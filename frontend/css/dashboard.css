@@ -1,0 +1,272 @@
+/* ── DASHBOARD STAT CARDS ── */
+.dash-stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, transform 0.15s;
+  user-select: none;
+}
+.dash-stat-card:hover {
+  border-color: rgba(201,168,76,0.5);
+  background: #132038;
+  transform: translateY(-2px);
+}
+.dash-stat-card.active-graph {
+  border-color: var(--gold);
+  background: #132038;
+}
+
+/* Graph panel inside stats grid */
+#dashGraphPanel {
+  grid-column: 1 / -1;
+}
+.dash-stat-label { font-size: 10px; letter-spacing: 1px; color: var(--muted); margin-bottom: 8px; }
+.dash-stat-val   { font-family: var(--font-display); font-size: 20px; line-height: 1.1; }
+.dash-stat-sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.dash-stat-chart-hint {
+  color: var(--gold); opacity: 0.5; font-size: 9px; margin-left: 3px; letter-spacing: 0;
+  transition: opacity 0.2s;
+}
+.dash-stat-card:hover .dash-stat-chart-hint { opacity: 1; }
+
+/* ── DASHBOARD INVESTMENT CARDS ── */
+.dash-inv-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px 24px;
+  margin-bottom: 14px;
+  transition: border-color 0.2s;
+}
+.dash-inv-card:hover { border-color: rgba(201,168,76,0.35); }
+.dash-inv-card.claimed { opacity: 0.55; }
+
+.dash-inv-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.dash-inv-logo {
+  width: 40px; height: 40px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0; overflow: hidden;
+}
+.dash-inv-title { flex: 1; min-width: 0; }
+.dash-inv-title .sym { font-family: var(--font-display); font-size: 18px; color: var(--gold); letter-spacing: 1px; }
+.dash-inv-title .nm  { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+.dash-inv-badge {
+  font-size: 10px; letter-spacing: 1px; padding: 3px 10px;
+  border-radius: 20px; border: 1px solid; flex-shrink: 0;
+}
+.dash-inv-badge.locked   { border-color: var(--gold);  color: var(--gold); }
+.dash-inv-badge.unlocked { border-color: #4ade80;       color: #4ade80; }
+.dash-inv-badge.claimed  { border-color: var(--muted);  color: var(--muted); }
+.dash-inv-badge.removed  { background: rgba(107,114,128,0.15); color: #6b7280; border-color: rgba(107,114,128,0.3); }
+
+.dash-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px,100%), 1fr));
+  gap: 14px 20px;
+  margin-bottom: 18px;
+}
+.dash-inv-stat-label { font-size: 10px; letter-spacing: 1px; color: var(--muted); margin-bottom: 4px; }
+.dash-inv-stat-val   { font-family: var(--font-mono); font-size: 14px; color: var(--cream); }
+.dash-inv-stat-sub   { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+.dash-countdown {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+}
+.dash-countdown .cd-label { font-size: 10px; letter-spacing: 1px; color: var(--muted); flex-shrink: 0; }
+.dash-countdown .cd-time  { font-size: 15px; color: var(--gold); flex: 1; min-width: 0; }
+.dash-countdown.expired .cd-time { color: #4ade80; }
+.dash-countdown .cd-seg { text-align: center; }
+.dash-countdown .cd-num { font-size: 18px; color: var(--gold); font-family: var(--font-display); }
+.dash-countdown .cd-unit { font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+
+.dash-growth-pos { color: #4ade80; }
+.dash-growth-neg { color: #f87171; }
+.dash-growth-neu { color: var(--muted); }
+
+/* ── INVESTMENT CARD SUMMARY ROW ── */
+.dash-inv-summary {
+  display: flex; align-items: stretch;
+  border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 10px; overflow: hidden;
+}
+.dis-col {
+  flex: 1; padding: 11px 15px;
+  border-right: 1px solid var(--border);
+}
+.dis-col:last-child { border-right: none; }
+.dis-col-action {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 10px 14px; min-width: 148px;
+}
+.dis-label {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.5px;
+  color: var(--muted); text-transform: uppercase; margin-bottom: 5px;
+}
+.dis-val { font-family: var(--font-mono); font-size: 13px; color: var(--cream); }
+.dis-sub { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 3px; }
+.dis-timer-val {
+  font-family: var(--font-display); font-size: 16px; color: var(--gold); letter-spacing: 1px;
+}
+
+/* Show more toggle */
+.dash-inv-toggle {
+  display: flex; align-items: center; gap: 5px; background: none; border: none;
+  cursor: pointer; padding: 3px 0 10px; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 1.5px; color: var(--muted); transition: color 0.15s; width: 100%;
+}
+.dash-inv-toggle:hover { color: var(--gold); }
+.dit-arrow { transition: transform 0.2s; display: inline-block; line-height: 1; }
+.dash-inv-toggle.open .dit-arrow { transform: rotate(180deg); }
+
+/* Details section */
+.dash-inv-details { display: none; border-top: 1px solid var(--border); padding-top: 12px; }
+.dash-inv-details.open { display: block; }
+.did-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.035); gap: 16px;
+}
+.did-row:last-child { border-bottom: none; }
+.did-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .8px; color: var(--muted); flex-shrink: 0; }
+.did-val   { font-family: var(--font-mono); font-size: 11px; color: var(--cream); text-align: right; }
+.did-hr    { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 6px 0; }
+.did-actions { display: flex; gap: 10px; flex-wrap: wrap; padding-top: 10px; }
+
+/* ── STAKING SLOTS (investment cards) ── */
+.dash-inv-staking {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 15px;
+  margin-bottom: 10px;
+  background: rgba(201,168,76,0.03);
+}
+.dis-staking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.dis-sl-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.dis-sl-reward {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+}
+.dis-slots {
+  margin-bottom: 7px;
+}
+.dis-bar-track {
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.dis-bar-claimed {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: rgba(201,168,76,0.35);
+  transition: width 0.9s linear;
+}
+.dis-bar-active {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: var(--gold);
+  transition: left 0.9s linear, width 0.9s linear;
+}
+
+@keyframes rewardSmoke {
+  0%   { opacity: 0.35; filter: blur(4px); transform: translateY(-4px); }
+  40%  { opacity: 1;    filter: blur(0);   transform: translateY(0);
+         text-shadow: 0 0 10px rgba(201,168,76,0.95), 0 0 28px rgba(201,168,76,0.45); }
+  100% { opacity: 1;    filter: blur(0);   transform: translateY(0); text-shadow: none; }
+}
+.dis-sl-reward-smoke {
+  animation: rewardSmoke 0.8s ease-out forwards;
+}
+.dis-staking-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  opacity: 0.75;
+}
+.dis-staking-claimed {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #4ade80;
+  letter-spacing: 0.5px;
+}
+
+/* ── STAKE DURATION MODAL ── */
+.stake-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 9000; }
+.stake-modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 32px 28px; width: min(420px,90vw); }
+.stake-modal-title { font-family: var(--font-display); font-size: 22px; letter-spacing: 2px; color: var(--cream); margin-bottom: 4px; }
+.stake-modal-sub { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 24px; }
+.stake-days-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; margin-bottom: 20px; }
+.stake-day-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; padding: 14px 4px; cursor: pointer; font-family: var(--font-mono); text-align: center; transition: all 0.15s; }
+.stake-day-btn .sdb-num { font-size: 18px; color: var(--cream); display: block; }
+.stake-day-btn .sdb-lbl { font-size: 9px; letter-spacing: 1.5px; color: var(--muted); display: block; margin-top: 2px; }
+.stake-day-btn:hover { border-color: var(--gold); }
+.stake-day-btn.selected { border-color: var(--gold); background: rgba(201,168,76,0.12); }
+.stake-day-btn.selected .sdb-num { color: var(--gold); }
+.stake-day-btn.selected .sdb-lbl { color: var(--gold); }
+.stake-unlock-info { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-height: 18px; margin-bottom: 20px; }
+.stake-unlock-info span { color: var(--cream); }
+.stake-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.stake-modal-cancel { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 9px 18px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+.stake-modal-cancel:hover { border-color: var(--cream); color: var(--cream); }
+.stake-modal-confirm { background: var(--gold); border: none; color: #0a0a0a; border-radius: 4px; padding: 9px 22px; font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 1px; cursor: pointer; transition: opacity 0.15s; }
+.stake-modal-confirm:disabled { opacity: 0.35; cursor: not-allowed; }
+.stake-modal-confirm:not(:disabled):hover { opacity: 0.85; }
+
+/* ── RESPONSIVE — tablet + phone (≤ 768px) ── */
+@media (max-width: 768px) {
+  .dash-stat-card { padding: 14px 16px; }
+  .dash-stat-val  { font-size: 17px; }
+  .dash-inv-card  { padding: 18px 16px; }
+  .dash-inv-title .sym { font-size: 17px; }
+  .dash-inv-stat-label { font-size: 11px; }
+  .dash-inv-stat-val { font-size: 14px; }
+  .dash-countdown { padding: 12px 14px; }
+  .dash-countdown .cd-num { font-size: 17px; }
+  .dash-countdown .cd-unit { font-size: 10px; }
+}
+
+/* ── RESPONSIVE — phone (≤ 480px) ── */
+@media (max-width: 480px) {
+  .dash-stat-val   { font-size: 15px; }
+  .dash-inv-card   { padding: 14px 12px; }
+  .dash-inv-grid   { gap: 10px 12px; }
+  .dash-countdown .cd-num { font-size: 15px; }
+  .dash-inv-summary { flex-direction: column; }
+  .dis-col { border-right: none; border-bottom: 1px solid var(--border); }
+  .dis-col:last-child { border-bottom: none; }
+  .dis-col-action { align-items: flex-start; min-width: unset; }
+}

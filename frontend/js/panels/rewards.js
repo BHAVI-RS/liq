@@ -1,0 +1,359 @@
+async function loadRewards() {
+  if (!contract || !walletAddress) {
+    ['rwRefContent','rwStakingContent','rwLPFeesContent'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="empty-state">Connect wallet to view your rewards.</div>';
+    });
+    return;
+  }
+  _tabLoaded.add('rewards');
+  loadRwReferral();
+  loadRwStaking();
+  loadRwLPFees();
+}
+
+async function loadRwReferral() {
+  const el = document.getElementById('rwRefContent');
+  el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  try {
+    const [commStats, commEvents] = await Promise.all([
+      contract.getUserCommissionStats(walletAddress),
+      contract.queryFilter(contract.filters.CommissionPaid(walletAddress)).catch(() => [])
+    ]);
+
+    const earned    = parseFloat(ethers.utils.formatEther(commStats.earned));
+    const missed    = parseFloat(ethers.utils.formatEther(commStats.missed));
+    const remaining = parseFloat(ethers.utils.formatEther(commStats.remainingCap));
+
+    const blockNums  = [...new Set(commEvents.map(e => e.blockNumber))];
+    const blockTsMap = new Map();
+    await Promise.all(blockNums.map(async bn => {
+      const blk = await provider.getBlock(bn).catch(() => null);
+      if (blk) blockTsMap.set(bn, blk.timestamp);
+    }));
+
+    const sortedEvents = [...commEvents].sort((a, b) => b.blockNumber - a.blockNumber);
+
+    let histHtml = '';
+    if (sortedEvents.length === 0) {
+      histHtml = '<div class="empty-state" style="margin-top:16px;">No commissions received yet.</div>';
+    } else {
+      let rows = '';
+      for (const ev of sortedEvents) {
+        const ts    = blockTsMap.get(ev.blockNumber);
+        const date  = ts ? _fmtTsFull(ts) : `Block #${ev.blockNumber}`;
+        const from  = ev.args.from;
+        const amt   = parseFloat(ethers.utils.formatEther(ev.args.amount));
+        const level = Number(ev.args.level);
+        const txUrl = `https://sepolia.etherscan.io/tx/${ev.transactionHash}`;
+        rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);">
+          <td style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
+          <td style="padding:7px 8px;"><a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${from.slice(0,6)}…${from.slice(-4)}</a></td>
+          <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
+          <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${amt.toFixed(6)} ETH ↗</a></td>
+        </tr>`;
+      }
+      histHtml = `<div style="overflow-x:auto;margin-top:16px;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">DATE</th>
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">FROM</th>
+              <th style="text-align:center;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">LVL</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">AMOUNT</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    }
+
+    const missedWarn = missed > 0.000001
+      ? `<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;color:#f87171;">
+           <span style="letter-spacing:1px;">⚠ MISSED COMMISSIONS: ${fmtUSDT(missed,{noEth:true})} (${missed.toFixed(6)} ETH)</span>
+           <div style="margin-top:4px;color:rgba(248,113,113,0.7);font-size:10px;">You were ineligible when these commissions passed through your position. Invest to earn future commissions.</div>
+         </div>` : '';
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:4px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL EARNED</div>
+          <div style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned,{noEth:true})}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${earned.toFixed(6)} ETH</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CAP REMAINING</div>
+          <div style="font-size:18px;color:var(--gold);font-family:var(--font-display);">${fmtUSDT(remaining,{noEth:true})}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${remaining.toFixed(6)} ETH</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">MISSED</div>
+          <div style="font-size:18px;font-family:var(--font-display);${missed > 0.000001 ? 'color:#f87171' : 'color:var(--muted)'};">${missed > 0.000001 ? fmtUSDT(missed,{noEth:true}) : '—'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${missed > 0.000001 ? missed.toFixed(6)+' ETH' : 'none'}</div>
+        </div>
+      </div>
+      ${missedWarn}
+      ${histHtml}`;
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+  }
+}
+
+async function loadRwStaking() {
+  const el = document.getElementById('rwStakingContent');
+  el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  try {
+    const [stakingData, lpLocks, latestBlock] = await Promise.all([
+      contract.getStakingReward(walletAddress),
+      contract.getUserLPLocks(walletAddress),
+      provider.getBlock('latest')
+    ]);
+
+    const now             = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
+    const totalAccruedETH = parseFloat(ethers.utils.formatEther(stakingData.totalAccruedETH));
+    const claimableETH    = parseFloat(ethers.utils.formatEther(stakingData.claimableETH));
+    const claimableTokens = parseFloat(ethers.utils.formatEther(stakingData.claimableTokens));
+    const nextClaimTime   = Number(stakingData.nextClaimTime);
+
+    const cooldownActive  = nextClaimTime > 0 && now < nextClaimTime;
+    const canClaim        = claimableTokens > 0 && !cooldownActive;
+
+    // Get token symbol from first lock
+    let tokenSymbol = 'HORDEX';
+    if (lpLocks.length > 0) {
+      try { const t = await contract.getToken(lpLocks[0].token); tokenSymbol = t.symbol; } catch(_) {}
+    }
+
+    // Per-investment staking breakdown rows
+    const SLOT_DURATION = 10;
+    let lockRows = '';
+
+    for (let i = 0; i < lpLocks.length; i++) {
+      const lock             = lpLocks[i];
+      const lockedAt         = Number(lock.lockedAt);
+      const unlockTime       = Number(lock.unlockTime);
+      const lockDurSecs      = unlockTime > lockedAt ? unlockTime - lockedAt : 60;
+      const NUM_SLOTS        = Math.max(1, Math.floor(lockDurSecs / SLOT_DURATION));
+      const ethInvested      = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const isStakingClaimed = lock.stakingClaimed || false;
+      const slotsClaimed     = lock.stakingTokens ? Number(lock.stakingTokens) : 0;
+      const elapsed          = Math.max(0, now - lockedAt);
+      const slotsComplete    = Math.min(Math.floor(elapsed / SLOT_DURATION), NUM_SLOTS);
+      const newSlots         = Math.max(0, slotsComplete - slotsClaimed);
+      const pendingETH       = ethInvested * 0.30 * newSlots / NUM_SLOTS;
+
+      const claimedPct = NUM_SLOTS > 0 ? (slotsClaimed / NUM_SLOTS) * 100 : 0;
+      const activePct  = NUM_SLOTS > 0 ? (Math.max(0, slotsComplete - slotsClaimed) / NUM_SLOTS) * 100 : 0;
+      const slotDots = `<div class="dis-bar-track" style="width:100%;min-width:70px;">
+        <div class="dis-bar-claimed" style="width:${claimedPct.toFixed(2)}%"></div>
+        <div class="dis-bar-active" style="left:${claimedPct.toFixed(2)}%; width:${activePct.toFixed(2)}%"></div>
+      </div>`;
+
+      const rewardCell = isStakingClaimed
+        ? `<span style="color:#4ade80;">✓ ALL CLAIMED</span>`
+        : newSlots > 0
+          ? `${pendingETH.toFixed(6)} ETH <span style="color:var(--gold);font-size:9px;">(${newSlots} new)</span>`
+          : `<span style="color:var(--muted);">${slotsClaimed > 0 ? slotsClaimed.toLocaleString()+'/'+NUM_SLOTS.toLocaleString()+' claimed' : '—'}</span>`;
+
+      lockRows += `
+        <tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
+          <td style="padding:8px 8px;color:var(--muted);font-size:10px;">#${i+1}</td>
+          <td style="padding:8px 8px;color:var(--cream);">${ethInvested.toFixed(4)} ETH</td>
+          <td style="padding:8px 8px;">
+            ${slotDots}
+            <div style="font-size:9px;color:var(--muted);margin-top:3px;">${slotsComplete.toLocaleString()}/${NUM_SLOTS.toLocaleString()} slots</div>
+          </td>
+          <td style="padding:8px 8px;text-align:right;color:var(--gold);">${rewardCell}</td>
+        </tr>`;
+    }
+
+    // Cooldown countdown
+    let cooldownHtml = '';
+    if (cooldownActive) {
+      const secsLeft = nextClaimTime - now;
+      const h = Math.floor(secsLeft / 3600);
+      const m = Math.floor((secsLeft % 3600) / 60);
+      const s = secsLeft % 60;
+      const p = n => String(n).padStart(2, '0');
+      cooldownHtml = `<div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">
+        Next claim in: <span style="color:var(--cream);">${p(h)}:${p(m)}:${p(s)}</span>
+      </div>`;
+    }
+
+    el.innerHTML = `
+      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
+        <div style="color:var(--gold);letter-spacing:1px;font-size:10px;margin-bottom:5px;">HOW STAKING REWARDS WORK</div>
+        <div style="color:var(--muted);line-height:1.75;">Each investment earns <span style="color:var(--cream);">30% of your ETH invested</span> as ${tokenSymbol} tokens at market price. Rewards accrue <span style="color:var(--cream);">slot-by-slot</span> (one 10-second slot at a time, proportional to lock duration). Use the <span style="color:var(--gold);">CLAIM REWARDS</span> button on the investment card to collect available tokens for each position.</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL ACCRUED</div>
+          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${totalAccruedETH.toFixed(6)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">ETH equivalent</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE NOW</div>
+          <div style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${claimableTokens > 0 ? claimableTokens.toFixed(4) : '0'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${tokenSymbol} tokens</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE ETH</div>
+          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${claimableETH.toFixed(6)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">ETH value</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <button id="claimStakingBtn" onclick="claimStakingReward()"
+          style="background:${canClaim ? 'var(--gold)' : 'rgba(255,255,255,0.06)'};
+                 border:1px solid ${canClaim ? 'var(--gold)' : 'var(--border)'};
+                 color:${canClaim ? '#0a0a0a' : 'var(--muted)'};
+                 border-radius:4px;padding:10px 24px;font-family:var(--font-mono);
+                 font-size:11px;font-weight:700;letter-spacing:1px;cursor:${canClaim ? 'pointer' : 'not-allowed'};
+                 transition:opacity 0.15s;"
+          ${canClaim ? '' : 'disabled'}>
+          ${claimableTokens > 0 && !cooldownActive ? 'CLAIM ' + claimableTokens.toFixed(4) + ' ' + tokenSymbol : cooldownActive ? 'COOLDOWN ACTIVE' : 'NOTHING TO CLAIM'}
+        </button>
+        ${cooldownHtml}
+      </div>
+
+      ${lockRows ? `
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:8px;">PER-INVESTMENT BREAKDOWN</div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">#</th>
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">INVESTED</th>
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">SLOTS</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:400;">REWARD (ETH)</th>
+            </tr>
+          </thead>
+          <tbody>${lockRows}</tbody>
+        </table>
+      </div>` : '<div class="empty-state">No investments yet. Go to INVEST to get started.</div>'}`;
+
+  } catch(e) {
+    document.getElementById('rwStakingContent').innerHTML =
+      `<div class="empty-state">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+  }
+}
+
+async function claimStakingReward() {
+  const btn = document.getElementById('claimStakingBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
+  try {
+    toast('Confirm staking claim in MetaMask…', 'info');
+    const tx = await contract.claimStakingReward();
+    toast('Transaction sent — waiting for confirmation…', 'info');
+    await tx.wait();
+    toast('Staking rewards claimed!', 'success');
+    loadRwStaking();
+  } catch(e) {
+    if (btn) { btn.disabled = false; }
+    toast('Claim failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  }
+}
+
+async function loadRwLPFees() {
+  const el = document.getElementById('rwLPFeesContent');
+  el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  try {
+    const lpLocks = await contract.getUserLPLocks(walletAddress);
+    if (!lpLocks.length) {
+      el.innerHTML = `<div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:12px;font-size:11px;font-family:var(--font-mono);color:var(--muted);line-height:1.7;">Every swap in a Uniswap pool charges a <span style="color:var(--cream);">0.3% fee</span> that flows to LP providers. Fees <span style="color:var(--cream);">compound automatically</span> in the pool — no separate claim needed. They are included automatically when you claim or remove LP tokens.</div><div class="empty-state">No LP positions found. Go to INVEST to get started.</div>`;
+      return;
+    }
+
+    const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
+    const poolCache = new Map();
+    const tokenMeta = new Map();
+    await Promise.all([
+      ...tokenSet.map(async addr => { const d = await _dashGetPoolPrice(addr); if (d) poolCache.set(addr, d); }),
+      ...tokenSet.map(async addr => { try { const t = await contract.getToken(addr); tokenMeta.set(addr, { symbol: t.symbol, meta: getMeta(addr) }); } catch(_) {} })
+    ]);
+
+    const now = Math.floor(Date.now() / 1000);
+    let totalGainETH = 0;
+    let activeCnt    = 0;
+    let rows         = '';
+
+    for (let i = 0; i < lpLocks.length; i++) {
+      const lock        = lpLocks[i];
+      const key         = lock.token.toLowerCase();
+      const pool        = poolCache.get(key);
+      const td          = tokenMeta.get(key) || { symbol: lock.token.slice(0,6), meta: {} };
+      const logoSrc     = td.meta && td.meta.logo ? `<img src="${td.meta.logo}" style="width:100%;height:100%;object-fit:contain;"/>` : '⬡';
+      const ethInvested = parseFloat(ethers.utils.formatEther(lock.ethInvested || ethers.BigNumber.from(0)));
+      const isClaimed   = lock.claimed;
+      const isRemoved   = lock.removed;
+      const currentETH  = pool && !isRemoved ? _dashComputeLPValue(lock.lpAmount, pool.resETH, pool.totalLPSupply) : 0;
+      const gainETH     = currentETH - ethInvested;
+      const gainPct     = ethInvested > 0 ? (gainETH / ethInvested) * 100 : 0;
+      const isUnlocked  = now >= Number(lock.unlockTime);
+
+      if (!isClaimed && !isRemoved && currentETH > 0) { totalGainETH += gainETH; activeCnt++; }
+
+      const gainClr   = gainETH > 0.000001 ? '#4ade80' : gainETH < -0.000001 ? '#f87171' : 'var(--muted)';
+      const statusTxt = isClaimed ? 'LP CLAIMED' : isRemoved ? 'REMOVED' : isUnlocked ? 'READY TO CLAIM' : 'LOCKED';
+      const statusClr = (isClaimed || isRemoved) ? 'var(--muted)' : isUnlocked ? '#4ade80' : 'var(--muted)';
+
+      rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
+        <td style="padding:9px 8px;">
+          <div style="display:flex;align-items:center;gap:7px;">
+            <div style="width:22px;height:22px;border-radius:5px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">${logoSrc}</div>
+            <div><div style="color:var(--cream);font-size:12px;">${td.symbol}</div><div style="color:var(--muted);font-size:9px;">#${i+1}</div></div>
+          </div>
+        </td>
+        <td style="padding:9px 8px;text-align:right;color:var(--cream);">${fmtUSDT(ethInvested,{noEth:true})}</td>
+        <td style="padding:9px 8px;text-align:right;color:var(--cream);">${currentETH > 0 ? fmtUSDT(currentETH,{noEth:true}) : '—'}</td>
+        <td style="padding:9px 8px;text-align:right;">
+          <span style="color:${gainClr};">${currentETH > 0 ? (gainETH >= 0 ? '+' : '') + fmtUSDT(gainETH,{noEth:true}) : '—'}</span>
+          ${currentETH > 0 ? `<div style="font-size:9px;color:${gainClr};opacity:0.75;">${(gainETH >= 0 ? '+' : '') + gainPct.toFixed(2)}%</div>` : ''}
+        </td>
+        <td style="padding:9px 8px;text-align:right;font-size:10px;color:${statusClr};">${statusTxt}</td>
+      </tr>`;
+    }
+
+    const totalClr = totalGainETH > 0.000001 ? '#4ade80' : totalGainETH < -0.000001 ? '#f87171' : 'var(--muted)';
+
+    el.innerHTML = `
+      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
+        <div style="color:var(--gold);letter-spacing:1px;font-size:10px;margin-bottom:5px;">HOW UNISWAP V2 POOL FEES WORK</div>
+        <div style="color:var(--muted);line-height:1.75;">Every swap in a Uniswap pool charges a <span style="color:var(--cream);">0.3% fee</span> that flows directly to LP providers. In V2, fees <span style="color:var(--cream);">compound automatically</span> inside the pool — your LP tokens grow in value with every swap. <span style="color:var(--gold);">No separate fee claim is needed.</span> Pool earnings are automatically included when you claim or remove your LP tokens.</div>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;display:inline-block;min-width:200px;">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:5px;">ESTIMATED POOL EARNINGS</div>
+        <div style="font-size:22px;font-family:var(--font-display);color:${totalClr};">${totalGainETH !== 0 ? (totalGainETH >= 0 ? '+' : '') + fmtUSDT(totalGainETH,{noEth:true}) : '—'}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px;">${activeCnt} active position${activeCnt !== 1 ? 's' : ''} · fees + price change combined</div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">TOKEN</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">INVESTED</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">CURRENT VALUE</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">GAIN (FEES + PRICE)</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">STATUS</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
+        To collect pool earnings, go to the <span style="color:var(--gold);cursor:pointer;text-decoration:underline;" onclick="switchTabByName('investments')">INVESTMENTS</span> tab and claim or remove your LP position.
+      </div>`;
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+  }
+}
+
+window.loadRewards           = loadRewards;
+window.loadRwReferral        = loadRwReferral;
+window.loadRwStaking         = loadRwStaking;
+window.loadRwLPFees          = loadRwLPFees;
+window.claimStakingReward    = claimStakingReward;

@@ -1,0 +1,14 @@
+{
+  "liveServer.settings.ignoreFiles": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/artifacts/**",
+    "**/cache/**",
+    "contract-config.js",
+    "scripts/**",
+    "contracts/**",
+    "hardhat.config.js",
+    "package*.json"
+  ],
+  "liveServer.settings.donotShowInfoMsg": true
+}

@@ -1,0 +1,406 @@
+.net-pill {
+  font-size: 10px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+.net-pill.sepolia  { background: rgba(38,217,127,0.12); color: var(--success, #26d97f); border: 1px solid rgba(38,217,127,0.35); }
+.net-pill.wrongnet { background: rgba(255,80,80,0.12);  color: #ff5050;                 border: 1px solid rgba(255,80,80,0.4);  }
+
+#connectBtn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid rgba(201,168,76,0.5);
+  color: var(--gold);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 1px;
+}
+
+#connectBtn:hover { background: var(--gold); color: var(--bg); }
+#connectBtn.connected { border-color: var(--success); color: var(--success); }
+#connectBtn.connected:hover { background: transparent; color: var(--success); }
+
+.wallet-dropdown-wrap { position: relative; }
+
+.wallet-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--panel);
+  border: 1px solid rgba(201,168,76,0.2);
+  border-radius: 4px;
+  min-width: 160px;
+  z-index: 200;
+  overflow: hidden;
+}
+
+.wallet-dropdown.open { display: block; }
+
+.wallet-dropdown-addr {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+
+.wallet-dropdown-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 12px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.wallet-dropdown-btn:hover { background: rgba(224,80,80,0.08); }
+
+/* ── HAMBURGER BUTTON (hidden on desktop) ── */
+#hamburgerBtn {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 38px;
+  height: 38px;
+  background: none;
+  border: 1px solid rgba(201,168,76,0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 7px;
+  flex-shrink: 0;
+}
+#hamburgerBtn span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--gold);
+  border-radius: 2px;
+  transition: all 0.2s;
+}
+#hamburgerBtn:hover { border-color: var(--gold); }
+
+/* ── MOBILE NAV SIDEBAR ── */
+#mobileNavOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(4,8,15,0.7);
+  backdrop-filter: blur(4px);
+}
+#mobileNavOverlay.open { display: block; }
+
+#mobileNav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 401;
+  width: 260px;
+  background: var(--panel);
+  border-right: 1px solid rgba(201,168,76,0.18);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+  overflow: hidden;
+}
+#mobileNav.open { transform: translateX(0); }
+
+#mobileNavHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.mobile-nav-logo {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 3px;
+  color: var(--gold);
+}
+#mobileNavClose {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+#mobileNavClose:hover { border-color: var(--gold); color: var(--gold); }
+
+#mobileNavItems {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+.mobile-nav-item {
+  width: 100%;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  padding: 14px 20px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.15s;
+}
+.mobile-nav-item:hover {
+  background: rgba(201,168,76,0.05);
+  color: var(--cream);
+}
+.mobile-nav-item.active {
+  border-left-color: var(--gold);
+  color: var(--gold);
+  background: rgba(201,168,76,0.06);
+}
+.mobile-nav-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── WALLET INFO BAR ── */
+#walletBar {
+  position: relative;
+  z-index: 1;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  padding: 12px 40px;
+  font-size: 12px;
+}
+
+#walletBar.show { display: flex; }
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.wallet-addr { color: var(--gold); font-size: 12px; }
+.wallet-label { color: var(--muted); }
+
+/* ── TABS ── */
+/* ── COLLAPSIBLE TAB BAR ── */
+.tabs-wrap {
+  position: relative;
+  z-index: 2;
+}
+.tabs-toggle-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  font-family: var(--font-mono);
+  transition: color 0.2s, border-color 0.2s;
+  z-index: 3;
+}
+.tabs-toggle-btn:hover { color: var(--gold); border-color: var(--gold); }
+
+.tabs-collapsed-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 0;
+  overflow: hidden;
+  background: rgba(4,8,15,0.6);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  transition: height 0.25s ease;
+}
+.tabs-collapsed-bar.show {
+  display: flex;
+  height: 38px;
+}
+
+.tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 4px;
+  padding: 0 56px 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(4,8,15,0.6);
+  backdrop-filter: blur(10px);
+  transition: max-height 0.25s ease, opacity 0.2s;
+  overflow: hidden;
+}
+.tabs.nav-collapsed {
+  max-height: 0 !important;
+  border-bottom-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tab {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 14px 20px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+}
+
+.tab::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0; right: 0;
+  height: 2px;
+  background: var(--gold);
+  transform: scaleX(0);
+  transition: transform 0.2s;
+}
+
+.tab.active { color: var(--gold); }
+.tab.active::after { transform: scaleX(1); }
+.tab:hover { color: var(--cream); }
+
+/* Sidebar collapse toggle button (inside sidebar header) */
+#sidebarCollapseBtn {
+  display: none; /* shown only on desktop via media query */
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  width: 32px; height: 32px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+#sidebarCollapseBtn:hover { border-color: var(--gold); color: var(--gold); }
+.collapse-arrow { display: inline-block; transition: transform 0.28s ease; }
+
+/* nav-label spans — text beside the icon */
+.nav-label {
+  transition: opacity 0.2s, width 0.28s;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ── DESKTOP SIDEBAR LAYOUT ── */
+@media (min-width: 769px) {
+  #hamburgerBtn { display: flex !important; } /* repurposed as sidebar toggle */
+  #mobileNavOverlay { display: none !important; }
+  #mobileNavClose { display: none !important; }
+  #sidebarCollapseBtn { display: flex; }
+
+  #mobileNav {
+    transform: none !important;
+    width: var(--sidebar-w);
+    transition: width 0.28s cubic-bezier(0.4,0,0.2,1);
+    z-index: 5;
+  }
+
+  #appContent {
+    margin-left: var(--sidebar-w);
+    transition: margin-left 0.28s cubic-bezier(0.4,0,0.2,1);
+  }
+
+  /* Collapsed state */
+  body.sidebar-collapsed #mobileNav  { width: var(--sidebar-cw); }
+  body.sidebar-collapsed #appContent { margin-left: var(--sidebar-cw); }
+  body.sidebar-collapsed .nav-label  { width: 0; opacity: 0; }
+  body.sidebar-collapsed .mobile-nav-logo { opacity: 0; width: 0; overflow: hidden; }
+  body.sidebar-collapsed #mobileNavAddr { display: none !important; }
+  body.sidebar-collapsed .mobile-nav-item { justify-content: center; padding: 14px 0; }
+  body.sidebar-collapsed .collapse-arrow { transform: rotate(180deg); }
+}
+
+/* Mobile: appContent never has left margin */
+@media (max-width: 768px) {
+  #appContent { margin-left: 0; }
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE — tablet + phone (≤ 768 px)
+   Sidebar nav replaces horizontal tabs
+═══════════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Show hamburger, hide desktop tabs */
+  #hamburgerBtn { display: flex; }
+  .tabs.visible { display: none !important; }
+
+  /* Header — tighter */
+  header { padding: 12px 16px; gap: 10px; }
+  .logo  { font-size: 20px; }
+  .logo span { display: none; }
+  #connectBtn { font-size: 12px; padding: 9px 14px; }
+
+  /* Wallet bar */
+  #walletBar { padding: 8px 16px; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .wallet-addr { font-size: 12px; }
+  #netPill { font-size: 11px; }
+
+  /* Footer */
+  footer { padding: 16px 14px; font-size: 12px; }
+  .footer-contract { font-size: 10px; word-break: break-all; }
+
+  /* Wallet dropdown */
+  .wallet-dropdown { min-width: 140px; width: 92vw; max-width: 280px; }
+}
+
+@media (max-width: 480px) {
+  header { padding: 10px 12px; }
+  .logo  { font-size: 18px; }
+  #connectBtn { font-size: 11px; padding: 8px 12px; }
+
+  /* Wallet dropdown */
+  .wallet-dropdown { width: 88vw !important; }
+}

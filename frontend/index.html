@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hordex — Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+  <script src="contract-config.js"></script>
+  <link rel="stylesheet" href="css/base.css"/>
+  <link rel="stylesheet" href="css/nav.css"/>
+  <link rel="stylesheet" href="css/components.css"/>
+  <link rel="stylesheet" href="css/dashboard.css"/>
+  <link rel="stylesheet" href="css/landing.css"/>
+</head>
+<body>
+
+<div class="orb2"></div>
+
+<!-- MISSED COMMISSION ALERT MODAL -->
+<div id="missedCommAlert" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#120608;border:2px solid #f87171;border-radius:14px;padding:32px 28px;max-width:440px;width:90%;position:relative;box-shadow:0 0 40px rgba(248,113,113,0.25);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="font-size:22px;">⚠</span>
+      <div style="font-family:var(--font-display);font-size:20px;letter-spacing:2px;color:#f87171;">MISSED COMMISSIONS</div>
+    </div>
+    <div id="missedCommText" style="font-size:13px;line-height:1.7;color:var(--cream);margin-bottom:22px;"></div>
+    <button onclick="dismissMissedAlert()" style="background:#f87171;color:#fff;border:none;padding:12px 0;border-radius:6px;cursor:pointer;font-family:var(--font-mono);font-size:12px;letter-spacing:1.5px;width:100%;transition:background 0.2s;" onmouseover="this.style.background='#ef4444'" onmouseout="this.style.background='#f87171'">I UNDERSTAND — DISMISS</button>
+  </div>
+</div>
+
+<!-- LANDING OVERLAY — shown before wallet connects -->
+<div id="landingOverlay">
+  <div class="landing-grid"></div>
+  <div class="landing-glow"></div>
+
+  <!-- ── Top navigation bar ── -->
+  <div class="landing-topbar">
+    <div class="landing-topbar-left">
+      <button class="landing-hamburger" onclick="toggleLandingMenu()" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+      <span class="landing-topbar-brand">HORDEX</span>
+      <!-- Dropdown — anchored below the left group -->
+      <div id="landingMenuDropdown">
+        <button onclick="scrollToLandingSection('landing-what')">What is Hordex? <span class="lnd-arrow">↓</span></button>
+        <button onclick="scrollToLandingSection('landing-brochures')">Brochures &amp; Links <span class="lnd-arrow">↓</span></button>
+        <button onclick="scrollToLandingSection('landing-how')">How Does It Work <span class="lnd-arrow">↓</span></button>
+        <button onclick="scrollToLandingSection('landing-faq')">FAQ <span class="lnd-arrow">↓</span></button>
+        <button onclick="scrollToLandingSection('landing-about')">About <span class="lnd-arrow">↓</span></button>
+        <button onclick="scrollToLandingSection('landing-contract')">Contract Address <span class="lnd-arrow">↓</span></button>
+      </div>
+    </div>
+    <button class="landing-nav-btn" onclick="connectWallet()">
+      <span id="landingBtnLabel">Connect Wallet</span>
+    </button>
+  </div>
+
+  <!-- ── Main scrollable area ── -->
+  <div class="landing-main-scroll" id="landingMainScroll">
+
+    <!-- ── Hero / connect screen ── -->
+    <div id="landingConnectScreen">
+
+      <!-- Hero -->
+      <div class="landing-logo">HORDEX</div>
+      <div class="landing-sub">— <span>Funding the Future</span> —</div>
+
+      <div class="landing-stat-grid">
+        <div class="landing-stat">
+          <div class="landing-stat-val" id="ls-total-users">—</div>
+          <div class="landing-stat-label">Total Users</div>
+        </div>
+        <div class="landing-stat">
+          <div class="landing-stat-val" id="ls-active-users">—</div>
+          <div class="landing-stat-label">Active Investors</div>
+        </div>
+        <div class="landing-stat">
+          <div class="landing-stat-val" id="ls-total-funding">—</div>
+          <div class="landing-stat-label">Total Funding</div>
+        </div>
+        <div class="landing-stat">
+          <div class="landing-stat-val">$0</div>
+          <div class="landing-stat-label">Staking Rewards</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:48px;">
+        <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2.5px;color:var(--muted);margin-bottom:14px;">PARTNERS</div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;">
+          <div class="landing-partner-badge">
+            <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+              <circle cx="50" cy="50" r="50" fill="#FF007A"/>
+              <!-- unicorn horn -->
+              <polygon points="50,8 46,32 54,32" fill="white" opacity="0.9"/>
+              <!-- unicorn head body simplified -->
+              <ellipse cx="50" cy="55" rx="22" ry="20" fill="white" opacity="0.95"/>
+              <ellipse cx="50" cy="42" rx="14" ry="13" fill="white"/>
+              <!-- eye -->
+              <circle cx="55" cy="40" r="2.5" fill="#FF007A"/>
+              <!-- ear -->
+              <polygon points="43,32 39,24 47,30" fill="white"/>
+              <!-- mane lines -->
+              <path d="M36 38 Q30 48 32 60" stroke="#FF007A" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+              <path d="M38 36 Q31 45 33 57" stroke="#FF69B4" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+            </svg>
+            <div>
+              <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:1px;color:#FF007A;line-height:1.2;">UNISWAP</div>
+              <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.5px;color:rgba(255,0,122,0.5);">PROTOCOL PARTNER</div>
+            </div>
+          </div>
+
+          <div class="landing-partner-badge" style="background:rgba(240,185,11,0.05);border-color:rgba(240,185,11,0.2);">
+            <!-- BNB Chain official logo: 5-diamond arrangement -->
+            <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+              <circle cx="50" cy="50" r="50" fill="#0B0E11"/>
+              <!-- top diamond -->
+              <polygon points="50,5 59,14 50,23 41,14" fill="#F0B90B"/>
+              <!-- left diamond -->
+              <polygon points="5,50 14,41 23,50 14,59" fill="#F0B90B"/>
+              <!-- center diamond -->
+              <polygon points="50,32 68,50 50,68 32,50" fill="#F0B90B"/>
+              <!-- right diamond -->
+              <polygon points="95,50 86,41 77,50 86,59" fill="#F0B90B"/>
+              <!-- bottom diamond -->
+              <polygon points="50,95 59,86 50,77 41,86" fill="#F0B90B"/>
+            </svg>
+            <div>
+              <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:1px;color:#F0B90B;line-height:1.2;">BNB CHAIN</div>
+              <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.5px;color:rgba(240,185,11,0.5);">ECOSYSTEM PARTNER</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── What is HORDEX? section ── -->
+      <section class="landing-section" id="landing-what">
+        <div class="landing-section-label">What is HORDEX?</div>
+        <p>Hordex is a decentralized liquidity providing platform built on Uniswap V2 that connects early-stage token projects with liquidity providers through automated market-making infrastructure.</p>
+        <p>The platform identifies and lists emerging token launches, enabling users to participate by supplying liquidity to curated token pools. Using Uniswap V2 infrastructure, user funds are paired and deployed to facilitate trading, helping new tokens enter the market with active liquidity.</p>
+        <p>By combining token discovery, liquidity provisioning, and reward mechanisms in a single interface, Hordex streamlines early-stage market participation while maintaining a fully decentralized execution model.</p>
+      </section>
+
+      <!-- ── Brochures & Links section ── -->
+      <section class="landing-section" id="landing-brochures">
+        <div class="landing-section-label">Brochures &amp; Links</div>
+        <p style="color:var(--muted);font-style:italic;">Platform documents and resource links will be published here.</p>
+      </section>
+
+      <!-- ── How Does It Work section ── -->
+      <section class="landing-section" id="landing-how">
+        <div class="landing-section-label">How Does It Work</div>
+        <div class="ls-step">
+          <div class="ls-step-num">1</div>
+          <div class="ls-step-body"><strong>REGISTRATION</strong> <p>Connect your wallet and sign up using a referral link to join the HORDEX network. No referral? Join directly on the platform and receive early invites to meetings.</p></div>
+        </div>
+        <div class="ls-step">
+          <div class="ls-step-num">2</div>
+          <div class="ls-step-body"><strong>INVESTMENT</strong> <p>Choose a token pool and select the required investment package. Your investment is used to provide liquidity to the selected token, where 50% of the investment is swapped for tokens and paired with the remaining 50%.</p></div>
+        </div>
+        
+        <div class="ls-step">
+          <div class="ls-step-num">3</div>
+          <div class="ls-step-body"><strong>LP POSITION</strong> <p>Your LP position guarantees your active participation on the platform. The LP tokens are locked in the smart contract for a default lock-in period of 90 days to ensure the stability of the Uniswap V2 pool.</p></div>
+        </div>
+        <div class="ls-step">
+          <div class="ls-step-num">4</div>
+          <div class="ls-step-body"><strong>REWARDS</strong><p>Users are eligible to receive referral commissions, LP fees, and staking rewards as long as they hold LP positions. Referral commissions of up to 5 times your investment package can be earned. Staking rewards are accumulated every second according to the current market price and can be claimed at any time.</p></div>
+        </div>
+        <div class="ls-step">
+          <div class="ls-step-num">5</div>
+          <div class="ls-step-body"><strong>RESTAKING</strong><p>Once the default lock-in period expires, users can restake their positions for a flexible number of days to become eligible again for staking rewards and LP fees.</p></div>
+        </div>
+        <div class="ls-step">
+          <div class="ls-step-num">6</div>
+          <div class="ls-step-body"><strong>REMOVING INVESTMENT</strong><p>Investments can be removed once LP positions are unlocked. Removing positions returns tokens and USDT to the user’s wallet according to the ratio of their contribution to the pool. Users are not eligible to receive rewards without an active investment.</p></div>
+        </div>
+      </section>
+
+      <!-- ── FAQ section ── -->
+      <section class="landing-section" id="landing-faq">
+        <div class="landing-section-label">Frequently Asked Questions</div>
+        <div class="lnd-faq-item" style="border-bottom:none;">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            What does the platform do with my funds?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a">The platform splits your funds into two equal halves - A and B. 60% of A is used for token purchase in existing pool (pool buy). 40% of A is used for token purchase via ICO (platform sale - funds are used for referral commission split). B is used to pair with total tokens purchased and liquidity is provided in Uniswap V2 pool for the chosen token. </div>
+        </div>
+        <div class="lnd-faq-item">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            What do users get in return for their investment?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a"><p>Users can earn from three types of income sources: referral commissions, LP fees, and staking rewards.</p><p>~ Referral commissions are given up to 10 levels for each investment and are sent directly to the user’s wallet. If commissions are missed, the levels are skipped and moves upward to the next eligible user.</p><p>~ LP fees of 0.3% are collected on every trade where the user has provided liquidity. The fee is split according to the user’s contribution to the pool.</p><p>~ Staking rewards are calculated every second based on the market price and the chosen package, and can be claimed at any time.</p></div>
+        </div>
+        <div class="lnd-faq-item">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            How is safety ensured for invested funds?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a"><p>Hordex smart contracts have undergone multiple layers of security audits. User funds are held in verified contracts deployed on Binance Smart Chain. Anybody can check the state of the contract which is publicly available on-chain, to verify their positions and holdings.</p><p> Liquidity is provided in Uniswap V2 pools, which use an Automated Market Maker (AMM) model, helping manage price impact and slippage during trades.</p><p>Time-based locks are implemented directly on-chain and commissions are sent directly to user wallet, which ensures only the user can control their funds.</p></div>
+        </div>
+        <div class="lnd-faq-item">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            How long are LP positions locked?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a">LP positions are locked for 90 days by default for all investment packages. Staking rewards are accumulated for users till their investments are locked in the contract. Users can restake their LP tokens after default lockin period to continue receiving staking rewards and referral commissions.</div>
+        </div>
+        <div class="lnd-faq-item">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            How does the referral commission system work?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a">Every investment distributes 20% of the invested USDT (obtained by the platform through ICO token sale) across up to 10 levels of the referrer chain. Level 1 earns 10%, Level 2 earns 5%, Level 3 earns 2%, and so on. Commissions are paid instantly on-chain to each eligible referrer's wallet. If users in certain levels or not eligible to receive referral commissions, the level is skipped and the commissions are moved to next eligible level.</div>
+        </div>
+        <div class="lnd-faq-item" style="border-bottom:none;">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            What happens if I remove my invested amount?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a">When you remove liquidity, the contract pulls your LP tokens, burns them via Uniswap, and sends you back a proportional share of both USDT and project tokens from the pool. Users are not eligible to receive any rewards or commissions without having an active investment.</div>
+        </div>
+        <div class="lnd-faq-item" style="border-bottom:none;">
+          <button class="lnd-faq-q" onclick="toggleFaq(this)">
+            Can I hold positions without staking my investment?
+            <span class="lnd-faq-icon">+</span>
+          </button>
+          <div class="lnd-faq-a">Default staking of 90 days is applicable to all investment packages, after which users can either restake or claim LP tokens. If restaked, users are eligible to receive referral commissions, LP fees and staking rewards. If not restaked, users are eligible to receive only referral commissions and LP fees.</div>
+        </div>
+      </section>
+
+      <!-- ── About section ── -->
+      <section class="landing-section" id="landing-about">
+        <div class="landing-section-label">About</div>
+        <p>HORDEX is a decentralized liquidity providing platform built on Uniswap V2. Users put in funds into liquidity pools of newly launched tokens to generate LP positions in curated token pools, earn passive returns as liquidity providers, and grow their network through a multi-level referral commission system.</p>
+        <p>LP positions are time-locked to ensure platform stability, then claimable or removable once the lock period expires. Referral commissions are distributed automatically across up to 10 levels of your network on every investment made by your referrals.</p>
+      </section>
+
+      <!-- contract address footer -->
+      <section class="landing-section" id="landing-contract"></section>
+      <div class="landing-contract-footer">
+        <div class="lcf-label">Contract Address</div>
+        <div class="lcf-addr" id="lcf-contract-addr">—</div>
+      </div>
+    </section>
+
+    </div><!-- /#landingConnectScreen -->
+
+    <!-- shown when wallet is connected but user is not registered -->
+    <div id="landingNewUserScreen" style="display:none;text-align:center;max-width:480px;width:100%;">
+      <div style="font-size:11px;letter-spacing:.25em;color:var(--gold);margin-bottom:12px;font-family:var(--font-mono);">NEW USER DETECTED</div>
+      <div class="landing-logo" style="margin-bottom:8px;">HORDEX</div>
+      <div style="font-size:15px;color:var(--muted);margin-bottom:28px;">Your wallet is not yet registered on this platform.</div>
+      <div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:10px;padding:24px 28px;margin-bottom:28px;text-align:left;">
+        <div id="newUserReferrerRow" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);">
+          <div style="flex-shrink:0;width:32px;height:32px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:14px;">👤</div>
+          <div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">REFERRED BY</div>
+            <div id="newUserReferrerAddr" style="font-family:var(--font-mono);font-size:12px;color:var(--cream);">—</div>
+          </div>
+        </div>
+        <div style="font-size:13px;color:var(--cream);margin-bottom:6px;" id="newUserPromptText">Register under this referrer?</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.7;">You will earn commission for your referrer on your investments.<br>You can also earn commissions by sharing your own link after registration.</div>
+      </div>
+      <button class="landing-btn" id="newUserRegisterBtn" onclick="registerNewUser()">
+        <span id="newUserBtnLabel">YES, REGISTER ME</span>
+      </button>
+      <div style="margin-top:16px;">
+        <button onclick="disconnectWallet()" style="background:none;border:none;color:var(--muted);font-family:var(--font-mono);font-size:11px;cursor:pointer;letter-spacing:.08em;text-decoration:underline;">Cancel &amp; Disconnect</button>
+      </div>
+    </div>
+
+  </div><!-- /.landing-main-scroll -->
+</div>
+
+<!-- SIDEBAR NAV (persistent on desktop, overlay on mobile) -->
+<div id="mobileNavOverlay" onclick="closeMobileNav()"></div>
+<nav id="mobileNav">
+  <div id="mobileNavHeader">
+    <span class="mobile-nav-logo">HORDEX</span>
+    <!-- Desktop: collapse/expand toggle -->
+    <button id="sidebarCollapseBtn" onclick="toggleSidebar()" title="Collapse sidebar">
+      <span class="collapse-arrow">‹</span>
+    </button>
+    <!-- Mobile: close overlay -->
+    <button id="mobileNavClose" onclick="closeMobileNav()">✕</button>
+  </div>
+  <div id="mobileNavItems">
+    <button class="mobile-nav-item active" data-tab="dashboard" onclick="mobileNavSwitch('dashboard')">
+      <span class="mobile-nav-icon">⊞</span><span class="nav-label"> DASHBOARD</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="investments" id="mobileTab-investments" onclick="mobileNavSwitch('investments')">
+      <span class="mobile-nav-icon">◫</span><span class="nav-label"> INVESTMENTS</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="invest" id="mobileTab-invest" onclick="mobileNavSwitch('invest')">
+      <span class="mobile-nav-icon">◈</span><span class="nav-label"> INVEST</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="pool" onclick="mobileNavSwitch('pool')">
+      <span class="mobile-nav-icon">◉</span><span class="nav-label"> POOL</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="genealogy" onclick="mobileNavSwitch('genealogy')">
+      <span class="mobile-nav-icon">⬡</span><span class="nav-label"> GENEALOGY</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="rewards" id="mobileTab-rewards" onclick="mobileNavSwitch('rewards')">
+      <span class="mobile-nav-icon">◈</span><span class="nav-label"> REWARDS</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="myinfo" onclick="mobileNavSwitch('myinfo')">
+      <span class="mobile-nav-icon">◎</span><span class="nav-label"> MY INFO</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="history" onclick="mobileNavSwitch('history')">
+      <span class="mobile-nav-icon">◷</span><span class="nav-label"> HISTORY</span>
+    </button>
+    <button class="mobile-nav-item" data-tab="owner" id="mobileOwnerTab" onclick="mobileNavSwitch('owner')" style="display:none;">
+      <span class="mobile-nav-icon">⚙</span><span class="nav-label"> OWNER</span>
+    </button>
+  </div>
+  <div id="mobileNavFooter">
+    <div id="mobileNavAddr" style="font-size:11px;color:var(--muted);word-break:break-all;padding:12px 20px;border-top:1px solid var(--border);display:none;font-family:var(--font-mono);"></div>
+  </div>
+</nav>
+
+<!-- APP CONTENT (shifts right on desktop to clear the fixed sidebar) -->
+<div id="appContent">
+
+<!-- HEADER -->
+<header>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <button id="hamburgerBtn" onclick="handleSidebarBtn()" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+    <a class="logo" href="index.html">HORDEX </a>
+  </div>
+  <div class="header-right">
+    <div class="wallet-dropdown-wrap" id="walletDropdownWrap">
+      <button id="connectBtn" onclick="handleWalletBtn()">CONNECT WALLET</button>
+      <div class="wallet-dropdown" id="walletDropdown">
+        <div class="wallet-dropdown-addr" id="walletDropdownAddr"></div>
+        <button class="wallet-dropdown-btn" onclick="disconnectWallet()">⏻ Disconnect</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- WALLET BAR (hidden — state kept for JS, not shown) -->
+<div id="walletBar" style="display:none!important;">
+  <span class="wallet-addr" id="walletAddr">—</span>
+  <span id="netPill" class="net-pill sepolia" style="display:none;">SEPOLIA</span>
+</div>
+
+<!-- STATUS LOG -->
+<div id="statusLog"></div>
+
+<main>
+
+  <!-- Tab buttons kept hidden — panels are switched via the left sidebar.
+       The "tabs" class must stay so revealDashboard() querySelector('.tabs') doesn't throw. -->
+  <div class="tabs" id="tabsBar" style="display:none!important;">
+    <button id="tab-dashboard"></button><button id="tab-investments"></button>
+    <button id="tab-invest"></button><button id="tab-pool"></button>
+    <button id="tab-genealogy"></button><button id="tab-rewards"></button>
+    <button id="tab-myinfo"></button>
+    <button id="tab-history"></button>
+    <button id="ownerTab" style="display:none;"></button>
+  </div>
+
+  <!-- DASHBOARD PANEL -->
+  <div id="panel-dashboard" class="panel active">
+
+    <!-- NEW LAUNCH NOTIFICATION BANNER -->
+    <div id="dashFeaturedBanner" style="display:none;position:relative;background:#c9a84c;border-radius:8px;padding:11px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="background:#22c55e;color:#fff;font-size:9px;letter-spacing:2px;padding:3px 10px;border-radius:4px;font-family:var(--font-mono);flex-shrink:0;font-weight:600;">FEATURED</span>
+      <div id="featuredLogo" style="width:28px;height:28px;border-radius:5px;overflow:hidden;background:rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">⬡</div>
+      <div style="flex:1;min-width:0;">
+        <span id="featuredSymbol" style="font-family:var(--font-display);font-size:15px;letter-spacing:2px;color:#1a1209;"></span>
+        <span id="featuredName" style="font-size:11px;color:rgba(0,0,0,0.55);margin-left:8px;"></span>
+      </div>
+      <span style="font-size:10px;color:rgba(0,0,0,0.55);font-family:var(--font-mono);letter-spacing:1px;">NEW LAUNCH</span>
+      <button onclick="(typeof mobileNavSwitch==='function'?mobileNavSwitch('invest'):switchTabByName('invest'))" style="background:rgba(0,0,0,0.15);border:none;padding:7px 16px;border-radius:4px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;color:#1a1209;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">INVEST NOW</button>
+      <button onclick="dismissFeaturedBanner()" style="background:none;border:none;color:rgba(0,0,0,0.45);font-size:20px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;">&times;</button>
+    </div>
+
+    <!-- REFERRAL LINK -->
+    <div class="card" id="dashRefCard" style="display:none;">
+      <div class="card-title">YOUR REFERRAL LINK</div>
+      <div style="display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;">
+        <input id="dashRefLink" type="text" readonly
+          style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:11px 14px;font-family:var(--font-mono);font-size:12px;color:var(--gold);outline:none;cursor:pointer;"
+          onclick="this.select()" />
+        <button class="btn btn-secondary" onclick="copyRefLink()"
+          style="width:auto;padding:10px 22px;flex-shrink:0;">COPY</button>
+      </div>
+    </div>
+
+    <!-- STATS GRID -->
+    <div id="dashStatsRow" style="display:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(175px,100%),1fr));gap:12px;">
+      <div class="dash-stat-card" id="dashCard-invested" data-graph="invested" onclick="openStatGraph('invested')" title="Click to view chart">
+        <div class="dash-stat-label">TOTAL INVESTED <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashTotalInvested" class="dash-stat-val" style="color:var(--gold);">—</div>
+        <div id="dashTotalInvestedUSD" class="dash-stat-sub"></div>
+      </div>
+      <div class="dash-stat-card" id="dashCard-lpvalue" data-graph="lpvalue" onclick="openStatGraph('lpvalue')" title="Click to view chart">
+        <div class="dash-stat-label">CURRENT LP VALUE <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
+        <div id="dashTotalValueUSD" class="dash-stat-sub"></div>
+      </div>
+      <div class="dash-stat-card" id="dashCard-referral" data-graph="referral" onclick="openStatGraph('referral')" title="Click to view chart">
+        <div class="dash-stat-label">REFERRAL EARNINGS <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashRefEarnings" class="dash-stat-val" style="color:#4ade80;">—</div>
+        <div id="dashRefEarningsUSD" class="dash-stat-sub"></div>
+      </div>
+      <div class="dash-stat-card" id="dashCard-staking" data-graph="staking" onclick="openStatGraph('staking')" title="Click to view chart">
+        <div class="dash-stat-label">STAKING REWARDS <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashStakingRewards" class="dash-stat-val" style="color:#a78bfa;">—</div>
+        <div class="dash-stat-sub">no active staking</div>
+      </div>
+      <div class="dash-stat-card" id="dashCard-pnl" data-graph="pnl" onclick="openStatGraph('pnl')" title="Click to view chart">
+        <div class="dash-stat-label">OVERALL P/L <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashPnL" class="dash-stat-val">—</div>
+        <div id="dashPnLPct" class="dash-stat-sub"></div>
+      </div>
+      <div class="dash-stat-card" id="dashCard-locks" data-graph="locks" onclick="openStatGraph('locks')" title="Click to view chart">
+        <div class="dash-stat-label">ACTIVE LOCKS <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashActiveLocks" class="dash-stat-val" style="color:var(--cream);">—</div>
+        <div class="dash-stat-sub">positions</div>
+      </div>
+
+      <!-- INLINE STAT GRAPH — lives inside the grid so it spans full width below the clicked card -->
+      <div id="dashGraphPanel" style="display:none;" class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <div>
+            <div id="dashGraphTitle" style="font-family:var(--font-display);font-size:16px;letter-spacing:1px;color:var(--gold);"></div>
+            <div id="dashGraphSub" style="font-size:11px;color:var(--muted);margin-top:3px;"></div>
+          </div>
+          <button onclick="closeStatGraph()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:4px;width:30px;height:30px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;">✕</button>
+        </div>
+        <div style="position:relative;">
+          <canvas id="dashGraphCanvas" style="width:100%;display:block;"></canvas>
+          <div id="dashGraphTooltip" style="display:none;position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-family:var(--font-mono);font-size:11px;white-space:nowrap;z-index:10;"></div>
+          <div id="dashGraphEmpty" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);font-size:12px;font-family:var(--font-mono);letter-spacing:1px;">NO DATA YET — MAKE YOUR FIRST INVESTMENT TO SEE CHARTS</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="dashLoadingState">
+      <div class="empty-state" style="margin-top:20px;">Connect wallet to load your dashboard.</div>
+    </div>
+
+  </div>
+
+  <!-- INVESTMENTS PANEL -->
+  <div id="panel-investments" class="panel">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+      <button class="btn btn-secondary" onclick="loadInvestments()" style="width:auto;padding:10px 20px;">↻ REFRESH</button>
+    </div>
+    <div id="investmentsContent">
+      <div class="empty-state">Connect wallet to view your investments.</div>
+    </div>
+  </div>
+
+  <!-- INVEST PANEL -->
+  <div id="panel-invest" class="panel">
+    <div class="card">
+      <div class="card-title">NEW LAUNCHES</div>
+      <button class="btn btn-secondary" onclick="loadInvestTokens()" style="margin-bottom:20px;width:auto;padding:10px 20px;">↻ REFRESH</button>
+      <div id="investTokenList" class="token-list">
+        <div class="empty-state">Loading available tokens<span class='ld'><span></span><span></span><span></span></span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">PROVIDE LIQUIDITY</div>
+
+      <!-- 1. Token selector -->
+      <div class="field">
+        <label>Select Token</label>
+        <div id="investDropdownWrap" style="position:relative;">
+          <div id="investDropdownTrigger" onclick="toggleInvestDropdown()" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:11px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;min-height:46px;user-select:none;">
+            <div id="investDropdownSelected" style="flex:1;"><span style="color:var(--muted);font-size:13px;">— Select a token —</span></div>
+            <span id="investDropdownArrow" style="color:var(--muted);font-size:11px;margin-left:10px;flex-shrink:0;">▾</span>
+          </div>
+          <div id="investDropdownMenu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:320px;overflow-y:auto;box-shadow:0 8px 28px rgba(0,0,0,0.45);">
+          </div>
+        </div>
+        <select id="investTokenSelect" style="display:none;">
+          <option value="">— Select a token —</option>
+        </select>
+      </div>
+
+      <!-- 2. Package selector -->
+      <div class="field" style="margin-bottom:0;">
+        <label style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span>Investment Package</span>
+          <span style="font-size:10px;color:var(--muted);font-weight:400;">Platform rate: <span style="color:var(--gold);">1,000 USDT = 1 ETH</span></span>
+        </label>
+
+        <!-- category tabs -->
+        <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:16px;">
+          <button id="pkgBtnBasic"         onclick="switchPkgCat('basic')"         class="pkg-cat-btn pkg-cat-active">BASIC</button>
+          <button id="pkgBtnElite"         onclick="switchPkgCat('elite')"         class="pkg-cat-btn">ELITE</button>
+          <button id="pkgBtnInstitutional" onclick="switchPkgCat('institutional')" class="pkg-cat-btn">INSTITUTIONAL</button>
+        </div>
+
+        <!-- package cards grid -->
+        <div id="pkgGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-bottom:16px;"></div>
+
+        <!-- selected summary -->
+        <div id="pkgSummary" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;font-size:12px;font-family:var(--font-mono);margin-bottom:4px;">
+          <span style="color:var(--muted);">SELECTED  </span>
+          <span id="pkgSummaryUSD" style="color:var(--gold);font-size:15px;font-family:var(--font-display);"></span>
+          <span style="color:var(--muted);"> = </span>
+          <span id="pkgSummaryETH" style="color:var(--cream);"></span>
+          <span style="color:var(--muted);"> ETH</span>
+        </div>
+      </div>
+
+      <!-- hidden amount field read by invest() -->
+      <input type="hidden" id="investAmount" value=""/>
+
+      <div id="investBreakdown" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:16px;margin-bottom:16px;font-size:12px;line-height:2;">
+        <div style="color:var(--muted);letter-spacing:1px;font-size:10px;margin-bottom:8px;">INVESTMENT BREAKDOWN</div>
+        <div>Half A — token acquisition: <span id="brkA" style="color:var(--gold)"></span></div>
+        <div style="padding-left:16px;">↳ 60% pool buy: <span id="brkA60" style="color:var(--cream)"></span></div>
+        <div style="padding-left:16px;">↳ 40% commissions: <span id="brkA40" style="color:var(--cream)"></span></div>
+        <div style="margin-top:6px;">Half B — liquidity ETH: <span id="brkB" style="color:var(--gold)"></span></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);">Excess tokens &amp; unused ETH from the router are returned to the platform.</div>
+      </div>
+      <button class="btn btn-primary" id="investBtn" onclick="invest()">PROVIDE LIQUIDITY</button>
+    </div>
+  </div>
+
+  <!-- POOL PANEL -->
+  <div id="panel-pool" class="panel">
+
+    <!-- Token list -->
+    <div class="card">
+      <div class="card-title">LIQUIDITY POOLS</div>
+      <div id="poolTokenList" class="token-list">
+        <div class="empty-state">Loading pools<span class='ld'><span></span><span></span><span></span></span></div>
+      </div>
+    </div>
+
+    <!-- Pool detail + trade (hidden until token selected) -->
+    <div class="card" id="poolDetailCard" style="display:none;">
+
+      <!-- Header -->
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap;">
+        <div id="poolTokenIcon" style="width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">⬡</div>
+        <div>
+          <div id="poolTokenLabel" style="font-family:var(--font-mono);font-size:16px;color:var(--cream);letter-spacing:.05em;"></div>
+          <div id="poolTokenAddr" style="font-size:10px;color:var(--gold);font-family:var(--font-mono);margin-top:3px;word-break:break-all;"></div>
+        </div>
+        <button onclick="loadPoolInfo(window._poolSelectedToken)" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">↻ REFRESH</button>
+      </div>
+
+      <!-- Stats grid -->
+      <div id="poolStats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px;"></div>
+
+      <!-- Trade section -->
+      <div style="border-top:1px solid var(--border);padding-top:20px;">
+        <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:18px;width:fit-content;">
+          <button id="poolBuyBtn"  onclick="switchPoolMode('buy')"  style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--success,#26d97f);color:#000;font-weight:700;">BUY</button>
+          <button id="poolSellBtn" onclick="switchPoolMode('sell')" style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--surface);color:var(--muted);">SELL</button>
+        </div>
+
+        <!-- BUY form — bidirectional: type ETH or type tokens, the other auto-fills -->
+        <div id="poolBuyForm">
+          <div class="field">
+            <label>ETH to spend</label>
+            <input id="poolBuyETH" type="number" min="0" step="0.001" placeholder="0.000000"
+                   oninput="onBuyEthInput()" onfocus="this.select()">
+          </div>
+          <div class="pool-swap-sep">↕</div>
+          <div class="field">
+            <label style="display:flex;justify-content:space-between;">
+              <span>Tokens to receive</span>
+              <span id="poolBuyOutSym" style="color:var(--gold);font-size:10px;"></span>
+            </label>
+            <input id="poolBuyToken" type="number" min="0" step="1" placeholder="0"
+                   oninput="onBuyTokenInput()" onfocus="this.select()">
+          </div>
+          <div style="margin:6px 0 12px;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
+            Price impact &amp; 0.3% fee included · type either amount
+          </div>
+          <div class="field">
+            <label style="display:flex;justify-content:space-between;"><span>Slippage tolerance</span><span id="poolBuySlipLabel" style="color:var(--gold);">1%</span></label>
+            <input type="range" id="poolBuySlip" min="1" max="50" value="1" oninput="document.getElementById('poolBuySlipLabel').textContent=this.value+'%'" style="width:100%;accent-color:var(--gold);">
+          </div>
+          <button class="btn btn-primary" onclick="poolBuyTokens()">BUY TOKENS</button>
+        </div>
+
+        <!-- SELL form — bidirectional: type tokens or type ETH desired, the other auto-fills -->
+        <div id="poolSellForm" style="display:none;">
+          <div class="field">
+            <label style="display:flex;justify-content:space-between;">
+              <span>Tokens to sell</span>
+              <span id="poolSellBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;" onclick="poolSellMax()">
+                BAL: <span id="poolSellBal">—</span> &nbsp;MAX
+              </span>
+            </label>
+            <input id="poolSellAmt" type="number" min="0" step="1" placeholder="0"
+                   oninput="onSellTokenInput()" onfocus="this.select()">
+          </div>
+          <div class="pool-swap-sep">↕</div>
+          <div class="field">
+            <label>ETH to receive</label>
+            <input id="poolSellETH" type="number" min="0" step="0.0001" placeholder="0.00000000"
+                   oninput="onSellEthInput()" onfocus="this.select()">
+          </div>
+          <div style="margin:6px 0 12px;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
+            Price impact &amp; 0.3% fee included · type either amount
+          </div>
+          <div class="field">
+            <label style="display:flex;justify-content:space-between;"><span>Slippage tolerance</span><span id="poolSellSlipLabel" style="color:var(--gold);">1%</span></label>
+            <input type="range" id="poolSellSlip" min="1" max="50" value="1" oninput="document.getElementById('poolSellSlipLabel').textContent=this.value+'%'" style="width:100%;accent-color:var(--gold);">
+          </div>
+          <button class="btn btn-primary" onclick="poolSellTokens()">SELL TOKENS</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GENEALOGY PANEL -->
+  <div id="panel-genealogy" class="panel">
+    <div class="card">
+      <div class="card-title">MY GENEALOGY</div>
+
+      <!-- toolbar -->
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
+        <div id="geneViewToggle" style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+          <button id="geneListBtn" onclick="switchGeneView('list')" style="padding:9px 20px;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;border:none;cursor:pointer;background:var(--gold);color:#000;transition:background .15s;">LIST</button>
+          <button id="geneTreeBtn" onclick="switchGeneView('tree')" style="padding:9px 20px;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;border:none;cursor:pointer;background:var(--surface);color:var(--muted);transition:background .15s;">TREE</button>
+        </div>
+        <button class="btn btn-secondary" onclick="loadGenealogy()" style="width:auto;padding:9px 20px;">↻ REFRESH</button>
+      </div>
+
+      <!-- list view -->
+      <div id="geneListView"></div>
+
+      <!-- tree view -->
+      <div id="geneTreeView" style="display:none;overflow-x:auto;padding-bottom:12px;"></div>
+    </div>
+  </div>
+
+
+  <!-- REWARDS PANEL -->
+  <div id="panel-rewards" class="panel">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+      <button class="btn btn-secondary" onclick="loadRewards()" style="width:auto;padding:10px 20px;">↻ REFRESH</button>
+    </div>
+
+    <!-- REFERRAL COMMISSIONS -->
+    <div class="card">
+      <div class="card-title">REFERRAL COMMISSIONS</div>
+      <div id="rwRefContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
+    </div>
+
+    <!-- STAKING REWARDS -->
+    <div class="card">
+      <div class="card-title">STAKING REWARDS</div>
+      <div id="rwStakingContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
+    </div>
+
+    <!-- LP POOL FEES -->
+    <div class="card">
+      <div class="card-title">LP POOL FEES <span style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1px;font-family:var(--font-body);font-weight:400;">(UNISWAP V2 · 0.3%)</span></div>
+      <div id="rwLPFeesContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
+    </div>
+  </div>
+
+  <!-- MY INFO PANEL -->
+  <div id="panel-myinfo" class="panel">
+    <div class="card">
+      <div class="card-title">MY ACCOUNT</div>
+      <button class="btn btn-primary" onclick="loadMyInfo()">LOAD MY INFO</button>
+      <div id="myInfoContent"></div>
+    </div>
+  </div>
+
+  <!-- HISTORY PANEL -->
+  <div id="panel-history" class="panel">
+    <div class="card">
+      <!-- Sub-tab bar -->
+      <div style="display:flex;align-items:center;gap:0;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;">
+        <button id="histTab-invest" class="hist-subtab active" onclick="switchHistoryTab('invest')">INVESTMENTS</button>
+        <button id="histTab-pool"   class="hist-subtab"        onclick="switchHistoryTab('pool')">POOL ACTIVITY</button>
+        <button class="btn btn-secondary" id="histRefreshBtn" onclick="_refreshHistoryTab()"
+          style="width:auto;padding:6px 14px;font-size:11px;margin-left:auto;margin-bottom:6px;">↻ REFRESH</button>
+      </div>
+
+      <!-- Investment history sub-panel -->
+      <div id="histPanel-invest">
+        <div id="historyList">
+          <div class="empty-state">Connect wallet to view history.</div>
+        </div>
+      </div>
+
+      <!-- Pool activity sub-panel -->
+      <div id="histPanel-pool" style="display:none;">
+        <div id="poolHistoryList">
+          <div class="empty-state">Connect wallet to view pool activity.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OWNER PANEL -->
+  <div id="panel-owner" class="panel">
+    <div class="owner-notice">
+      ⬡ Only the contract deployer (owner) can access these functions.
+    </div>
+
+    <!-- Owner Stats Card -->
+    <div class="card" id="ownerStatsCard">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div class="card-title" style="margin-bottom:0;">PLATFORM OVERVIEW</div>
+        <button class="btn btn-secondary" onclick="loadOwnerStats()" style="width:auto;padding:8px 18px;font-size:11px;">↻ REFRESH</button>
+      </div>
+      <div id="ownerStatsContent">
+        <div class="empty-state">Loading platform stats…</div>
+      </div>
+    </div>
+
+    <!-- Token Approval Status Card -->
+    <div class="card" id="ownerApprovalCard">
+      <div class="card-title">TOKEN APPROVAL STATUS</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:14px;line-height:1.6;">
+        Remaining staking allowance you have approved for the contract. If low, approve more tokens to avoid failed reward claims.
+      </div>
+      <div id="ownerApprovalContent">
+        <div class="empty-state">Loading allowance status…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">ADD NEW TOKEN</div>
+
+      <div class="field">
+        <label>Token Contract Address</label>
+        <input type="text" id="newTokenAddr" placeholder="0x..." oninput="onTokenAddrInput(this.value)"/>
+        <div id="tokenFetchStatus" style="font-size:11px;margin-top:6px;color:var(--muted);min-height:16px;"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:16px;">
+        <div class="field">
+          <label>Token Name <span style="color:var(--muted);font-size:10px;">AUTO</span></label>
+          <input type="text" id="newTokenName" placeholder="Fetched automatically" readonly style="opacity:0.7;cursor:default;"/>
+        </div>
+        <div class="field">
+          <label>Token Symbol <span style="color:var(--muted);font-size:10px;">AUTO</span></label>
+          <input type="text" id="newTokenSymbol" placeholder="Fetched automatically" readonly style="opacity:0.7;cursor:default;"/>
+        </div>
+        <div class="field">
+          <label>Total Supply <span style="color:var(--muted);font-size:10px;">AUTO</span></label>
+          <input type="text" id="newTokenTotalSupply" placeholder="Fetched automatically" readonly style="opacity:0.7;cursor:default;"/>
+        </div>
+        <div class="field">
+          <label>Contract Balance <span style="color:var(--muted);font-size:10px;">AUTO</span></label>
+          <input type="text" id="newTokenBalance" placeholder="Fetched automatically" readonly style="opacity:0.7;cursor:default;"/>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Token Logo <span style="color:var(--muted);font-size:10px;">JPG / PNG</span></label>
+        <input type="file" id="newTokenLogo" accept="image/jpeg,image/png" onchange="onLogoChange(this)"/>
+        <div id="logoPreview" style="margin-top:10px;display:none;">
+          <img id="logoPreviewImg" style="width:64px;height:64px;object-fit:contain;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:4px;"/>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Website</label>
+        <input type="url" id="newTokenWebsite" placeholder="https://yourtoken.io"/>
+      </div>
+
+      <div class="field">
+        <label>Whitepaper <span style="color:var(--muted);font-size:10px;">PDF URL</span></label>
+        <input type="url" id="newTokenWhitepaper" placeholder="https://yourtoken.io/whitepaper.pdf"/>
+      </div>
+
+      <div class="field">
+        <label>Token Information</label>
+        <textarea id="newTokenDescription" placeholder="Describe the token, its use case, and the project..." rows="4"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:12px 14px;font-family:var(--font-mono);font-size:13px;color:var(--cream);outline:none;resize:vertical;line-height:1.6;"></textarea>
+      </div>
+
+      <button class="btn btn-primary" onclick="addToken()">ADD TOKEN</button>
+    </div>
+
+    <!-- ── OWNER: ADD LIQUIDITY ── -->
+    <div class="card">
+      <div class="card-title">ADD LIQUIDITY TO POOL</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;line-height:1.6;">
+        Add ETH + tokens to a registered pool. Token amount is auto-calculated from the current pool price. For a new pool, set the initial price manually.
+      </div>
+
+      <div class="field">
+        <label>Token</label>
+        <select id="ownerLiqToken" onchange="onOwnerLiqTokenChange(this.value)"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px 14px;font-family:var(--font-mono);font-size:13px;color:var(--cream);outline:none;">
+          <option value="">— Select token —</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>USDT Amount</label>
+        <div style="position:relative;">
+          <input type="number" id="ownerLiqUSDT" placeholder="0" min="0" step="any"
+            oninput="onOwnerLiqUSDTChange()"
+            style="width:100%;padding-right:60px;"/>
+          <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none;">USDT</span>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">ETH AMOUNT</div>
+          <div id="ownerLiqETH" style="font-family:var(--font-mono);font-size:14px;color:var(--cream);">—</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;"><span id="ownerLiqTokenSymLabel">TOKEN</span> AMOUNT</div>
+          <div id="ownerLiqTokenAmt" style="font-family:var(--font-mono);font-size:14px;color:var(--cream);">—</div>
+        </div>
+      </div>
+
+      <!-- New pool: set initial price -->
+      <div id="ownerNewPoolSection" style="display:none;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.25);border-radius:6px;padding:14px 16px;margin-bottom:16px;">
+        <div style="font-size:11px;color:var(--gold);letter-spacing:.06em;margin-bottom:10px;">⬡ NEW POOL — SET INITIAL PRICE</div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Initial Price (USDT per token)</label>
+          <div style="position:relative;">
+            <input type="number" id="ownerInitialPrice" placeholder="e.g. 0.01" min="0" step="any"
+              oninput="onOwnerLiqUSDTChange()"
+              style="width:100%;padding-right:70px;margin-bottom:0;"/>
+            <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none;">USDT</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="ownerLiqPoolStatus" style="font-size:11px;font-family:var(--font-mono);margin-bottom:16px;min-height:16px;"></div>
+      <button class="btn btn-primary" onclick="ownerAddLiquidity()" id="ownerAddLiqBtn">ADD LIQUIDITY</button>
+    </div>
+
+    <!-- ── OWNER: REMOVE LIQUIDITY ── -->
+    <div class="card">
+      <div class="card-title">REMOVE MY LIQUIDITY</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;line-height:1.6;">
+        Remove your own LP position from a registered pool. ETH and tokens are returned directly to your wallet.
+      </div>
+
+      <div class="field">
+        <label>Token</label>
+        <select id="ownerRemoveLiqToken" onchange="onOwnerRemoveLiqTokenChange(this.value)"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px 14px;font-family:var(--font-mono);font-size:13px;color:var(--cream);outline:none;">
+          <option value="">— Select token —</option>
+        </select>
+      </div>
+
+      <div id="ownerRemoveLiqInfo" style="display:none;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:16px;">
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
+            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">MY LP BALANCE</div>
+            <div id="ownerLPBalance" style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">—</div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
+            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">EST. ETH OUT</div>
+            <div id="ownerRemoveEstETH" style="font-family:var(--font-mono);font-size:13px;color:var(--success);">—</div>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
+            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">EST. TOKENS OUT</div>
+            <div id="ownerRemoveEstToken" style="font-family:var(--font-mono);font-size:13px;color:var(--gold);">—</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>LP Amount to Remove</label>
+          <div style="display:flex;gap:8px;">
+            <input type="number" id="ownerRemoveLPAmt" placeholder="0" min="0" step="any"
+              oninput="onOwnerRemoveLPAmtChange()" style="flex:1;margin-bottom:0;"/>
+            <button onclick="ownerSetMaxLP()"
+              style="padding:10px 18px;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--cream);cursor:pointer;white-space:nowrap;flex-shrink:0;">
+              MAX
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="ownerRemoveLiquidity()" id="ownerRemoveLiqBtn" style="margin-top:8px;">REMOVE LIQUIDITY</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">APPROVE TOKENS</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:14px;line-height:1.6;">Approve the platform contract to spend your tokens for staking rewards. Users will be paid directly from your wallet when they claim.</div>
+      <div class="field">
+        <label>Token Address</label>
+        <input id="stakingApproveToken" type="text" placeholder="0x…" />
+      </div>
+      <div class="field">
+        <label>Approve Amount (token units)</label>
+        <input id="stakingApproveAmount" type="number" placeholder="100000" min="0" />
+      </div>
+      <button class="btn btn-primary" onclick="approveStakingTokens()" style="width:auto;padding:10px 24px;">APPROVE</button>
+      <div id="stakingApproveStatus" style="margin-top:12px;font-size:12px;font-family:var(--font-mono);color:var(--muted);"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">PLATFORM INFO</div>
+      <button class="btn btn-secondary" onclick="loadOwnerInfo()">LOAD INFO</button>
+      <div id="ownerInfoContent"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- SHORTAGE NOTIFICATION POPUP -->
+<div id="shortagePopup" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border:1px solid rgba(224,80,80,0.4);border-radius:8px;max-width:460px;width:92%;padding:28px;position:relative;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(224,80,80,0.15);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">⚠</div>
+      <div style="font-family:var(--font-display);font-size:20px;letter-spacing:2px;color:var(--danger);">TOKEN SHORTAGE ALERT</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.7;">The following tokens have critically low staking approval. Users may fail to claim staking rewards.</div>
+    <div id="shortagePopupList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="document.getElementById('shortagePopup').style.display='none'" style="width:auto;padding:9px 20px;font-size:12px;">DISMISS</button>
+      <button class="btn btn-primary" onclick="document.getElementById('shortagePopup').style.display='none';document.getElementById('stakingApproveToken').focus();" style="width:auto;padding:9px 20px;font-size:12px;">APPROVE TOKENS</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  © 2025 <span>HORDEX</span> — FUNDING THE FUTURE
+  <span class="footer-contract">
+    CONTRACT:&nbsp;<a id="footerContractLink" href="" target="_blank" rel="noopener"></a>
+  </span>
+</footer>
+
+</div><!-- /#appContent -->
+
+<!-- TOKEN DETAIL MODAL -->
+<div id="tokenDetailOverlay" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(4,8,15,0.88);backdrop-filter:blur(16px);align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border:1px solid rgba(201,168,76,0.2);border-radius:8px;max-width:520px;width:92%;max-height:85vh;overflow-y:auto;position:relative;">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;gap:16px;padding:28px 28px 20px;border-bottom:1px solid var(--border);">
+      <div id="tdLogo" style="width:56px;height:56px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;">⬡</div>
+      <div>
+        <div id="tdSymbol" style="font-family:var(--font-display);font-size:24px;letter-spacing:2px;color:var(--gold);"></div>
+        <div id="tdName" style="font-size:13px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button onclick="closeTokenDetail()" style="position:absolute;top:16px;right:20px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:24px 28px;display:flex;flex-direction:column;gap:18px;">
+
+      <!-- Contract address -->
+      <div>
+        <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">CONTRACT ADDRESS</div>
+        <div id="tdAddr" style="font-family:var(--font-mono);font-size:11px;color:var(--gold);word-break:break-all;"></div>
+      </div>
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:12px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
+          <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL SUPPLY</div>
+          <div id="tdSupply" style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--cream);">—</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
+          <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">AVAILABLE</div>
+          <div id="tdAvailable" style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--success);">—</div>
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div id="tdDescBlock" style="display:none;">
+        <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:8px;">ABOUT</div>
+        <div id="tdDesc" style="font-size:13px;color:var(--cream);line-height:1.8;opacity:0.85;"></div>
+      </div>
+
+      <!-- Links -->
+      <div id="tdLinks" style="display:flex;gap:12px;flex-wrap:wrap;"></div>
+
+      <!-- Select button -->
+      <button id="tdSelectBtn" onclick="selectTokenFromDetail()" style="width:100%;font-family:var(--font-mono);font-size:13px;letter-spacing:2px;text-transform:uppercase;padding:14px;background:var(--gold);color:var(--bg);border:none;border-radius:4px;cursor:pointer;font-weight:600;margin-top:4px;">SELECT THIS TOKEN</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Stake LP duration modal ── -->
+<div id="stakeModal" class="stake-modal-overlay" style="display:none;" onclick="if(event.target===this)closeStakeModal()">
+  <div class="stake-modal-box">
+    <div class="stake-modal-title">STAKE LP</div>
+    <div class="stake-modal-sub">SELECT LOCK DURATION</div>
+    <div class="stake-days-grid">
+      <button class="stake-day-btn" data-days="30"  onclick="selectStakeDays(30)"><span class="sdb-num">30</span><span class="sdb-lbl">DAYS</span></button>
+      <button class="stake-day-btn" data-days="60"  onclick="selectStakeDays(60)"><span class="sdb-num">60</span><span class="sdb-lbl">DAYS</span></button>
+      <button class="stake-day-btn" data-days="90"  onclick="selectStakeDays(90)"><span class="sdb-num">90</span><span class="sdb-lbl">DAYS</span></button>
+      <button class="stake-day-btn" data-days="180" onclick="selectStakeDays(180)"><span class="sdb-num">180</span><span class="sdb-lbl">DAYS</span></button>
+      <button class="stake-day-btn" data-days="360" onclick="selectStakeDays(360)"><span class="sdb-num">360</span><span class="sdb-lbl">DAYS</span></button>
+    </div>
+    <div class="stake-unlock-info" id="stakeUnlockInfo">&nbsp;</div>
+    <div class="stake-modal-actions">
+      <button class="stake-modal-cancel" onclick="closeStakeModal()">CANCEL</button>
+      <button class="stake-modal-confirm" id="stakeConfirmBtn" disabled onclick="confirmRestake()">CONFIRM STAKE</button>
+    </div>
+  </div>
+</div>
+
+<!-- JS — loaded in dependency order -->
+<script src="js/session.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/panels/dashboard.js"></script>
+<script src="js/panels/investments.js"></script>
+<script src="js/panels/invest.js"></script>
+<script src="js/panels/pool.js"></script>
+<script src="js/panels/genealogy.js"></script>
+<script src="js/panels/rewards.js"></script>
+<script src="js/panels/myinfo.js"></script>
+<script src="js/panels/history.js"></script>
+<script src="js/panels/owner.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
