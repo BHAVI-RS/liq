@@ -509,24 +509,69 @@ async function checkOwner() {
     App.isOwner = _isOwner;
     document.getElementById('ownerTab').style.display        = _isOwner ? 'block' : 'none';
     document.getElementById('mobileOwnerTab').style.display  = _isOwner ? 'flex'  : 'none';
-    const ownerHideTabs   = ['tab-investments','tab-invest','tab-rewards'];
-    const ownerHideMobile = ['mobileTab-investments','mobileTab-invest','mobileTab-rewards'];
-    ownerHideTabs.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = _isOwner ? 'none' : '';
-    });
-    ownerHideMobile.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = _isOwner ? 'none' : '';
-    });
-    const refCard = document.getElementById('dashRefCard');
-    if (refCard) refCard.style.display = _isOwner ? 'none' : '';
   } catch(e) {
     // silently ignore — owner tab stays hidden
   }
 }
 
 let _pendingReferrer = null;
+
+// Runs once after every login.  Fetches LP locks + latest block, determines
+// each lock's status using the sessionStorage-restored effectiveNow so the
+// correct state is visible even right after a page reload on a frozen Hardhat
+// fork.  Pre-populates the investments panel and shows a toast when locks are
+// ready to claim / remove.
+async function _onLoginCheckInvestments() {
+  if (!App.contract || !App.walletAddress) return;
+  try {
+    const [lpLocks, latestBlock] = await Promise.all([
+      App.contract.getUserLPLocks(App.walletAddress),
+      App.provider.getBlock('latest').catch(() => null),
+    ]);
+    if (!lpLocks.length) return;
+
+    const blockNow = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
+    const wallNow  = Math.floor(Date.now() / 1000);
+
+    // Mirror the sessionStorage restore from loadInvestments() so we use the
+    // same effectiveNow reference even before loadInvestments() has been called.
+    let effectiveNow = blockNow;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('hordex_eff_time') || 'null');
+      if (saved && saved.blockNow === blockNow) {
+        effectiveNow = Math.max(blockNow, saved.effectiveNow + Math.max(0, wallNow - saved.wallNow));
+      }
+    } catch(_) {}
+
+    const active   = lpLocks.filter(l => !l.claimed && !l.removed);
+    const unlocked = active.filter(l => Number(l.unlockTime) <= effectiveNow);
+    const locked   = active.filter(l => Number(l.unlockTime)  > effectiveNow);
+
+    if (unlocked.length > 0) {
+      toast(
+        unlocked.length === 1
+          ? '1 LP position is unlocked — go to INVESTMENTS to remove or stake.'
+          : `${unlocked.length} LP positions are unlocked — go to INVESTMENTS.`,
+        'success'
+      );
+    } else if (locked.length > 0) {
+      const soonest  = locked.reduce((mn, l) => Math.min(mn, Number(l.unlockTime)), Infinity);
+      const secsLeft = Math.max(0, soonest - effectiveNow);
+      const m = Math.floor(secsLeft / 60), s = secsLeft % 60;
+      toast(
+        `${locked.length} active LP lock${locked.length > 1 ? 's' : ''}. ` +
+        `Next unlock in ${m > 0 ? m + 'm ' : ''}${s}s.`,
+        'info'
+      );
+    }
+
+    // Pre-populate the investments panel so correct state is shown immediately
+    // when the user navigates there, without an extra loading flash.
+    loadInvestments();
+  } catch(e) {
+    console.warn('_onLoginCheckInvestments:', e);
+  }
+}
 
 async function checkRegistration() {
   if (!App.contract) { revealDashboard(); return; }
@@ -537,6 +582,7 @@ async function checkRegistration() {
       setTimeout(() => {
         switchTabByName('dashboard');
         loadInvestTokens();
+        _onLoginCheckInvestments();
       }, 600);
     } else {
       const params = new URLSearchParams(window.location.search);
@@ -557,9 +603,14 @@ async function checkRegistration() {
       if (!referrerAddr) {
         referrerAddr = await App.contract.owner();
         referrerLabel = referrerAddr.slice(0,14) + '...' + referrerAddr.slice(-8) + '  (Platform Admin)';
-        document.getElementById('newUserPromptText').textContent = 'Register under the platform admin?';
+        document.getElementById('newUserPromptText').textContent = 'Register under the platform admin, or enter a referrer below.';
+        // No referral link — show the manual address entry section
+        document.getElementById('customReferrerSection').style.display = 'block';
+        document.getElementById('customReferrerInput').value = '';
+        document.getElementById('customReferrerStatus').textContent = '';
       } else {
         document.getElementById('newUserPromptText').textContent = 'Register under this referrer?';
+        document.getElementById('customReferrerSection').style.display = 'none';
       }
 
       _pendingReferrer = referrerAddr;
@@ -604,6 +655,58 @@ async function registerNewUser() {
     toast('Registration failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
     btn.textContent = 'YES, REGISTER ME';
     document.getElementById('newUserRegisterBtn').disabled = false;
+  }
+}
+
+// Live feedback as the user types in the custom referrer field.
+function onCustomReferrerInput(val) {
+  const statusEl = document.getElementById('customReferrerStatus');
+  if (!val || val.trim() === '') {
+    statusEl.textContent = '';
+    statusEl.style.color = 'var(--muted)';
+    return;
+  }
+  if (!ethers.utils.isAddress(val.trim())) {
+    statusEl.textContent = 'Not a valid Ethereum address.';
+    statusEl.style.color = '#f87171';
+  } else {
+    statusEl.textContent = 'Press USE to verify this address.';
+    statusEl.style.color = 'var(--muted)';
+  }
+}
+
+// Validates the entered address and updates the pending referrer if it is a registered user.
+async function applyCustomReferrer() {
+  const input    = document.getElementById('customReferrerInput');
+  const statusEl = document.getElementById('customReferrerStatus');
+  const val      = (input.value || '').trim();
+
+  if (!ethers.utils.isAddress(val)) {
+    statusEl.textContent = 'Not a valid Ethereum address.';
+    statusEl.style.color = '#f87171';
+    return;
+  }
+
+  statusEl.textContent = 'Checking…';
+  statusEl.style.color = 'var(--muted)';
+
+  try {
+    const refUser = await App.contract.users(val);
+    if (!refUser.isRegistered) {
+      statusEl.textContent = 'This address is not registered on the platform.';
+      statusEl.style.color = '#f87171';
+      return;
+    }
+
+    _pendingReferrer = val;
+    const label = val.slice(0,14) + '...' + val.slice(-8);
+    document.getElementById('newUserReferrerAddr').textContent = label;
+    document.getElementById('newUserPromptText').textContent = 'Register under this referrer?';
+    statusEl.textContent = 'Referrer set. Click YES, REGISTER ME to continue.';
+    statusEl.style.color = '#4ade80';
+  } catch(e) {
+    statusEl.textContent = 'Could not verify address: ' + (e.reason || e.message);
+    statusEl.style.color = '#f87171';
   }
 }
 

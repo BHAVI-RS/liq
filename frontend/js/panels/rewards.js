@@ -16,10 +16,15 @@ async function loadRwReferral() {
   const el = document.getElementById('rwRefContent');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
-    const [commStats, commEvents] = await Promise.all([
+    const [commStats, commEvents, activeCountRaw, minInvRaw] = await Promise.all([
       contract.getUserCommissionStats(walletAddress),
-      contract.queryFilter(contract.filters.CommissionPaid(walletAddress)).catch(() => [])
+      contract.queryFilter(contract.filters.CommissionPaid(walletAddress)).catch(() => []),
+      contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
+      contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0))
     ]);
+    const activeCount  = Number(activeCountRaw);
+    const minInvETH    = parseFloat(ethers.utils.formatEther(minInvRaw));
+    const minInvLabel  = minInvETH > 0 ? `≥ ${fmtUSDT(minInvETH,{noEth:true})} each` : 'any active investment';
 
     const earned    = parseFloat(ethers.utils.formatEther(commStats.earned));
     const missed    = parseFloat(ethers.utils.formatEther(commStats.missed));
@@ -74,7 +79,28 @@ async function loadRwReferral() {
            <div style="margin-top:4px;color:rgba(248,113,113,0.7);font-size:10px;">You were ineligible when these commissions passed through your position. Invest to earn future commissions.</div>
          </div>` : '';
 
+    const maxEligibleLevel = Math.min(activeCount, 10);
+    const eligColor  = maxEligibleLevel > 0 ? '#4ade80' : '#f87171';
+    const eligBg     = maxEligibleLevel > 0 ? 'rgba(74,222,128,0.07)' : 'rgba(248,113,113,0.07)';
+    const eligBorder = maxEligibleLevel > 0 ? 'rgba(74,222,128,0.22)' : 'rgba(248,113,113,0.22)';
+    const nextLevel  = maxEligibleLevel + 1;
+    const nextHint   = maxEligibleLevel < 10
+      ? `<div style="margin-top:4px;font-size:10px;color:var(--muted);">Invite <span style="color:var(--cream);">${nextLevel} active referral${nextLevel !== 1 ? 's' : ''} (${minInvLabel})</span> to unlock Level ${nextLevel}.</div>`
+      : `<div style="margin-top:4px;font-size:10px;color:var(--gold);">All 10 levels unlocked — maximum commission reach.</div>`;
+
+    const eligBanner = `
+      <div style="background:${eligBg};border:1px solid ${eligBorder};border-radius:6px;padding:11px 14px;margin-bottom:14px;font-size:11px;font-family:var(--font-mono);">
+        <div style="color:${eligColor};letter-spacing:1px;font-size:10px;margin-bottom:4px;">REFERRAL ELIGIBILITY</div>
+        <div style="color:var(--cream);">
+          <span style="color:${eligColor};font-weight:700;">${activeCount}</span> active direct referral${activeCount !== 1 ? 's' : ''} → commissions up to
+          <span style="color:${eligColor};font-weight:700;">Level ${maxEligibleLevel}</span>
+          ${maxEligibleLevel === 10 ? '<span style="color:var(--gold);"> · MAX</span>' : ''}
+        </div>
+        ${nextHint}
+      </div>`;
+
     el.innerHTML = `
+      ${eligBanner}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:4px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL EARNED</div>
@@ -110,98 +136,110 @@ async function loadRwStaking() {
       provider.getBlock('latest')
     ]);
 
-    const now             = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
-    const totalAccruedETH = parseFloat(ethers.utils.formatEther(stakingData.totalAccruedETH));
-    const claimableETH    = parseFloat(ethers.utils.formatEther(stakingData.claimableETH));
-    const claimableTokens = parseFloat(ethers.utils.formatEther(stakingData.claimableTokens));
-    const nextClaimTime   = Number(stakingData.nextClaimTime);
+    const now              = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
+    const lifetimeClaimed  = parseFloat(ethers.utils.formatEther(stakingData.lifetimeClaimed));
+    const totalAccumulated = parseFloat(ethers.utils.formatEther(stakingData.totalAccumulated));
+    const previewNewTokens = parseFloat(ethers.utils.formatEther(stakingData.previewNewTokens));
+    const totalClaimable   = totalAccumulated + previewNewTokens;
 
-    const cooldownActive  = nextClaimTime > 0 && now < nextClaimTime;
-    const canClaim        = claimableTokens > 0 && !cooldownActive;
+    // Compute USDT figures from lock data (linear per-second accrual, capped at period end).
+    // Removed locks are included — rewards earned before removal remain claimable.
+    let totalLiveUSDT      = 0;
+    let totalClaimableUSDT = 0;
+    for (const lock of lpLocks) {
+      const la    = Number(lock.lockedAt);
+      const ut    = Number(lock.unlockTime);
+      const dur   = Math.max(ut - la, 60);
+      const ethInv = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const rwETH  = ethInv * 0.30;
+      const elapsed = Math.min(dur, Math.max(0, now - la));
+      const earnedETH = dur > 0 ? rwETH * elapsed / dur : 0;
+      const claimedETH = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
+      const pendingETH = Math.max(0, earnedETH - claimedETH);
+      const carry = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
+      totalLiveUSDT      += earnedETH * USDT_PER_ETH;
+      totalClaimableUSDT += pendingETH * USDT_PER_ETH;
+    }
+    const canClaim = totalClaimable > 0;
 
-    // Get token symbol from first lock
     let tokenSymbol = 'HORDEX';
     if (lpLocks.length > 0) {
       try { const t = await contract.getToken(lpLocks[0].token); tokenSymbol = t.symbol; } catch(_) {}
     }
 
-    // Per-investment staking breakdown rows
-    const SLOT_DURATION = 10;
     let lockRows = '';
-
     for (let i = 0; i < lpLocks.length; i++) {
-      const lock             = lpLocks[i];
-      const lockedAt         = Number(lock.lockedAt);
-      const unlockTime       = Number(lock.unlockTime);
-      const lockDurSecs      = unlockTime > lockedAt ? unlockTime - lockedAt : 60;
-      const NUM_SLOTS        = Math.max(1, Math.floor(lockDurSecs / SLOT_DURATION));
-      const ethInvested      = parseFloat(ethers.utils.formatEther(lock.ethInvested));
-      const isStakingClaimed = lock.stakingClaimed || false;
-      const slotsClaimed     = lock.stakingTokens ? Number(lock.stakingTokens) : 0;
-      const elapsed          = Math.max(0, now - lockedAt);
-      const slotsComplete    = Math.min(Math.floor(elapsed / SLOT_DURATION), NUM_SLOTS);
-      const newSlots         = Math.max(0, slotsComplete - slotsClaimed);
-      const pendingETH       = ethInvested * 0.30 * newSlots / NUM_SLOTS;
+      const lock        = lpLocks[i];
+      const isRemoved   = lock.removed || false;
+      const lockedAt    = Number(lock.lockedAt);
+      const unlockTime  = Number(lock.unlockTime);
+      const lockDurSecs = unlockTime > lockedAt ? unlockTime - lockedAt : 60;
+      const ethInvested = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const rewardClaimedETH  = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
+      const tokensAccumulated = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
+      const totalClaimed      = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
+      const elapsed           = Math.min(lockDurSecs, Math.max(0, now - lockedAt));
+      const rewardTotalETH    = ethInvested * 0.30;
+      const earnedETH         = lockDurSecs > 0 ? rewardTotalETH * elapsed / lockDurSecs : 0;
+      const pendingETH        = Math.max(0, earnedETH - rewardClaimedETH);
+      const liveUSDT_lock     = earnedETH * USDT_PER_ETH;
+      const claimUSDT_lock    = pendingETH * USDT_PER_ETH;
 
-      const claimedPct = NUM_SLOTS > 0 ? (slotsClaimed / NUM_SLOTS) * 100 : 0;
-      const activePct  = NUM_SLOTS > 0 ? (Math.max(0, slotsComplete - slotsClaimed) / NUM_SLOTS) * 100 : 0;
-      const slotDots = `<div class="dis-bar-track" style="width:100%;min-width:70px;">
-        <div class="dis-bar-claimed" style="width:${claimedPct.toFixed(2)}%"></div>
-        <div class="dis-bar-active" style="left:${claimedPct.toFixed(2)}%; width:${activePct.toFixed(2)}%"></div>
-      </div>`;
+      // Skip locks with no rewards at all (no earned, no carry, no claimed ever).
+      if (earnedETH === 0 && tokensAccumulated === 0 && totalClaimed === 0) continue;
 
-      const rewardCell = isStakingClaimed
-        ? `<span style="color:#4ade80;">✓ ALL CLAIMED</span>`
-        : newSlots > 0
-          ? `${pendingETH.toFixed(6)} ETH <span style="color:var(--gold);font-size:9px;">(${newSlots} new)</span>`
-          : `<span style="color:var(--muted);">${slotsClaimed > 0 ? slotsClaimed.toLocaleString()+'/'+NUM_SLOTS.toLocaleString()+' claimed' : '—'}</span>`;
+      const claimedPct = rewardTotalETH > 0 ? Math.min(100, rewardClaimedETH / rewardTotalETH * 100) : 0;
+      const pendingPct = rewardTotalETH > 0 ? Math.min(100 - claimedPct, pendingETH / rewardTotalETH * 100) : 0;
+      const progressBar = isRemoved
+        ? `<div style="font-size:9px;color:#f87171;letter-spacing:1px;">LP REMOVED</div>`
+        : `<div class="dis-bar-track" style="width:100%;min-width:70px;">
+            <div class="dis-bar-claimed" style="width:${claimedPct.toFixed(2)}%"></div>
+            <div class="dis-bar-active" style="left:${claimedPct.toFixed(2)}%; width:${pendingPct.toFixed(2)}%"></div>
+          </div>`;
+
+      const progressLabel = isRemoved
+        ? `full period earned`
+        : `${(elapsed / lockDurSecs * 100).toFixed(1)}% of period`;
+      const claimedCell   = totalClaimed > 0
+        ? `<span style="color:#4ade80;">✓ ${totalClaimed.toFixed(4)} ${tokenSymbol} claimed</span>`
+        : '';
+      const statusCell    = claimUSDT_lock > 0
+        ? `<span style="color:var(--gold);">$${claimUSDT_lock.toFixed(6)} USDT</span>`
+        : `<span style="color:var(--muted);">—</span>`;
 
       lockRows += `
         <tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
           <td style="padding:8px 8px;color:var(--muted);font-size:10px;">#${i+1}</td>
-          <td style="padding:8px 8px;color:var(--cream);">${ethInvested.toFixed(4)} ETH</td>
+          <td style="padding:8px 8px;color:var(--cream);">${fmtUSDT(ethInvested,{noEth:true})}<div style="font-size:9px;color:var(--muted);">accrued: $${liveUSDT_lock.toFixed(6)} USDT</div></td>
           <td style="padding:8px 8px;">
-            ${slotDots}
-            <div style="font-size:9px;color:var(--muted);margin-top:3px;">${slotsComplete.toLocaleString()}/${NUM_SLOTS.toLocaleString()} slots</div>
+            ${progressBar}
+            <div style="font-size:9px;color:var(--muted);margin-top:3px;">${progressLabel} · ${claimedCell}</div>
           </td>
-          <td style="padding:8px 8px;text-align:right;color:var(--gold);">${rewardCell}</td>
+          <td style="padding:8px 8px;text-align:right;">${statusCell}</td>
         </tr>`;
-    }
-
-    // Cooldown countdown
-    let cooldownHtml = '';
-    if (cooldownActive) {
-      const secsLeft = nextClaimTime - now;
-      const h = Math.floor(secsLeft / 3600);
-      const m = Math.floor((secsLeft % 3600) / 60);
-      const s = secsLeft % 60;
-      const p = n => String(n).padStart(2, '0');
-      cooldownHtml = `<div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">
-        Next claim in: <span style="color:var(--cream);">${p(h)}:${p(m)}:${p(s)}</span>
-      </div>`;
     }
 
     el.innerHTML = `
       <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
         <div style="color:var(--gold);letter-spacing:1px;font-size:10px;margin-bottom:5px;">HOW STAKING REWARDS WORK</div>
-        <div style="color:var(--muted);line-height:1.75;">Each investment earns <span style="color:var(--cream);">30% of your ETH invested</span> as ${tokenSymbol} tokens at market price. Rewards accrue <span style="color:var(--cream);">slot-by-slot</span> (one 10-second slot at a time, proportional to lock duration). Use the <span style="color:var(--gold);">CLAIM REWARDS</span> button on the investment card to collect available tokens for each position.</div>
+        <div style="color:var(--muted);line-height:1.75;">Rewards accrue at <span style="color:var(--cream);">30% of your invested amount per lock period</span>, every second, capped at the lock period end. Restake to start a new period. When you claim, the accrued USDT value is <span style="color:var(--gold);">converted to ${tokenSymbol} tokens at the current market price</span> and sent to your wallet. Claim any time — no minimum wait.</div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL ACCRUED</div>
-          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${totalAccruedETH.toFixed(6)}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px;">ETH equivalent</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">ACCRUED (USDT)</div>
+          <div style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${totalLiveUSDT > 0 ? '$' + totalLiveUSDT.toFixed(6) : '$0.000000'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">30% of investment · live</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE NOW</div>
-          <div style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${claimableTokens > 0 ? claimableTokens.toFixed(4) : '0'}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${tokenSymbol} tokens</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE (USDT)</div>
+          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${totalClaimableUSDT > 0 ? '$' + totalClaimableUSDT.toFixed(6) : '$0.000000'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">unclaimed · converts to tokens at claim</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE ETH</div>
-          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${claimableETH.toFixed(6)}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px;">ETH value</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">LIFETIME CLAIMED</div>
+          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">${lifetimeClaimed > 0 ? lifetimeClaimed.toFixed(4) : '0'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${tokenSymbol} tokens total</div>
         </div>
       </div>
 
@@ -214,9 +252,9 @@ async function loadRwStaking() {
                  font-size:11px;font-weight:700;letter-spacing:1px;cursor:${canClaim ? 'pointer' : 'not-allowed'};
                  transition:opacity 0.15s;"
           ${canClaim ? '' : 'disabled'}>
-          ${claimableTokens > 0 && !cooldownActive ? 'CLAIM ' + claimableTokens.toFixed(4) + ' ' + tokenSymbol : cooldownActive ? 'COOLDOWN ACTIVE' : 'NOTHING TO CLAIM'}
+          ${canClaim ? 'CLAIM ALL · ' + totalClaimable.toFixed(4) + ' ' + tokenSymbol : 'NOTHING TO CLAIM'}
         </button>
-        ${cooldownHtml}
+        <div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">No cooldown · tokens sent at current market price</div>
       </div>
 
       ${lockRows ? `
@@ -227,8 +265,8 @@ async function loadRwStaking() {
             <tr style="border-bottom:1px solid var(--border);">
               <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">#</th>
               <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">INVESTED</th>
-              <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">SLOTS</th>
-              <th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:400;">REWARD (ETH)</th>
+              <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">PROGRESS / CLAIMED</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:400;">CLAIMABLE</th>
             </tr>
           </thead>
           <tbody>${lockRows}</tbody>

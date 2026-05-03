@@ -1,3 +1,4 @@
+
 function toggleInvDetails(btn) {
   const details = btn.nextElementSibling;
   if (!details) return;
@@ -25,17 +26,52 @@ async function loadInvestments() {
   try {
     const [lpLocks, latestBlock] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
-      provider.getBlock('latest')
+      provider.getBlock('latest').catch(() => null),
     ]);
-    const blockTs = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
-    // On first load (_dashWallNow=0): anchor to blockchain time to avoid JS clock skew on Hardhat.
-    // On reload (e.g., triggered by timer expiry): advance from last calibration by wall-clock elapsed
-    // so locks correctly expire even when Hardhat hasn't mined a new block since the invest tx.
-    const now = (_dashWallNow > 0)
-      ? Math.max(blockTs, Math.floor(_dashBlockNow + (Date.now() / 1000 - _dashWallNow)))
-      : blockTs;
-    _dashBlockNow = now;
-    _dashWallNow  = Date.now() / 1000;
+    // Use blockchain timestamp as the reference "now".  On a Hardhat mainnet fork
+    // block.timestamp can be far behind the wall clock, which makes every fresh lock
+    // appear immediately unlocked (unlockTime < wallNow) and produces absurd staking
+    // reward figures.  We anchor to block.timestamp once and advance it via wall-clock
+    // delta in _dashTickCountdowns (using _blockTimeOffset) so the ticker never stalls.
+    const blockNow = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
+    const wallNow  = Math.floor(Date.now() / 1000);
+
+    // On a Hardhat mainnet fork, block.timestamp is frozen between transactions —
+    // it only advances when a tx is mined.  _maxEffectiveNow is a high-water mark
+    // that we advance by wall-clock elapsed time so expired locks stay expired even
+    // when no new block has been mined.
+    //
+    // Problem: _maxEffectiveNow lives only in memory, so a page reload resets it
+    // and expired locks show as 60 s "LOCKED" again on every login.
+    //
+    // Fix: persist {blockNow, effectiveNow, wallNow} in sessionStorage (cleared on
+    // browser-tab close but survives page reloads / hot reloads).  On the FIRST load
+    // of a fresh session we restore the high-water mark and advance it by wall-clock
+    // elapsed time since it was saved.  If blockNow has advanced (new tx was mined),
+    // the saved entry is stale and we start fresh from the real blockNow.
+    if (_lastLoadWallTime === 0) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem('hordex_eff_time') || 'null');
+        if (saved && saved.blockNow === blockNow) {
+          const elapsed = Math.max(0, wallNow - saved.wallNow);
+          _maxEffectiveNow = Math.max(blockNow, saved.effectiveNow + elapsed);
+          _lastLoadWallTime = wallNow; // mark as restored so the normal path below is a no-op
+        }
+      } catch(_) {}
+    }
+
+    const wallElapsed = _lastLoadWallTime > 0 ? Math.max(0, wallNow - _lastLoadWallTime) : 0;
+    _maxEffectiveNow  = Math.max(blockNow, _maxEffectiveNow + wallElapsed);
+    _lastLoadWallTime = wallNow;
+    _blockTimeOffset  = blockNow - wallNow;
+    const effectiveNow = _maxEffectiveNow;
+    _dashRefNow  = effectiveNow;
+    _dashWallRef = wallNow;
+
+    // Persist for the next page load / session restore
+    try {
+      sessionStorage.setItem('hordex_eff_time', JSON.stringify({ blockNow, effectiveNow, wallNow }));
+    } catch(_) {}
 
     if (!lpLocks.length) {
       el.innerHTML = '<div class="empty-state">No investments yet. Go to the INVEST tab to get started.</div>';
@@ -73,8 +109,8 @@ async function loadInvestments() {
       const unlockTime      = Number(lock.unlockTime);
       const isClaimed       = lock.claimed;
       const isRemoved       = lock.removed || false;
-      const secsLeft        = Math.max(0, unlockTime - now);
-      const isUnlocked      = now >= unlockTime && !isClaimed && !isRemoved;
+      const secsLeft        = Math.max(0, unlockTime - effectiveNow);
+      const isUnlocked      = secsLeft === 0 && !isClaimed && !isRemoved;
       const lockedAt        = lock && lock.lockedAt ? Number(lock.lockedAt) : (unlockTime - 60);
 
       const currentETH  = pool ? _dashComputeLPValue(lpAmount, pool.resETH, pool.totalLPSupply) : 0;
@@ -107,62 +143,65 @@ async function loadInvestments() {
       const lockedAtLabel = lockedAt > 0 ? new Date(lockedAt * 1000).toLocaleString() : '—';
       const unlockLabel   = new Date(unlockTime * 1000).toLocaleString();
 
-      // ── Staking slot data ──
-      const SLOT_DURATION_S   = 10;
-      const NUM_SLOTS         = Math.max(1, Math.floor(lockDurSecs / SLOT_DURATION_S));
-      const rewardEthTotal    = ethInvested * 0.30;
-      const rewardEthPerSlot  = rewardEthTotal / NUM_SLOTS;
-      const stakingPriceEth   = pool ? pool.priceEth : 0;
-      const elapsedStaking    = Math.max(0, now - lockedAt);
-      const slotsNow          = Math.min(Math.floor(elapsedStaking / SLOT_DURATION_S), NUM_SLOTS);
-      const slotProgressNow   = (elapsedStaking % SLOT_DURATION_S) / SLOT_DURATION_S;
-      const tokenSymbol       = td.symbol || 'HORDEX';
-      const slotsClaimed      = lock.stakingTokens ? Number(lock.stakingTokens) : 0;
-      const isStakingClaimed  = lock.stakingClaimed || false;
-      const newSlotsAvail     = Math.max(0, slotsNow - slotsClaimed);
-      const canClaimStaking   = !isRemoved && !isStakingClaimed && newSlotsAvail > 0;
+      // ── Staking reward data ──
+      const rewardTotalETH     = ethInvested * 0.30;
+      const stakingPriceEth    = pool ? pool.priceEth : 0;
+      const lockDurForStaking  = lockDurSecs > 0 ? lockDurSecs : 60;
+      const elapsedStaking     = Math.min(lockDurForStaking, Math.max(0, effectiveNow - lockedAt));
+      const tokenSymbol        = td.symbol || 'HORDEX';
+      const rewardClaimedETH   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
+      const tokensAccumulated  = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
+      const totalTokensClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
 
-      const claimedPct = NUM_SLOTS > 0 ? (slotsClaimed / NUM_SLOTS) * 100 : 0;
-      const activePct  = NUM_SLOTS > 0 ? (Math.max(0, slotsNow - slotsClaimed + slotProgressNow) / NUM_SLOTS) * 100 : 0;
+      // Linear per-second accrual, capped at the lock period.
+      const earnedETH          = lockDurForStaking > 0 ? rewardTotalETH * elapsedStaking / lockDurForStaking : 0;
+      const pendingETH         = Math.max(0, earnedETH - rewardClaimedETH);
+      const perSecUSDT         = (rewardTotalETH * USDT_PER_ETH) / lockDurForStaking;
+      const accumulatedUSDT    = tokensAccumulated * stakingPriceEth * USDT_PER_ETH;
+      const liveUSDTNow        = pendingETH * USDT_PER_ETH + accumulatedUSDT;
+
+      const claimableTokensAtPrice = (stakingPriceEth > 0 ? pendingETH / stakingPriceEth : 0) + tokensAccumulated;
+      const canClaimStaking        = claimableTokensAtPrice > 0;
+
+      // Progress bar: claimed portion + pending (earned but not yet claimed).
+      const claimedPct  = rewardTotalETH > 0 ? Math.min(100, rewardClaimedETH / rewardTotalETH * 100) : 0;
+      const pendingPct  = rewardTotalETH > 0 ? Math.min(100 - claimedPct, pendingETH / rewardTotalETH * 100) : 0;
       const initialSlotHtml = `<div class="dis-bar-track">
         <div class="dis-bar-claimed" style="width:${claimedPct.toFixed(3)}%"></div>
-        <div class="dis-bar-active" style="left:${claimedPct.toFixed(3)}%; width:${activePct.toFixed(3)}%"></div>
+        <div class="dis-bar-active" style="left:${claimedPct.toFixed(3)}%; width:${pendingPct.toFixed(3)}%"></div>
       </div>`;
-      const totalEarnedTokens = stakingPriceEth > 0 ? (rewardEthPerSlot * slotsNow) / stakingPriceEth : 0;
-      const initialRewardStr  = stakingPriceEth > 0
-        ? totalEarnedTokens.toFixed(4) + ' ' + tokenSymbol
-        : '— ' + tokenSymbol;
+      const initialRewardStr = liveUSDTNow > 0
+        ? '$' + liveUSDTNow.toFixed(6) + ' USDT'
+        : '— USDT';
 
       let stakingFooterHtml = '';
-      if (isStakingClaimed) {
-        stakingFooterHtml = `<div class="dis-staking-claimed">✓ All staking rewards claimed</div>`;
-      } else if (canClaimStaking) {
-        const claimableETH    = rewardEthPerSlot * newSlotsAvail;
-        const claimableTokens = stakingPriceEth > 0 ? claimableETH / stakingPriceEth : 0;
-        const btnLabel = claimableTokens > 0
-          ? 'CLAIM ' + claimableTokens.toFixed(4) + ' ' + tokenSymbol
-          : 'CLAIM REWARDS';
-        stakingFooterHtml = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${i}" onclick="claimStakingRewardForLock(${i})">${btnLabel}</button>`;
+      if (canClaimStaking) {
+        stakingFooterHtml = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${i}" onclick="claimStakingRewardForLock(${i})">CLAIM ${claimableTokensAtPrice.toFixed(4)} ${tokenSymbol}</button>`;
+      } else if (isRemoved) {
+        stakingFooterHtml = `<div class="dis-staking-claimed">LP removed · staking rewards fully claimed</div>`;
+      } else if (elapsedStaking >= lockDurForStaking) {
+        stakingFooterHtml = `<div class="dis-staking-hint">Staking period complete · max reward reached</div>`;
       } else {
-        const hint = slotsClaimed > 0
-          ? `${slotsClaimed}/${NUM_SLOTS} slots claimed · ${NUM_SLOTS - slotsNow} remaining`
-          : `Rewards accrue slot-by-slot · ${NUM_SLOTS - slotsNow} slots remaining`;
+        const hint = liveUSDTNow > 0
+          ? `$${liveUSDTNow.toFixed(6)} USDT earned · $${perSecUSDT.toFixed(6)} USDT/sec`
+          : `Rewards accumulating · $${perSecUSDT.toFixed(6)} USDT/sec`;
         stakingFooterHtml = `<div class="dis-staking-hint">${hint}</div>`;
       }
 
       const stakingRowHtml = `
         <div class="dash-inv-staking"
              data-staking-locked-at="${lockedAt}"
-             data-num-slots="${NUM_SLOTS}"
-             data-last-slots-complete="${slotsNow}"
-             data-reward-eth-per-slot="${rewardEthPerSlot.toFixed(12)}"
+             data-lock-dur-secs="${lockDurForStaking}"
+             data-reward-total-eth="${rewardTotalETH.toFixed(12)}"
+             data-reward-claimed-eth="${rewardClaimedETH.toFixed(12)}"
              data-price-eth="${stakingPriceEth.toFixed(12)}"
              data-token-symbol="${tokenSymbol}"
-             data-slots-claimed="${slotsClaimed}"
-             data-staking-claimed="${isStakingClaimed}"
-             data-inv-index="${i}">
+             data-token-addr="${lock.token}"
+             data-inv-index="${i}"
+             data-tokens-accumulated="${tokensAccumulated.toFixed(18)}"
+             data-per-sec-usdt="${perSecUSDT.toFixed(12)}">
           <div class="dis-staking-header">
-            <span class="dis-sl-label">STAKING REWARD · 30% · ${NUM_SLOTS.toLocaleString()} × ${SLOT_DURATION_S}s</span>
+            <span class="dis-sl-label">STAKING REWARD · 30% / ${lockDurForStaking}s · CONTINUOUS</span>
             <span class="dis-sl-reward">${initialRewardStr}</span>
           </div>
           <div class="dis-slots">${initialSlotHtml}</div>
@@ -234,6 +273,7 @@ async function loadInvestments() {
             <div class="did-row"><span class="did-label">LOCK PERIOD</span><span class="did-val">${lockDurLabel}</span></div>
             <div class="did-row"><span class="did-label">LOCKED AT</span><span class="did-val">${lockedAtLabel}</span></div>
             <div class="did-row"><span class="did-label">UNLOCKS AT</span><span class="did-val" style="color:${isUnlocked?'#4ade80':'var(--cream)'};">${unlockLabel}</span></div>
+            <div class="did-row"><span class="did-label">STAKING CLAIMED</span><span class="did-val" style="color:#4ade80;">${totalTokensClaimed > 0 ? totalTokensClaimed.toFixed(4) + ' ' + tokenSymbol : '—'}</span></div>
             ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val"><a href="https://sepolia.etherscan.io/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr.slice(0,10)}…${pool.pairAddr.slice(-6)} ↗</a></span></div>` : ''}
             ${removeLPBtn ? `<div class="did-actions">${removeLPBtn}</div>` : ''}
           </div>
@@ -256,8 +296,9 @@ async function loadInvestments() {
     });
 
     const hasCountdowns = document.querySelectorAll('#investmentsContent [data-unlock-time]').length > 0;
+    // Keep interval alive as long as any non-removed lock exists — rewards accrue continuously.
     const hasActiveStaking = document.querySelectorAll('#investmentsContent .dash-inv-staking').length > 0
-      && lpLocks.some(l => !l.stakingClaimed && !l.removed);
+      && lpLocks.some(l => !l.removed);
     if (hasCountdowns || hasActiveStaking) {
       _invCountdownInterval = setInterval(_dashTickCountdowns, 1000);
     }

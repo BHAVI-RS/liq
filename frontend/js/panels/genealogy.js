@@ -28,7 +28,14 @@ async function loadGenealogy() {
   listEl.innerHTML = '<div class="empty-state">Loading genealogy<span class="ld"><span></span><span></span><span></span></span></div>';
   treeEl.innerHTML = '';
   try {
-    _geneTree = await fetchGeneTree(walletAddress, 1);
+    const [treeData, activeCountRaw, minInvRaw] = await Promise.all([
+      fetchGeneTree(walletAddress, 1),
+      contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
+      contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0))
+    ]);
+    _geneTree = treeData;
+    const activeCount = Number(activeCountRaw);
+    const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
 
     const levels = [];
     function collectLevels(node, depth) {
@@ -43,10 +50,34 @@ async function loadGenealogy() {
 
     const totalReferrals = levels.reduce((s, l) => s + l.length, 0);
 
+    // Eligibility banner: shows which levels the user can currently earn from
+    const maxEligibleLevel = Math.min(activeCount, 10);
+    const nextLevelNeeded  = maxEligibleLevel + 1;
+    const minInvLabel      = minInvETH > 0 ? `(≥ ${fmtUSDT(minInvETH,{noEth:true})} active each)` : '(any active investment)';
+    const eligBannerColor  = maxEligibleLevel > 0 ? 'rgba(74,222,128,0.08)' : 'rgba(248,113,113,0.08)';
+    const eligBorderColor  = maxEligibleLevel > 0 ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)';
+    const eligTextColor    = maxEligibleLevel > 0 ? '#4ade80' : '#f87171';
+
+    let nextLevelHint = '';
+    if (maxEligibleLevel < 10) {
+      nextLevelHint = `<div style="margin-top:5px;font-size:10px;color:var(--muted);">Need <span style="color:var(--cream);">${nextLevelNeeded} active direct referral${nextLevelNeeded !== 1 ? 's' : ''}</span> to unlock Level ${nextLevelNeeded} commission ${minInvLabel}.</div>`;
+    }
+
+    const eligBanner = `
+      <div style="background:${eligBannerColor};border:1px solid ${eligBorderColor};border-radius:6px;padding:11px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
+        <div style="color:${eligTextColor};letter-spacing:1px;font-size:10px;margin-bottom:4px;">COMMISSION ELIGIBILITY</div>
+        <div style="color:var(--cream);">
+          ${activeCount} active direct referral${activeCount !== 1 ? 's' : ''} → earning up to
+          <span style="color:${eligTextColor};font-weight:700;">Level ${maxEligibleLevel > 0 ? maxEligibleLevel : 0} commission</span>
+          ${maxEligibleLevel === 10 ? '<span style="color:var(--gold);"> · MAX</span>' : ''}
+        </div>
+        ${nextLevelHint}
+      </div>`;
+
     if (totalReferrals === 0) {
-      listEl.innerHTML = '<div class="empty-state">No referrals yet. Share your referral link to grow your network.</div>';
+      listEl.innerHTML = eligBanner + '<div class="empty-state">No referrals yet. Share your referral link to grow your network.</div>';
     } else {
-      listEl.innerHTML = '';
+      listEl.innerHTML = eligBanner;
 
       const allAddrs   = [...new Set(levels.flat())];
       const investedMap = new Map();
@@ -62,14 +93,20 @@ async function loadGenealogy() {
         const level      = idx + 1;
         const rate       = COMMISSION_RATES[idx] !== undefined ? COMMISSION_RATES[idx].toFixed(2) + '%' : '—';
         const levelTotal = addrs.reduce((s, a) => s + (investedMap.get(a) || 0), 0);
+        const eligible   = activeCount >= level;
+        const eligStyle  = eligible
+          ? 'color:#4ade80;font-size:10px;font-family:var(--font-mono);margin-left:8px;'
+          : 'color:#f87171;font-size:10px;font-family:var(--font-mono);margin-left:8px;';
+        const eligLabel  = eligible ? '✓ ELIGIBLE' : `✗ NEED ${level} ACTIVE REFERRAL${level !== 1 ? 'S' : ''}`;
         const block = document.createElement('div');
         block.className = 'gene-level-block';
         block.innerHTML = `
           <div class="gene-level-header">
             <span class="gene-level-badge">LEVEL ${level}</span>
             <span class="gene-commission-rate">${rate} commission</span>
-            <span class="gene-count-pill">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
-            <span style="margin-left:auto;font-size:10px;color:var(--gold);font-family:var(--font-mono);">${fmtUSDT(levelTotal,{noEth:true})} invested</span>
+            <span style="${eligStyle}">${eligLabel}</span>
+            <span class="gene-count-pill" style="margin-left:auto;">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
+            <span style="margin-left:8px;font-size:10px;color:var(--gold);font-family:var(--font-mono);">${fmtUSDT(levelTotal,{noEth:true})} invested</span>
           </div>
           ${addrs.map(a => {
             const inv = investedMap.get(a) || 0;

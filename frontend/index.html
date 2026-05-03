@@ -263,6 +263,21 @@
         </div>
         <div style="font-size:13px;color:var(--cream);margin-bottom:6px;" id="newUserPromptText">Register under this referrer?</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.7;">You will earn commission for your referrer on your investments.<br>You can also earn commissions by sharing your own link after registration.</div>
+
+        <!-- shown only when no ?ref= link is present -->
+        <div id="customReferrerSection" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:8px;">KNOW SOMEONE ON THE PLATFORM? ENTER THEIR ADDRESS</div>
+          <div style="display:flex;gap:8px;">
+            <input id="customReferrerInput" type="text" placeholder="0x…"
+              style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:9px 12px;font-family:var(--font-mono);font-size:11px;color:var(--cream);outline:none;"
+              oninput="onCustomReferrerInput(this.value)" />
+            <button onclick="applyCustomReferrer()"
+              style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:9px 14px;font-family:var(--font-mono);font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;letter-spacing:.05em;">
+              USE
+            </button>
+          </div>
+          <div id="customReferrerStatus" style="font-size:10px;margin-top:5px;font-family:var(--font-mono);min-height:14px;color:var(--muted);"></div>
+        </div>
       </div>
       <button class="landing-btn" id="newUserRegisterBtn" onclick="registerNewUser()">
         <span id="newUserBtnLabel">YES, REGISTER ME</span>
@@ -298,7 +313,7 @@
       <span class="mobile-nav-icon">◈</span><span class="nav-label"> INVEST</span>
     </button>
     <button class="mobile-nav-item" data-tab="pool" onclick="mobileNavSwitch('pool')">
-      <span class="mobile-nav-icon">◉</span><span class="nav-label"> POOL</span>
+      <span class="mobile-nav-icon">◉</span><span class="nav-label"> SWAP</span>
     </button>
     <button class="mobile-nav-item" data-tab="genealogy" onclick="mobileNavSwitch('genealogy')">
       <span class="mobile-nav-icon">⬡</span><span class="nav-label"> GENEALOGY</span>
@@ -394,17 +409,19 @@
     </div>
 
     <!-- STATS GRID -->
-    <div id="dashStatsRow" style="display:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(175px,100%),1fr));gap:12px;">
+    <div id="dashStatsRow" style="display:none;">
+      <!-- Row 1 -->
+      <div class="dash-stat-card" id="dashCard-pnl" data-graph="pnl" onclick="openStatGraph('pnl')" title="Click to view chart">
+        <div class="dash-stat-label">OVERALL P/L <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashPnL" class="dash-stat-val">—</div>
+        <div id="dashPnLPct" class="dash-stat-sub"></div>
+      </div>
       <div class="dash-stat-card" id="dashCard-invested" data-graph="invested" onclick="openStatGraph('invested')" title="Click to view chart">
         <div class="dash-stat-label">TOTAL INVESTED <span class="dash-stat-chart-hint">↗</span></div>
         <div id="dashTotalInvested" class="dash-stat-val" style="color:var(--gold);">—</div>
         <div id="dashTotalInvestedUSD" class="dash-stat-sub"></div>
       </div>
-      <div class="dash-stat-card" id="dashCard-lpvalue" data-graph="lpvalue" onclick="openStatGraph('lpvalue')" title="Click to view chart">
-        <div class="dash-stat-label">CURRENT LP VALUE <span class="dash-stat-chart-hint">↗</span></div>
-        <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
-        <div id="dashTotalValueUSD" class="dash-stat-sub"></div>
-      </div>
+      <!-- Row 2 -->
       <div class="dash-stat-card" id="dashCard-referral" data-graph="referral" onclick="openStatGraph('referral')" title="Click to view chart">
         <div class="dash-stat-label">REFERRAL EARNINGS <span class="dash-stat-chart-hint">↗</span></div>
         <div id="dashRefEarnings" class="dash-stat-val" style="color:#4ade80;">—</div>
@@ -415,13 +432,15 @@
         <div id="dashStakingRewards" class="dash-stat-val" style="color:#a78bfa;">—</div>
         <div class="dash-stat-sub">no active staking</div>
       </div>
-      <div class="dash-stat-card" id="dashCard-pnl" data-graph="pnl" onclick="openStatGraph('pnl')" title="Click to view chart">
-        <div class="dash-stat-label">OVERALL P/L <span class="dash-stat-chart-hint">↗</span></div>
-        <div id="dashPnL" class="dash-stat-val">—</div>
-        <div id="dashPnLPct" class="dash-stat-sub"></div>
+      <!-- Row 3 -->
+      <div class="dash-stat-card" id="dashCard-lpvalue" data-graph="lpvalue" onclick="openStatGraph('lpvalue')" title="Click to view chart">
+        <div class="dash-stat-label">LP POSITIONS <span class="dash-stat-chart-hint">↗</span></div>
+        <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
+        <div id="dashTotalValueUSD" class="dash-stat-sub"></div>
+        <div id="dashLPTokens" class="dash-stat-sub" style="margin-top:2px;color:var(--muted);"></div>
       </div>
-      <div class="dash-stat-card" id="dashCard-locks" data-graph="locks" onclick="openStatGraph('locks')" title="Click to view chart">
-        <div class="dash-stat-label">ACTIVE LOCKS <span class="dash-stat-chart-hint">↗</span></div>
+      <div class="dash-stat-card" id="dashCard-locks" style="cursor:default;">
+        <div class="dash-stat-label">ACTIVE LOCKS</div>
         <div id="dashActiveLocks" class="dash-stat-val" style="color:var(--cream);">—</div>
         <div class="dash-stat-sub">positions</div>
       </div>
@@ -535,7 +554,7 @@
 
     <!-- Token list -->
     <div class="card">
-      <div class="card-title">LIQUIDITY POOLS</div>
+      <div class="card-title">SWAP</div>
       <div id="poolTokenList" class="token-list">
         <div class="empty-state">Loading pools<span class='ld'><span></span><span></span><span></span></span></div>
       </div>
@@ -684,7 +703,7 @@
       <!-- Sub-tab bar -->
       <div style="display:flex;align-items:center;gap:0;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;">
         <button id="histTab-invest" class="hist-subtab active" onclick="switchHistoryTab('invest')">INVESTMENTS</button>
-        <button id="histTab-pool"   class="hist-subtab"        onclick="switchHistoryTab('pool')">POOL ACTIVITY</button>
+        <button id="histTab-pool"   class="hist-subtab"        onclick="switchHistoryTab('pool')">SWAP ACTIVITY</button>
         <button class="btn btn-secondary" id="histRefreshBtn" onclick="_refreshHistoryTab()"
           style="width:auto;padding:6px 14px;font-size:11px;margin-left:auto;margin-bottom:6px;">↻ REFRESH</button>
       </div>

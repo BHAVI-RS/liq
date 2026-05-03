@@ -561,6 +561,11 @@ input[type="email"]::placeholder { color: var(--muted); }
   40%         { opacity:1;  transform:translateY(-4px); }
 }
 
+/* ── MOBILE: shrink refresh / secondary buttons ── */
+@media (max-width: 640px) {
+  .btn-secondary { padding: 8px 14px !important; font-size: 11px !important; }
+}
+
 /* Pool bidirectional swap divider */
 .pool-swap-sep {
   display: flex;

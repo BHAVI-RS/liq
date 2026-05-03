@@ -18,6 +18,15 @@
   background: #132038;
 }
 
+/* Stats grid — always 2 columns */
+#dashStatsRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+
 /* Graph panel inside stats grid */
 #dashGraphPanel {
   grid-column: 1 / -1;

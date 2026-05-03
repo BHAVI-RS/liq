@@ -17,6 +17,7 @@ module.exports = {
   networks: {
     hardhat: {
       chainId: 31337,
+      initialBaseFeePerGas: 0,
       forking: {
         url: MAINNET_RPC,
         // optional: pin a block for reproducible tests

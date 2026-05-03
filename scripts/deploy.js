@@ -45,6 +45,24 @@ async function main() {
   await tx1.wait();
   console.log("  Token transfer confirmed ✓");
 
+  // ── Register HordexToken in the platform ──
+  console.log("\nRegistering HordexToken in the platform...");
+  const tx2 = await liquidity.addToken(tokenAddress, "Hordex Token", "HORDEX");
+  await tx2.wait();
+  console.log("  addToken confirmed ✓");
+
+  // ── Seed the Uniswap pool: 100,000 USDT (100 ETH) + 100,000 HORDEX ──
+  // Platform rate: 1 ETH = 1,000 USDT → 100,000 USDT = 100 ETH
+  // Ratio: 100 ETH : 100,000 HORDEX → 1 HORDEX = 0.001 ETH = 1 USDT
+  const seedETH    = hre.ethers.parseEther("100");
+  const seedTokens = hre.ethers.parseEther("100000");
+  console.log("\nSeeding Uniswap pool with 100 ETH + 100,000 HORDEX...");
+  const tx3 = await liquidity.seedPool(tokenAddress, seedTokens, { value: seedETH });
+  await tx3.wait();
+  console.log("  seedPool confirmed ✓");
+  console.log("  Pool: 100 ETH ($100,000 USDT) + 100,000 HORDEX");
+  console.log("  Initial price: 1 HORDEX = 0.001 ETH = $1.00 USDT");
+
   // ── Auto-update contract-config.js ──
   const artifact = hre.artifacts.readArtifactSync("Liquidity");
   const configPath = path.join(__dirname, "..", "contract-config.js");
@@ -72,6 +90,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   console.log("Router:     ", UNI_ROUTER);
   console.log("Factory:    ", UNI_FACTORY);
   console.log("WETH:       ", UNI_WETH);
+  console.log("Pool seeded: 100 ETH + 100,000 HORDEX (1 HORDEX = $1.00 USDT)");
   console.log("────────────────────────────────────────────────\n");
 }
 

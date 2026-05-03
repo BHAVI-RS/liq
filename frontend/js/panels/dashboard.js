@@ -2,9 +2,15 @@
 // var (not let) so these are window-level globals visible across script tags
 var _dashCountdownInterval = null;
 var _invCountdownInterval  = null;
-// Blockchain clock correction: captured at load time in loadInvestments()
-var _dashBlockNow  = 0;   // block.timestamp at last load
-var _dashWallNow   = 0;   // Date.now()/1000 at same moment
+var _dashRefNow    = 0;
+var _dashWallRef   = 0;
+// Offset between blockchain time and wall clock (can differ on Hardhat mainnet forks).
+var _blockTimeOffset = 0;
+// High-water mark for effective blockchain time — advances by wall-clock elapsed time
+// between loadInvestments() calls so the timer never regresses even when the chain
+// hasn't mined a new block (common on Hardhat forks in automine mode).
+var _maxEffectiveNow  = 0;
+var _lastLoadWallTime = 0;
 
 function _dashFmtCountdown(secsLeft) {
   const s = Math.floor(secsLeft);
@@ -23,10 +29,10 @@ function _dashFmtCompact(cd) {
 }
 
 function _dashTickCountdowns() {
-  // Use blockchain-corrected now to match contract clock (avoids Hardhat skew)
-  const nowSec = _dashBlockNow > 0
-    ? Math.floor(_dashBlockNow + (Date.now() / 1000 - _dashWallNow))
-    : Math.floor(Date.now() / 1000);
+  // Advance from the effective blockchain time recorded at last load, not from wall
+  // clock + offset — this stays correct even after multiple loadInvestments() calls
+  // where _blockTimeOffset shifts but _dashRefNow/_dashWallRef are anchored together.
+  const nowSec = _dashRefNow + Math.floor(Date.now() / 1000 - _dashWallRef);
 
   let anyExpired = false;
 
@@ -45,88 +51,67 @@ function _dashTickCountdowns() {
     }
   });
 
-  // ── Staking slot progress ──
-  const SLOT_DURATION  = 10; // seconds
+  // ── Staking reward progress (linear per-second) ──
   document.querySelectorAll('#investmentsContent .dash-inv-staking').forEach(el => {
     const lockedAt         = Number(el.dataset.stakingLockedAt);
-    const rewardEthPerSlot = parseFloat(el.dataset.rewardEthPerSlot || '0');
+    const lockDurSecs      = Number(el.dataset.lockDurSecs || '60');
+    const rewardTotalEth   = parseFloat(el.dataset.rewardTotalEth || '0');
+    const rewardClaimedEth = parseFloat(el.dataset.rewardClaimedEth || '0');
     const priceEth         = parseFloat(el.dataset.priceEth || '0');
     const tokenSymbol      = el.dataset.tokenSymbol || 'HORDEX';
-    const NUM_SLOTS        = Number(el.dataset.numSlots || '6');
+    const invIndex         = Number(el.dataset.invIndex || '0');
+    const tokensAccumulated = parseFloat(el.dataset.tokensAccumulated || '0');
+    const perSecUSDT       = parseFloat(el.dataset.perSecUsdt || '0');
     if (!lockedAt) return;
 
-    const elapsed        = Math.max(0, nowSec - lockedAt);
-    const slotsComplete  = Math.min(Math.floor(elapsed / SLOT_DURATION), NUM_SLOTS);
-    const slotProgress   = (elapsed % SLOT_DURATION) / SLOT_DURATION; // 0–1 into current slot
+    const elapsed    = Math.min(lockDurSecs, Math.max(0, nowSec - lockedAt));
+    const earnedETH  = lockDurSecs > 0 ? rewardTotalEth * elapsed / lockDurSecs : 0;
+    const pendingETH = Math.max(0, earnedETH - rewardClaimedEth);
 
-    const slotsClaimed     = Number(el.dataset.slotsClaimed || '0');
-    const isStakingClaimed = el.dataset.stakingClaimed === 'true';
-    const invIndex         = Number(el.dataset.invIndex || '0');
-
-    // Detect new slot completion → trigger smoke effect on reward label
-    const lastSlotsComplete = Number(el.dataset.lastSlotsComplete || '-1');
-    if (lastSlotsComplete >= 0 && slotsComplete > lastSlotsComplete) {
-      const rewardEl = el.querySelector('.dis-sl-reward');
-      if (rewardEl) {
-        rewardEl.classList.remove('dis-sl-reward-smoke');
-        void rewardEl.offsetWidth; // force reflow to restart animation
-        rewardEl.classList.add('dis-sl-reward-smoke');
-        setTimeout(() => rewardEl.classList.remove('dis-sl-reward-smoke'), 800);
-      }
-    }
-    el.dataset.lastSlotsComplete = slotsComplete;
-
-    // Update single continuous progress bar
+    // Progress bar: claimed portion + pending (earned but not yet claimed).
+    const claimedPct = rewardTotalEth > 0 ? Math.min(100, rewardClaimedEth / rewardTotalEth * 100) : 0;
+    const pendingPct = rewardTotalEth > 0 ? Math.min(100 - claimedPct, pendingETH / rewardTotalEth * 100) : 0;
     const slotsEl = el.querySelector('.dis-slots');
     if (slotsEl) {
-      const claimedPct = NUM_SLOTS > 0 ? (slotsClaimed / NUM_SLOTS) * 100 : 0;
-      const activePct  = NUM_SLOTS > 0 ? (Math.max(0, slotsComplete - slotsClaimed + slotProgress) / NUM_SLOTS) * 100 : 0;
       let track = slotsEl.querySelector('.dis-bar-track');
       if (!track) {
-        slotsEl.innerHTML = `<div class="dis-bar-track">
-          <div class="dis-bar-claimed"></div>
-          <div class="dis-bar-active"></div>
-        </div>`;
+        slotsEl.innerHTML = `<div class="dis-bar-track"><div class="dis-bar-claimed"></div><div class="dis-bar-active"></div></div>`;
         track = slotsEl.querySelector('.dis-bar-track');
       }
-      const claimed = track.querySelector('.dis-bar-claimed');
-      const active  = track.querySelector('.dis-bar-active');
-      if (claimed) claimed.style.width = claimedPct.toFixed(3) + '%';
-      if (active)  { active.style.left = claimedPct.toFixed(3) + '%'; active.style.width = activePct.toFixed(3) + '%'; }
+      const claimedBar = track.querySelector('.dis-bar-claimed');
+      const activeBar  = track.querySelector('.dis-bar-active');
+      if (claimedBar) claimedBar.style.width = claimedPct.toFixed(3) + '%';
+      if (activeBar)  { activeBar.style.left = claimedPct.toFixed(3) + '%'; activeBar.style.width = pendingPct.toFixed(3) + '%'; }
     }
 
-    // Update reward amount
+    // Reward label.
+    const accumulatedUSDT = tokensAccumulated * priceEth * USDT_PER_ETH;
+    const liveUSDT = pendingETH * USDT_PER_ETH + accumulatedUSDT;
     const rewardEl = el.querySelector('.dis-sl-reward');
     if (rewardEl) {
-      const rewardETH    = rewardEthPerSlot * slotsComplete;
-      const rewardTokens = priceEth > 0 ? rewardETH / priceEth : 0;
-      rewardEl.textContent = priceEth > 0
-        ? rewardTokens.toFixed(4) + ' ' + tokenSymbol
-        : '— ' + tokenSymbol;
+      rewardEl.textContent = perSecUSDT > 0 || accumulatedUSDT > 0
+        ? '$' + liveUSDT.toFixed(6) + ' USDT'
+        : '— USDT';
     }
 
-    // Update claim footer when new slots become available
-    const footerEl = el.querySelector('.dis-staking-footer');
-    if (footerEl && !isStakingClaimed) {
-      const newSlots  = Math.max(0, slotsComplete - slotsClaimed);
-      const canClaim  = newSlots > 0;
-      const hasBtn    = !!footerEl.querySelector('.inv-btn-claim-staking');
+    // Claim footer.
+    const claimTokens = (priceEth > 0 ? pendingETH / priceEth : 0) + tokensAccumulated;
+    const canClaim    = claimTokens > 0;
+    const footerEl    = el.querySelector('.dis-staking-footer');
+    if (footerEl) {
+      const hasBtn = !!footerEl.querySelector('.inv-btn-claim-staking');
       if (canClaim && !hasBtn) {
-        const claimableETH    = rewardEthPerSlot * newSlots;
-        const claimableTokens = priceEth > 0 ? claimableETH / priceEth : 0;
-        const btnLabel = claimableTokens > 0
-          ? 'CLAIM ' + claimableTokens.toFixed(4) + ' ' + tokenSymbol
-          : 'CLAIM REWARDS';
-        footerEl.innerHTML = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${invIndex}" onclick="claimStakingRewardForLock(${invIndex})">${btnLabel}</button>`;
+        footerEl.innerHTML = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${invIndex}" onclick="claimStakingRewardForLock(${invIndex})">CLAIM ${claimTokens.toFixed(4)} ${tokenSymbol}</button>`;
       } else if (canClaim && hasBtn) {
         const btn = footerEl.querySelector('.inv-btn-claim-staking');
-        if (btn && !btn.disabled) {
-          const claimableETH    = rewardEthPerSlot * newSlots;
-          const claimableTokens = priceEth > 0 ? claimableETH / priceEth : 0;
-          btn.textContent = claimableTokens > 0
-            ? 'CLAIM ' + claimableTokens.toFixed(4) + ' ' + tokenSymbol
-            : 'CLAIM REWARDS';
-        }
+        if (btn && !btn.disabled) btn.textContent = 'CLAIM ' + claimTokens.toFixed(4) + ' ' + tokenSymbol;
+      } else if (!canClaim && hasBtn) {
+        const hint = elapsed >= lockDurSecs
+          ? `Staking period complete · max reward reached`
+          : liveUSDT > 0
+            ? `$${liveUSDT.toFixed(6)} USDT earned · $${perSecUSDT.toFixed(6)} USDT/sec`
+            : `Rewards accumulating · $${perSecUSDT.toFixed(6)} USDT/sec`;
+        footerEl.innerHTML = `<div class="dis-staking-hint">${hint}</div>`;
       }
     }
   });
@@ -213,12 +198,13 @@ function dismissFeaturedBanner() {
 
 // ── STAT LINE GRAPH ──
 
-let _graphCache   = null;
-let _graphCleanup = null;
+let _graphCache        = null;
+let _graphCleanup      = null;
+let _graphPendingTimer = null;
 
 const GRAPH_OPTS = {
   invested: { label: 'TOTAL INVESTED',    unit: 'ETH', color: '#c9a84c', yLabel: 'ETH Invested' },
-  lpvalue:  { label: 'CURRENT LP VALUE',  unit: 'ETH', color: '#e2e8f0', yLabel: 'ETH (at current price)' },
+  lpvalue:  { label: 'LP POSITIONS',       unit: 'ETH', color: '#e2e8f0', yLabel: 'ETH (at current price)' },
   referral: { label: 'REFERRAL EARNINGS', unit: 'ETH', color: '#4ade80', yLabel: 'ETH Earned' },
   staking:  { label: 'STAKING REWARDS',   unit: 'ETH', color: '#a78bfa', yLabel: 'ETH value of token rewards' },
   pnl:      { label: 'OVERALL P/L',       unit: 'ETH', color: '#60a5fa', yLabel: 'ETH P/L' },
@@ -561,6 +547,8 @@ drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, p
 };
 
 function openStatGraph(type) {
+  if (type === 'locks') return;
+
   const panel = document.getElementById('dashGraphPanel');
 
   if (panel.dataset.type === type && panel.style.display !== 'none') {
@@ -577,8 +565,10 @@ function openStatGraph(type) {
   const opts = GRAPH_OPTS[type];
   document.getElementById('dashGraphTitle').textContent = opts.label + ' OVER TIME';
   document.getElementById('dashGraphSub').textContent   = opts.yLabel + '  ·  X-axis = time since registration';
-  panel.dataset.type  = type;
-  panel.style.display = '';
+  panel.dataset.type     = type;
+  panel.style.transition = 'none';
+  panel.style.opacity    = '0';
+  panel.style.display    = '';
 
   const series  = buildSeries(type, _graphCache);
   const canvas  = document.getElementById('dashGraphCanvas');
@@ -609,11 +599,20 @@ function openStatGraph(type) {
       }
     });
   }
+
+  // Trigger visible 0.5s fade-in after browser paints the opacity:0 state
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    panel.style.transition = 'opacity 0.5s ease';
+    panel.style.opacity    = '1';
+  }));
 }
 
 function closeStatGraph() {
-  document.getElementById('dashGraphPanel').style.display  = 'none';
-  document.getElementById('dashGraphPanel').dataset.type   = '';
+  const panel = document.getElementById('dashGraphPanel');
+  panel.style.transition = '';
+  panel.style.opacity    = '';
+  panel.style.display    = 'none';
+  panel.dataset.type     = '';
   document.querySelectorAll('.dash-stat-card').forEach(c => c.classList.remove('active-graph'));
   if (_graphCleanup) { _graphCleanup(); _graphCleanup = null; }
 }
@@ -634,7 +633,7 @@ async function loadDashboard() {
     document.getElementById('dashRefLink').value = refBase + '?ref=' + walletAddress;
     document.getElementById('dashRefCard').style.display = '';
   }
-  document.getElementById('dashStatsRow').style.display = '';
+  document.getElementById('dashStatsRow').style.display = 'grid';
 
   try {
     const [lpLocks, commStats] = await Promise.all([
@@ -651,6 +650,7 @@ async function loadDashboard() {
     let totalInvestedETH = 0;
     let totalCurrentETH  = 0;
     let activeLocks      = 0;
+    let totalLPTokens    = 0;
 
     if (lpLocks.length) {
       const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
@@ -662,7 +662,10 @@ async function loadDashboard() {
 
       for (const lock of lpLocks) {
         totalInvestedETH += parseFloat(ethers.utils.formatEther(lock.ethInvested));
-        if (!lock.claimed && !lock.removed) activeLocks++;
+        if (!lock.claimed && !lock.removed) {
+          activeLocks++;
+          totalLPTokens += parseFloat(ethers.utils.formatEther(lock.lpAmount));
+        }
         const pool = poolCache.get(lock.token.toLowerCase());
         if (pool && !lock.removed) totalCurrentETH += _dashComputeLPValue(lock.lpAmount, pool.resETH, pool.totalLPSupply);
       }
@@ -677,6 +680,8 @@ async function loadDashboard() {
     document.getElementById('dashTotalInvestedUSD').innerHTML  = '';
     document.getElementById('dashTotalValue').innerHTML        = totalCurrentETH > 0 ? fmtUSDT(totalCurrentETH) : '—';
     document.getElementById('dashTotalValueUSD').innerHTML     = '';
+    const lpTokensEl = document.getElementById('dashLPTokens');
+    if (lpTokensEl) lpTokensEl.textContent = totalLPTokens > 0 ? totalLPTokens.toFixed(6) + ' LP' : '';
     document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH);
     document.getElementById('dashRefEarningsUSD').innerHTML    =
       capETH > 0
