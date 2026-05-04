@@ -76,7 +76,7 @@ function updateInvestBreakdown(totalEth, totalUsdt) {
   const B     = totalEth - halfA; const BU   = usdt - halfAU;
 
   function fmt(eth, u) {
-    return `${u.toLocaleString('en-US', {maximumFractionDigits:2})} USDT <span style="color:var(--muted);font-size:10px;">(${eth.toFixed(6)} ETH)</span>`;
+    return `${u.toLocaleString('en-US', {maximumFractionDigits:2})} USDT`;
   }
   document.getElementById('brkA').innerHTML   = fmt(halfA, halfAU);
   document.getElementById('brkA60').innerHTML = fmt(A60,   A60U);

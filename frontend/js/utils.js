@@ -11,16 +11,12 @@ function ethToUSDT(ethFloat) {
   return ethFloat * USDT_PER_ETH;
 }
 
-// Primary display: "1,000.00 USDT" with ETH shown smaller alongside.
-// opts.noEth  = true → show USDT only
-// opts.sign   = true → prepend + or - sign
+// opts.sign = true → prepend + or - sign
 function fmtUSDT(ethFloat, opts = {}) {
   const usdt = ethToUSDT(ethFloat);
   const sign = opts.sign ? (ethFloat >= 0 ? '+' : '') : '';
   const usdtStr = sign + usdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (opts.noEth) return `${usdtStr} USDT`;
-  const ethStr = Math.abs(ethFloat).toFixed(4);
-  return `${usdtStr} USDT <span style="color:var(--muted);font-size:0.82em;">(${opts.sign && ethFloat >= 0 ? '+' : opts.sign && ethFloat < 0 ? '-' : ''}${ethStr} ETH)</span>`;
+  return `${usdtStr} USDT`;
 }
 
 // ── COMMISSION RATES ──

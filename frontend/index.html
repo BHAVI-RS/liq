@@ -383,6 +383,10 @@
   <!-- DASHBOARD PANEL -->
   <div id="panel-dashboard" class="panel active">
 
+    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+      <button class="btn btn-secondary" onclick="loadDashboard()" style="width:auto;padding:10px 20px;">↻ REFRESH</button>
+    </div>
+
     <!-- NEW LAUNCH NOTIFICATION BANNER -->
     <div id="dashFeaturedBanner" style="display:none;position:relative;background:#c9a84c;border-radius:8px;padding:11px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <span style="background:#22c55e;color:#fff;font-size:9px;letter-spacing:2px;padding:3px 10px;border-radius:4px;font-family:var(--font-mono);flex-shrink:0;font-weight:600;">FEATURED</span>
@@ -416,31 +420,31 @@
         <div id="dashPnL" class="dash-stat-val">—</div>
         <div id="dashPnLPct" class="dash-stat-sub"></div>
       </div>
-      <div class="dash-stat-card" id="dashCard-invested" data-graph="invested" onclick="openStatGraph('invested')" title="Click to view chart">
-        <div class="dash-stat-label">TOTAL INVESTED <span class="dash-stat-chart-hint">↗</span></div>
+      <div class="dash-stat-card" id="dashCard-invested" style="cursor:default;">
+        <div class="dash-stat-label">TOTAL INVESTED</div>
         <div id="dashTotalInvested" class="dash-stat-val" style="color:var(--gold);">—</div>
         <div id="dashTotalInvestedUSD" class="dash-stat-sub"></div>
       </div>
       <!-- Row 2 -->
-      <div class="dash-stat-card" id="dashCard-referral" data-graph="referral" onclick="openStatGraph('referral')" title="Click to view chart">
-        <div class="dash-stat-label">REFERRAL EARNINGS <span class="dash-stat-chart-hint">↗</span></div>
+      <div class="dash-stat-card" id="dashCard-referral" onclick="navToRewards('referral')" title="Click to view referral earnings">
+        <div class="dash-stat-label">REFERRAL EARNINGS <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashRefEarnings" class="dash-stat-val" style="color:#4ade80;">—</div>
         <div id="dashRefEarningsUSD" class="dash-stat-sub"></div>
       </div>
-      <div class="dash-stat-card" id="dashCard-staking" data-graph="staking" onclick="openStatGraph('staking')" title="Click to view chart">
-        <div class="dash-stat-label">STAKING REWARDS <span class="dash-stat-chart-hint">↗</span></div>
+      <div class="dash-stat-card" id="dashCard-staking" onclick="navToRewards('staking')" title="Click to view staking rewards">
+        <div class="dash-stat-label">STAKING REWARDS <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashStakingRewards" class="dash-stat-val" style="color:#a78bfa;">—</div>
         <div class="dash-stat-sub">no active staking</div>
       </div>
       <!-- Row 3 -->
-      <div class="dash-stat-card" id="dashCard-lpvalue" data-graph="lpvalue" onclick="openStatGraph('lpvalue')" title="Click to view chart">
-        <div class="dash-stat-label">LP POSITIONS <span class="dash-stat-chart-hint">↗</span></div>
+      <div class="dash-stat-card" id="dashCard-lpvalue" style="cursor:default;">
+        <div class="dash-stat-label">LP POSITIONS</div>
         <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
         <div id="dashTotalValueUSD" class="dash-stat-sub"></div>
         <div id="dashLPTokens" class="dash-stat-sub" style="margin-top:2px;color:var(--muted);"></div>
       </div>
-      <div class="dash-stat-card" id="dashCard-locks" style="cursor:default;">
-        <div class="dash-stat-label">ACTIVE LOCKS</div>
+      <div class="dash-stat-card" id="dashCard-locks" onclick="switchTabByName('investments')" title="Click to view active locks">
+        <div class="dash-stat-label">ACTIVE LOCKS <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashActiveLocks" class="dash-stat-val" style="color:var(--cream);">—</div>
         <div class="dash-stat-sub">positions</div>
       </div>
@@ -511,7 +515,7 @@
       <div class="field" style="margin-bottom:0;">
         <label style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
           <span>Investment Package</span>
-          <span style="font-size:10px;color:var(--muted);font-weight:400;">Platform rate: <span style="color:var(--gold);">1,000 USDT = 1 ETH</span></span>
+          <span style="font-size:10px;color:var(--muted);font-weight:400;">All values in <span style="color:var(--gold);">USDT</span></span>
         </label>
 
         <!-- category tabs -->
@@ -528,9 +532,7 @@
         <div id="pkgSummary" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;font-size:12px;font-family:var(--font-mono);margin-bottom:4px;">
           <span style="color:var(--muted);">SELECTED  </span>
           <span id="pkgSummaryUSD" style="color:var(--gold);font-size:15px;font-family:var(--font-display);"></span>
-          <span style="color:var(--muted);"> = </span>
-          <span id="pkgSummaryETH" style="color:var(--cream);"></span>
-          <span style="color:var(--muted);"> ETH</span>
+          <span id="pkgSummaryETH" style="display:none;"></span>
         </div>
       </div>
 
@@ -542,8 +544,8 @@
         <div>Half A — token acquisition: <span id="brkA" style="color:var(--gold)"></span></div>
         <div style="padding-left:16px;">↳ 60% pool buy: <span id="brkA60" style="color:var(--cream)"></span></div>
         <div style="padding-left:16px;">↳ 40% commissions: <span id="brkA40" style="color:var(--cream)"></span></div>
-        <div style="margin-top:6px;">Half B — liquidity ETH: <span id="brkB" style="color:var(--gold)"></span></div>
-        <div style="margin-top:8px;font-size:10px;color:var(--muted);">Excess tokens &amp; unused ETH from the router are returned to the platform.</div>
+        <div style="margin-top:6px;">Half B — liquidity: <span id="brkB" style="color:var(--gold)"></span></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);">Excess tokens &amp; unused funds from the router are returned to the platform.</div>
       </div>
       <button class="btn btn-primary" id="investBtn" onclick="invest()">PROVIDE LIQUIDITY</button>
     </div>
@@ -670,13 +672,13 @@
     </div>
 
     <!-- REFERRAL COMMISSIONS -->
-    <div class="card">
+    <div class="card" id="rwRefCard">
       <div class="card-title">REFERRAL COMMISSIONS</div>
       <div id="rwRefContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
     </div>
 
     <!-- STAKING REWARDS -->
-    <div class="card">
+    <div class="card" id="rwStakingCard">
       <div class="card-title">STAKING REWARDS</div>
       <div id="rwStakingContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
     </div>
@@ -811,7 +813,7 @@
     <div class="card">
       <div class="card-title">ADD LIQUIDITY TO POOL</div>
       <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;line-height:1.6;">
-        Add ETH + tokens to a registered pool. Token amount is auto-calculated from the current pool price. For a new pool, set the initial price manually.
+        Add liquidity to a registered pool. Token amount is auto-calculated from the current pool price. For a new pool, set the initial price manually.
       </div>
 
       <div class="field">
@@ -834,7 +836,7 @@
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
-          <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">ETH AMOUNT</div>
+          <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">USDT EQUIVALENT</div>
           <div id="ownerLiqETH" style="font-family:var(--font-mono);font-size:14px;color:var(--cream);">—</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
@@ -865,7 +867,7 @@
     <div class="card">
       <div class="card-title">REMOVE MY LIQUIDITY</div>
       <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;line-height:1.6;">
-        Remove your own LP position from a registered pool. ETH and tokens are returned directly to your wallet.
+        Remove your own LP position from a registered pool. Funds and tokens are returned directly to your wallet.
       </div>
 
       <div class="field">
@@ -883,7 +885,7 @@
             <div id="ownerLPBalance" style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">—</div>
           </div>
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
-            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">EST. ETH OUT</div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;">EST. USDT OUT</div>
             <div id="ownerRemoveEstETH" style="font-family:var(--font-mono);font-size:13px;color:var(--success);">—</div>
           </div>
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">

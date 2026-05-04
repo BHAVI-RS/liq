@@ -1,5 +1,7 @@
-let _geneView = 'list';
-let _geneTree = null;
+let _geneView      = 'list';
+let _geneTree      = null;
+let _geneInvestedMap = new Map();
+let _geneStatsMap    = new Map();  // addr.toLowerCase() → { teamCount, teamBusiness }
 
 function switchGeneView(mode) {
   _geneView = mode;
@@ -20,6 +22,147 @@ async function fetchGeneTree(addr, depth) {
   return { addr, children };
 }
 
+function _geneCollectAddrs(node, result = []) {
+  result.push(node.addr);
+  for (const child of node.children) _geneCollectAddrs(child, result);
+  return result;
+}
+
+function _geneComputeStats(node) {
+  let count = 0, business = 0;
+  for (const child of node.children) {
+    const inv = _geneInvestedMap.get(child.addr) || 0;
+    if (inv > 0) count++;
+    business += inv;
+    const sub = _geneComputeStats(child);
+    count    += sub.count;
+    business += sub.business;
+  }
+  node._teamCount    = count;
+  node._teamBusiness = business;
+  return { count, business };
+}
+
+function _buildGeneStatsMap(node) {
+  _geneStatsMap.set(node.addr.toLowerCase(), {
+    teamCount:    node._teamCount    || 0,
+    teamBusiness: node._teamBusiness || 0
+  });
+  for (const child of node.children) _buildGeneStatsMap(child);
+}
+
+// ─── Shared tooltip ───────────────────────────────────────────────────────────
+
+function geneShowTooltip(e, el) {
+  let tt = document.getElementById('geneTooltip');
+  if (!tt) {
+    tt = document.createElement('div');
+    tt.id = 'geneTooltip';
+    tt.style.cssText = [
+      'position:fixed','z-index:9000','background:#0b1520',
+      'border:1px solid rgba(201,168,76,0.35)','border-radius:8px',
+      'padding:12px 16px','font-family:var(--font-mono)','font-size:11px',
+      'pointer-events:none','min-width:250px','max-width:320px',
+      'box-shadow:0 6px 28px rgba(0,0,0,0.65)','display:none','line-height:1.5'
+    ].join(';');
+    document.body.appendChild(tt);
+  }
+
+  const addr    = el.dataset.addr   || '';
+  const inv     = parseFloat(el.dataset.inv           || '0');
+  const teamCnt = parseInt(el.dataset.teamCount       || '0');
+  const teamBiz = parseFloat(el.dataset.teamBusiness  || '0');
+
+  const invLabel = inv > 0 ? fmtUSDT(inv, {noEth:true}) : `<span style="color:#f87171;">No active package</span>`;
+  const bizLabel = fmtUSDT(teamBiz, {noEth:true});
+
+  tt.innerHTML = `
+    <div style="color:var(--gold);font-size:10px;letter-spacing:1px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(201,168,76,0.2);">USER DETAILS</div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:baseline;">
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ADDRESS</div>
+      <div style="color:var(--gold);font-size:10px;word-break:break-all;">${addr.slice(0,12)}…${addr.slice(-8)}</div>
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ACTIVE PKG</div>
+      <div style="color:var(--cream);">${invLabel}</div>
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM VOLUME</div>
+      <div style="color:var(--cream);">${teamCnt} active user${teamCnt !== 1 ? 's' : ''}</div>
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM BUSINESS</div>
+      <div style="color:#4ade80;">${bizLabel}</div>
+    </div>`;
+
+  tt.style.display = 'block';
+  const margin = 14, tw = tt.offsetWidth || 270, th = tt.offsetHeight || 130;
+  let left = e.clientX + margin, top = e.clientY + margin;
+  if (left + tw > window.innerWidth  - 8) left = e.clientX - tw - margin;
+  if (top  + th > window.innerHeight - 8) top  = e.clientY - th - margin;
+  tt.style.left = left + 'px';
+  tt.style.top  = top  + 'px';
+}
+
+function geneHideTooltip() {
+  const tt = document.getElementById('geneTooltip');
+  if (tt) tt.style.display = 'none';
+}
+
+// ─── List view accordion toggle ───────────────────────────────────────────────
+
+function geneListLevelToggle(id) {
+  const content = document.getElementById(id);
+  const arrow   = document.getElementById(id + '-arrow');
+  if (!content) return;
+  const opening = content.style.display === 'none';
+  content.style.display = opening ? '' : 'none';
+  if (arrow) arrow.textContent = opening ? '▼' : '▶';
+}
+
+// ─── Tree view node builder ───────────────────────────────────────────────────
+
+function _geneBuildNodeHtml(node, depth) {
+  const isRoot  = depth === 0;
+  const addr    = node.addr;
+  const hasKids = node.children.length > 0;
+  const nid     = 'gnd' + addr.slice(2).toLowerCase();
+  const inv     = _geneInvestedMap.get(addr) || 0;
+
+  const expandIcon = hasKids
+    ? `<span id="ei-${nid}" style="display:inline-block;width:14px;font-size:9px;color:var(--muted);vertical-align:middle;flex-shrink:0;">▶</span>`
+    : `<span style="display:inline-block;width:14px;flex-shrink:0;"></span>`;
+
+  const label = isRoot
+    ? `YOU · ${addr.slice(0, 8)}…${addr.slice(-6)}`
+    : `<span class="gene-node-lvl">L${depth}</span>${addr.slice(0, 10)}…${addr.slice(-6)}`;
+
+  const nodeEl = `<span class="gene-node ${isRoot ? 'gene-node-self' : ''}"
+    id="${nid}"
+    data-addr="${addr}"
+    data-inv="${inv}"
+    data-team-count="${node._teamCount || 0}"
+    data-team-business="${node._teamBusiness || 0}"
+    ${hasKids ? `onclick="geneNodeClick('${nid}')"` : ''}
+    onmouseenter="geneShowTooltip(event,this)"
+    onmouseleave="geneHideTooltip()"
+    style="display:inline-flex;align-items:center;gap:4px;${hasKids ? 'cursor:pointer;' : ''}"
+  >${expandIcon}${label}</span>`;
+
+  if (!hasKids) return `<li>${nodeEl}</li>`;
+  const hidden = depth >= 1 ? 'style="display:none"' : '';
+  const kids   = node.children.map(c => _geneBuildNodeHtml(c, depth + 1)).join('');
+  return `<li>${nodeEl}<ul class="gene-subtree" id="sub-${nid}" ${hidden}>${kids}</ul></li>`;
+}
+
+function geneNodeClick(nid) {
+  const ul = document.getElementById('sub-' + nid);
+  const ei = document.getElementById('ei-'  + nid);
+  if (!ul) return;
+  const opening = ul.style.display === 'none';
+  ul.style.display = opening ? '' : 'none';
+  if (ei) {
+    ei.textContent = opening ? '▼' : '▶';
+    ei.style.color = opening ? 'var(--gold)' : 'var(--muted)';
+  }
+}
+
+// ─── loadGenealogy ────────────────────────────────────────────────────────────
+
 async function loadGenealogy() {
   if (!requireConnected()) return;
   _tabLoaded.add('genealogy');
@@ -37,6 +180,22 @@ async function loadGenealogy() {
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
 
+    // Fetch investment amounts for every node (shared by list + tree)
+    const allAddrs = _geneCollectAddrs(treeData);
+    _geneInvestedMap = new Map();
+    await Promise.all(allAddrs.map(async a => {
+      try {
+        const amt = await contract.userTotalInvested(a);
+        _geneInvestedMap.set(a, parseFloat(ethers.utils.formatEther(amt)));
+      } catch(_) { _geneInvestedMap.set(a, 0); }
+    }));
+
+    // Annotate tree nodes with team stats, then build flat lookup map
+    _geneComputeStats(treeData);
+    _geneStatsMap = new Map();
+    _buildGeneStatsMap(treeData);
+
+    // Collect level arrays for list view
     const levels = [];
     function collectLevels(node, depth) {
       if (depth > 10) return;
@@ -50,7 +209,7 @@ async function loadGenealogy() {
 
     const totalReferrals = levels.reduce((s, l) => s + l.length, 0);
 
-    // Eligibility banner: shows which levels the user can currently earn from
+    // ── Eligibility banner ──────────────────────────────────────────────────
     const maxEligibleLevel = Math.min(activeCount, 10);
     const nextLevelNeeded  = maxEligibleLevel + 1;
     const minInvLabel      = minInvETH > 0 ? `(≥ ${fmtUSDT(minInvETH,{noEth:true})} active each)` : '(any active investment)';
@@ -74,71 +233,77 @@ async function loadGenealogy() {
         ${nextLevelHint}
       </div>`;
 
+    // ── List view ───────────────────────────────────────────────────────────
     if (totalReferrals === 0) {
       listEl.innerHTML = eligBanner + '<div class="empty-state">No referrals yet. Share your referral link to grow your network.</div>';
     } else {
       listEl.innerHTML = eligBanner;
-
-      const allAddrs   = [...new Set(levels.flat())];
-      const investedMap = new Map();
-      await Promise.all(allAddrs.map(async addr => {
-        try {
-          const amt = await contract.userTotalInvested(addr);
-          investedMap.set(addr, parseFloat(ethers.utils.formatEther(amt)));
-        } catch(_) { investedMap.set(addr, 0); }
-      }));
+      listEl.insertAdjacentHTML('beforeend',
+        '<div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:.05em;margin-bottom:12px;">Click a level header to expand · Hover a member for details</div>'
+      );
 
       levels.forEach((addrs, idx) => {
         if (!addrs || addrs.length === 0) return;
-        const level      = idx + 1;
-        const rate       = COMMISSION_RATES[idx] !== undefined ? COMMISSION_RATES[idx].toFixed(2) + '%' : '—';
-        const levelTotal = addrs.reduce((s, a) => s + (investedMap.get(a) || 0), 0);
-        const eligible   = activeCount >= level;
-        const eligStyle  = eligible
+        const level    = idx + 1;
+        const isFirst  = level === 1;
+        const blockId  = `glvl${level}`;
+        const rate     = COMMISSION_RATES[idx] !== undefined ? COMMISSION_RATES[idx].toFixed(2) + '%' : '—';
+        const levelTotal = addrs.reduce((s, a) => s + (_geneInvestedMap.get(a) || 0), 0);
+        const eligible = activeCount >= level;
+        const eligStyle = eligible
           ? 'color:#4ade80;font-size:10px;font-family:var(--font-mono);margin-left:8px;'
           : 'color:#f87171;font-size:10px;font-family:var(--font-mono);margin-left:8px;';
-        const eligLabel  = eligible ? '✓ ELIGIBLE' : `✗ NEED ${level} ACTIVE REFERRAL${level !== 1 ? 'S' : ''}`;
+        const eligLabel = eligible ? '✓ ELIGIBLE' : `✗ NEED ${level} ACTIVE REFERRAL${level !== 1 ? 'S' : ''}`;
+
+        const memberRows = addrs.map(a => {
+          const inv   = _geneInvestedMap.get(a) || 0;
+          const stats = _geneStatsMap.get(a.toLowerCase()) || { teamCount: 0, teamBusiness: 0 };
+          return `<div class="gene-addr-row"
+            data-addr="${a}"
+            data-inv="${inv}"
+            data-team-count="${stats.teamCount}"
+            data-team-business="${stats.teamBusiness}"
+            onmouseenter="geneShowTooltip(event,this)"
+            onmouseleave="geneHideTooltip()"
+            style="justify-content:space-between;cursor:default;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="gene-addr-dot"></div>
+              <a href="https://sepolia.etherscan.io/address/${a}" target="_blank" rel="noopener" title="${a}"
+                 style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:12px;"
+                 onclick="event.stopPropagation()">${a.slice(0,10)}…${a.slice(-6)}</a>
+            </div>
+            <span style="font-size:11px;font-family:var(--font-mono);color:${inv > 0 ? 'var(--gold)' : 'var(--muted)'};">${inv > 0 ? fmtUSDT(inv,{noEth:true}) : '—'}</span>
+          </div>`;
+        }).join('');
+
         const block = document.createElement('div');
         block.className = 'gene-level-block';
         block.innerHTML = `
-          <div class="gene-level-header">
+          <div class="gene-level-header"
+            onclick="geneListLevelToggle('${blockId}')"
+            style="cursor:pointer;user-select:none;">
             <span class="gene-level-badge">LEVEL ${level}</span>
             <span class="gene-commission-rate">${rate} commission</span>
             <span style="${eligStyle}">${eligLabel}</span>
             <span class="gene-count-pill" style="margin-left:auto;">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
             <span style="margin-left:8px;font-size:10px;color:var(--gold);font-family:var(--font-mono);">${fmtUSDT(levelTotal,{noEth:true})} invested</span>
+            <span id="${blockId}-arrow" style="margin-left:10px;font-size:11px;color:var(--muted);">${isFirst ? '▼' : '▶'}</span>
           </div>
-          ${addrs.map(a => {
-            const inv = investedMap.get(a) || 0;
-            return `<div class="gene-addr-row" style="justify-content:space-between;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <div class="gene-addr-dot"></div>
-                <a href="https://sepolia.etherscan.io/address/${a}" target="_blank" rel="noopener" title="${a}" style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:12px;">${a.slice(0,10)}…${a.slice(-6)}</a>
-              </div>
-              <span style="font-size:11px;font-family:var(--font-mono);color:${inv > 0 ? 'var(--gold)' : 'var(--muted)'};">${inv > 0 ? fmtUSDT(inv,{noEth:true}) : '—'}</span>
-            </div>`;
-          }).join('')}
-        `;
+          <div id="${blockId}" style="${isFirst ? '' : 'display:none;'}">
+            ${memberRows}
+          </div>`;
         listEl.appendChild(block);
       });
     }
 
-    function buildTreeHTML(node, depth) {
-      const isRoot = depth === 0;
-      const label = isRoot
-        ? `<span class="gene-node gene-node-self" title="${node.addr}">YOU  ${node.addr.slice(0,8)}…${node.addr.slice(-6)}</span>`
-        : `<span class="gene-node" title="${node.addr}"><span class="gene-node-lvl">L${depth}</span>${node.addr.slice(0,10)}…${node.addr.slice(-6)}</span>`;
-      if (node.children.length === 0) return `<li>${label}</li>`;
-      return `<li>${label}<ul>${node.children.map(c => buildTreeHTML(c, depth + 1)).join('')}</ul></li>`;
-    }
-
+    // ── Tree view ───────────────────────────────────────────────────────────
     treeEl.innerHTML = `
+      <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:.05em;margin-bottom:12px;">
+        Click any node to expand · Hover for details
+      </div>
       <div class="gene-tree">
-        <ul style="padding-left:0;">${buildTreeHTML(_geneTree, 0)}</ul>
+        <ul style="padding-left:0;">${_geneBuildNodeHtml(_geneTree, 0)}</ul>
       </div>`;
-
-    const rootUl = treeEl.querySelector('.gene-tree > ul');
-    if (rootUl) rootUl.style.cssText += ';padding-left:0;';
 
     switchGeneView(_geneView);
   } catch(e) {
@@ -146,5 +311,9 @@ async function loadGenealogy() {
   }
 }
 
-window.switchGeneView = switchGeneView;
-window.loadGenealogy  = loadGenealogy;
+window.switchGeneView       = switchGeneView;
+window.loadGenealogy        = loadGenealogy;
+window.geneNodeClick        = geneNodeClick;
+window.geneShowTooltip      = geneShowTooltip;
+window.geneHideTooltip      = geneHideTooltip;
+window.geneListLevelToggle  = geneListLevelToggle;

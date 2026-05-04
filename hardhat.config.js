@@ -20,9 +20,12 @@ module.exports = {
       initialBaseFeePerGas: 0,
       forking: {
         url: MAINNET_RPC,
-        // optional: pin a block for reproducible tests
         // blockNumber: 21000000,
       },
+      accounts: {
+        mnemonic: "test test test test test test test test test test test junk",
+        count: 60
+      }
     },
     localhost: {
       url: "http://127.0.0.1:8545",

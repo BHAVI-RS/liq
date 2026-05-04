@@ -99,7 +99,7 @@ contract Liquidity {
     address public immutable WETH;
     address public immutable platformToken;
 
-    uint256[10] public referralCommissionRates = [1000, 500, 200, 60, 50, 45, 40, 40, 35, 30];
+    uint256[10] public referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
     uint256 public minDirectReferralInvestment;
 
     uint256 public constant LP_LOCK_DURATION    = 1 minutes;

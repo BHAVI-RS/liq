@@ -85,7 +85,7 @@ async function loadPoolInfo(tokenAddr) {
 
     const iconEl = document.getElementById('poolTokenIcon');
     if (meta.logo) iconEl.innerHTML = `<img src="${meta.logo}" style="width:44px;height:44px;object-fit:contain;border-radius:10px;">`;
-    document.getElementById('poolTokenLabel').textContent = `${t.symbol} / ETH`;
+    document.getElementById('poolTokenLabel').textContent = `${t.symbol} / USDT`;
     document.getElementById('poolTokenAddr').textContent  = tokenAddr;
     window._poolTokenSymbol = t.symbol;
     const symEl = document.getElementById('poolBuyOutSym');
@@ -125,11 +125,10 @@ async function loadPoolInfo(tokenAddr) {
     const liqUSDT   = ethToUSDT(resETHF * 2);
 
     const statItems = [
-      { label: 'PRICE (USDT)',     value: priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT' },
-      { label: 'PRICE (ETH)',      value: priceETH.toFixed(8) + ' ETH' },
+      { label: 'PRICE',           value: priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT' },
       { label: 'TOKEN RESERVE',   value: resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + t.symbol },
-      { label: 'ETH RESERVE',     value: resETHF.toFixed(6) + ' ETH' },
-      { label: 'TOTAL LIQUIDITY', value: liqUSDT.toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT (' + (resETHF*2).toFixed(4) + ' ETH)' },
+      { label: 'USDT RESERVE',    value: (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
+      { label: 'TOTAL LIQUIDITY', value: liqUSDT.toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
       { label: 'LP SUPPLY',       value: supplyF.toFixed(6) + ' HDEX-LP' },
       { label: 'PAIR ADDRESS',    value: pairAddr.slice(0,10) + '…' + pairAddr.slice(-8), full: pairAddr },
     ];

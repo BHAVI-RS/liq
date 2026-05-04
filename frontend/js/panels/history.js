@@ -49,8 +49,9 @@ async function _buildHistoryItem(ev) {
   const block = await provider.getBlock(blockNum);
   const date  = new Date(block.timestamp * 1000).toLocaleString();
 
-  const ethFmt = parseFloat(ethers.utils.formatEther(ethAmount)).toFixed(4);
-  const lpFmt  = parseFloat(ethers.utils.formatEther(lpTokens)).toFixed(6);
+  const ethRaw  = parseFloat(ethers.utils.formatEther(ethAmount));
+  const ethFmt  = (ethRaw * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const lpFmt   = parseFloat(ethers.utils.formatEther(lpTokens)).toFixed(6);
 
   const div = document.createElement('div');
   div.className = 'history-item';
@@ -59,7 +60,7 @@ async function _buildHistoryItem(ev) {
       <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;">
         <div style="width:36px;height:36px;border-radius:50%;background:rgba(201,168,76,0.1);display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:18px;flex-shrink:0;">⊕</div>
         <div style="min-width:0;">
-          <div style="font-size:13px;color:var(--cream);font-weight:500;">${ethFmt} ETH → ${tokenSymbol}</div>
+          <div style="font-size:13px;color:var(--cream);font-weight:500;">${ethFmt} USDT → ${tokenSymbol}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px;">${date}</div>
         </div>
       </div>
@@ -166,24 +167,20 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     }
   }
 
-  const ACCRUED_TOPIC  = ethers.utils.id('CommissionAccrued(address,address,uint256,uint256)');
-  const MISSED_TOPIC   = ethers.utils.id('CommissionMissed(address,address,uint256,uint256)');
-  const COMM_RATES_BPS = [1000, 500, 200, 60, 50, 45, 40, 40, 35, 30];
+  const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
+
+  let ownerAddr = '';
+  try { ownerAddr = (await contract.owner()).toLowerCase(); } catch(_) {}
 
   const refEvents = [];
-  let totalPaid = ethers.BigNumber.from(0);
-
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) continue;
-    if (log.topics[0] !== ACCRUED_TOPIC && log.topics[0] !== MISSED_TOPIC) continue;
+    if (log.topics[0] !== PAID_TOPIC) continue;
     const recipient = ethers.utils.defaultAbiCoder.decode(['address'], log.topics[1])[0];
     const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-    const type = log.topics[0] === ACCRUED_TOPIC ? 'paid' : 'missed';
-    if (type === 'paid') totalPaid = totalPaid.add(amount);
-    refEvents.push({ type, recipient, amount, level: Number(level) });
+    refEvents.push({ recipient, amount, level: Number(level), isPlatform: recipient.toLowerCase() === ownerAddr });
   }
-
-  const platformComm = A40.gt(totalPaid) ? A40.sub(totalPaid) : ethers.BigNumber.from(0);
+  refEvents.sort((a, b) => a.level - b.level);
 
   // Pre-seeded tokens used = total deposited to pool minus what the swap produced.
   // The contract passes its entire token balance (swap tokens + owner-seeded supply) to addLiquidityETH.
@@ -196,6 +193,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     resMid = { eth: resBefore.eth.add(A60), token: resBefore.token.sub(swapTokensOut) };
 
   const fE = bn => bn ? parseFloat(ethers.utils.formatEther(bn)).toFixed(6) : '—';
+  const fU = bn => bn ? (parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT' : '—';
   const fT = bn => {
     if (!bn) return '—';
     const n = parseFloat(ethers.utils.formatUnits(bn, tokenDecimals));
@@ -203,16 +201,16 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
   };
   const fPrice = res => {
     if (!res || res.eth.isZero()) return '—';
-    const p = parseFloat(ethers.utils.formatUnits(res.token, tokenDecimals))
-            / parseFloat(ethers.utils.formatEther(res.eth));
-    return p.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + tokenSymbol + '/ETH';
+    const p = (parseFloat(ethers.utils.formatEther(res.eth)) * USDT_PER_ETH)
+            / parseFloat(ethers.utils.formatUnits(res.token, tokenDecimals));
+    return p.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' USDT/' + tokenSymbol;
   };
 
   let effectiveSwapPrice = '—';
   if (swapTokensOut && !A60.isZero()) {
-    const p = parseFloat(ethers.utils.formatUnits(swapTokensOut, tokenDecimals))
-            / parseFloat(ethers.utils.formatEther(A60));
-    effectiveSwapPrice = p.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + tokenSymbol + '/ETH';
+    const p = (parseFloat(ethers.utils.formatEther(A60)) * USDT_PER_ETH)
+            / parseFloat(ethers.utils.formatUnits(swapTokensOut, tokenDecimals));
+    effectiveSwapPrice = p.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' USDT/' + tokenSymbol;
   }
 
   const totalTokens = mintToken || null;
@@ -222,11 +220,11 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     <div class="hd-section">
       <div class="hd-section-title">INVESTMENT SPLIT</div>
       <div class="hd-tree">
-        <div class="hd-row hd-root"><span class="hd-label">Total Investment</span><span class="hd-value">${fE(ethAmount)} ETH</span></div>
-        <div class="hd-row hd-branch"><span class="hd-label">├─ Token-side (A)</span><span class="hd-value">${fE(halfETH)} ETH <span class="hd-pct">50%</span></span></div>
-        <div class="hd-row hd-leaf"><span class="hd-label">│&nbsp;&nbsp;&nbsp;├─ Pool Buy via Uniswap (A60)</span><span class="hd-value">${fE(A60)} ETH <span class="hd-pct">30% of T</span></span></div>
-        <div class="hd-row hd-leaf"><span class="hd-label">│&nbsp;&nbsp;&nbsp;└─ Referral Commissions (A40)</span><span class="hd-value">${fE(A40)} ETH <span class="hd-pct">20% of T</span></span></div>
-        <div class="hd-row hd-branch"><span class="hd-label">└─ Liquidity ETH (B) → addLiquidityETH</span><span class="hd-value">${fE(B)} ETH <span class="hd-pct">50%</span></span></div>
+        <div class="hd-row hd-root"><span class="hd-label">Total Investment</span><span class="hd-value">${fU(ethAmount)}</span></div>
+        <div class="hd-row hd-branch"><span class="hd-label">├─ Token-side (A)</span><span class="hd-value">${fU(halfETH)} <span class="hd-pct">50%</span></span></div>
+        <div class="hd-row hd-leaf"><span class="hd-label">│&nbsp;&nbsp;&nbsp;├─ Pool Buy via Uniswap (A60)</span><span class="hd-value">${fU(A60)} <span class="hd-pct">30% of T</span></span></div>
+        <div class="hd-row hd-leaf"><span class="hd-label">│&nbsp;&nbsp;&nbsp;└─ Referral Commissions (A40)</span><span class="hd-value">${fU(A40)} <span class="hd-pct">20% of T</span></span></div>
+        <div class="hd-row hd-branch"><span class="hd-label">└─ Liquidity USDT (B) → addLiquidityETH</span><span class="hd-value">${fU(B)} <span class="hd-pct">50%</span></span></div>
       </div>
     </div>
 
@@ -236,7 +234,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
         <div class="hd-kv">
           <div class="hd-key">POOL BUY — Uniswap V2 (A60, 30% of T)</div>
           <div class="hd-val">${fT(swapTokensOut)} ${tokenSymbol}</div>
-          <div class="hd-sub">Swapped ${fE(A60)} ETH (incl. 0.3% Uniswap fee)</div>
+          <div class="hd-sub">Swapped ${fU(A60)} (incl. 0.3% Uniswap fee)</div>
           <div class="hd-sub">Effective price: ${effectiveSwapPrice}</div>
         </div>
         <div class="hd-kv">
@@ -250,10 +248,10 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     </div>
 
     <div class="hd-section">
-      <div class="hd-section-title">POOL STATE (${tokenSymbol} / ETH)</div>
+      <div class="hd-section-title">POOL STATE (${tokenSymbol} / USDT)</div>
       <div class="hd-pool-table">
         <div class="hd-pt-head"><div></div><div>BEFORE INVEST</div><div>AFTER SWAP (60%)</div><div>AFTER ADD LIQUIDITY</div></div>
-        <div class="hd-pt-row"><div class="hd-pt-label">ETH</div><div>${resBefore ? fE(resBefore.eth) : '—'}</div><div>${resMid ? fE(resMid.eth) : '—'}</div><div>${resAfter ? fE(resAfter.eth) : '—'}</div></div>
+        <div class="hd-pt-row"><div class="hd-pt-label">USDT</div><div>${resBefore ? fU(resBefore.eth) : '—'}</div><div>${resMid ? fU(resMid.eth) : '—'}</div><div>${resAfter ? fU(resAfter.eth) : '—'}</div></div>
         <div class="hd-pt-row"><div class="hd-pt-label">${tokenSymbol}</div><div>${resBefore ? fT(resBefore.token) : '—'}</div><div>${resMid ? fT(resMid.token) : '—'}</div><div>${resAfter ? fT(resAfter.token) : '—'}</div></div>
         <div class="hd-pt-row hd-pt-price"><div class="hd-pt-label">PRICE</div><div>${fPrice(resBefore)}</div><div>${fPrice(resMid)}</div><div>${fPrice(resAfter)}</div></div>
       </div>
@@ -262,7 +260,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     <div class="hd-section">
       <div class="hd-section-title">LIQUIDITY ADDED TO POOL</div>
       <div class="hd-grid2">
-        <div class="hd-kv"><div class="hd-key">ETH DEPOSITED</div><div class="hd-val">${fE(mintETH)} ETH</div><div class="hd-sub">B half of investment</div></div>
+        <div class="hd-kv"><div class="hd-key">USDT DEPOSITED</div><div class="hd-val">${fU(mintETH)}</div><div class="hd-sub">B half of investment</div></div>
         <div class="hd-kv"><div class="hd-key">${tokenSymbol} DEPOSITED</div><div class="hd-val">${fT(mintToken)} ${tokenSymbol}</div><div class="hd-sub">A60 swap tokens + contract pre-seeded supply (any surplus stays in contract)</div></div>
         <div class="hd-kv"><div class="hd-key">LP TOKENS RECEIVED</div><div class="hd-val">${fE(lpTokens)} LP</div><div class="hd-sub">Locked in contract until unlock period ends</div></div>
       </div>
@@ -272,35 +270,30 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
       <div class="hd-section-title">REFERRAL COMMISSION SPLIT</div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:11px;font-family:var(--font-mono);">
         <span style="color:var(--muted);">Referral commissions (A40 — 20% of total investment)</span>
-        <span style="color:var(--cream);">${fE(A40)} ETH</span>
+        <span style="color:var(--cream);">${fU(A40)}</span>
       </div>
       <div class="hd-ref-list">
         ${refEvents.length === 0
-          ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">No referral events found — all went to platform.</div>`
+          ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">No commission events found in this transaction.</div>`
           : refEvents.map(ev => {
               const short = ev.recipient.slice(0,8) + '…' + ev.recipient.slice(-6);
-              const rateLabel = COMM_RATES_BPS[ev.level - 1]
-                ? (COMM_RATES_BPS[ev.level - 1] / 100).toFixed(2).replace(/\.?0+$/, '') + '%'
+              const poolFloat = parseFloat(ethers.utils.formatEther(A40));
+              const amtFloat  = parseFloat(ethers.utils.formatEther(ev.amount));
+              const pctOfPool = poolFloat > 0 ? amtFloat / poolFloat * 100 : 0;
+              const rateLabel = pctOfPool > 0
+                ? pctOfPool.toFixed(pctOfPool >= 1 ? 1 : 2).replace(/\.?0+$/, '') + '% of pool'
                 : '';
-              const missedReason = ev.type === 'missed'
-                ? '<div style="font-size:10px;color:var(--muted);grid-column:2/-1;margin-top:2px;padding-left:0;">↳ not eligible (no active position or earnings cap reached) — slot retried at next upline</div>'
-                : '';
-              return `<div>
-                <div class="hd-ref-row">
-                  <div class="hd-ref-lvl">L${ev.level}<br><span style="font-size:8px;">${rateLabel}</span></div>
-                  <div class="hd-ref-addr" title="${ev.recipient}">${short}</div>
-                  <div class="hd-ref-badge ${ev.type}">${ev.type === 'paid' ? '✓ PAID' : '✗ MISSED'}</div>
-                  <div class="hd-ref-amt">${fE(ev.amount)} ETH</div>
-                </div>
-                ${missedReason}
+              const addrDisplay = ev.isPlatform
+                ? `<span style="color:var(--gold);font-family:var(--font-mono);" title="${ev.recipient}">${short}</span>`
+                : `<span title="${ev.recipient}">${short}</span>`;
+              return `<div class="hd-ref-row">
+                <div class="hd-ref-lvl">L${ev.level}<br><span style="font-size:8px;">${rateLabel}</span></div>
+                <div class="hd-ref-addr">${addrDisplay}</div>
+                <div class="hd-ref-badge paid">✓ PAID</div>
+                <div class="hd-ref-amt">${fU(ev.amount)}</div>
               </div>`;
             }).join('')
         }
-        ${platformComm.gt(0) ? `
-        <div class="hd-ref-platform-row">
-          <span>⬡ Platform (owner) — spill + cap excess</span>
-          <span>${fE(platformComm)} ETH</span>
-        </div>` : ''}
       </div>
     </div>
 
@@ -415,16 +408,17 @@ async function loadPoolHistory() {
       const fT   = (bn, dec) => parseFloat(ethers.utils.formatUnits(bn, dec || 18))
                                   .toLocaleString(undefined, { maximumFractionDigits: 4 });
 
+      const fEU = bn => (parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT';
       if (e.type === 'buy') return `
         <div class="ph-row">
           <div class="ph-badge buy">BUY</div>
-          <div class="ph-main"><div class="ph-title">${fE(e.ethAmt)} ETH → ${fT(e.tokenAmt, e.tokenDecimals)} ${e.tokenSymbol}</div><div class="ph-sub">Uniswap swap — ETH in, ${e.tokenSymbol} out</div></div>
+          <div class="ph-main"><div class="ph-title">${fEU(e.ethAmt)} → ${fT(e.tokenAmt, e.tokenDecimals)} ${e.tokenSymbol}</div><div class="ph-sub">Uniswap swap — USDT in, ${e.tokenSymbol} out</div></div>
           <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
         </div>`;
       if (e.type === 'sell') return `
         <div class="ph-row">
           <div class="ph-badge sell">SELL</div>
-          <div class="ph-main"><div class="ph-title">${fT(e.tokenAmt, e.tokenDecimals)} ${e.tokenSymbol} → ${fE(e.ethAmt)} ETH</div><div class="ph-sub">Uniswap swap — ${e.tokenSymbol} in, ETH out</div></div>
+          <div class="ph-main"><div class="ph-title">${fT(e.tokenAmt, e.tokenDecimals)} ${e.tokenSymbol} → ${fEU(e.ethAmt)}</div><div class="ph-sub">Uniswap swap — ${e.tokenSymbol} in, USDT out</div></div>
           <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
         </div>`;
       if (e.type === 'claim') return `
@@ -436,7 +430,7 @@ async function loadPoolHistory() {
       if (e.type === 'remove') return `
         <div class="ph-row">
           <div class="ph-badge remove">LP REMOVE</div>
-          <div class="ph-main"><div class="ph-title">${parseFloat(ethers.utils.formatEther(e.lpAmount)).toFixed(6)} LP removed — ${e.tokenSymbol}</div><div class="ph-sub">Received ${fE(e.ethReceived)} ETH + tokens back from pool</div></div>
+          <div class="ph-main"><div class="ph-title">${parseFloat(ethers.utils.formatEther(e.lpAmount)).toFixed(6)} LP removed — ${e.tokenSymbol}</div><div class="ph-sub">Received ${fEU(e.ethReceived)} + tokens back from pool</div></div>
           <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
         </div>`;
       return '';

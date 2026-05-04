@@ -5,29 +5,53 @@ const contractAddress = CONTRACT_ADDRESS;
 let _missedCommWei = null;
 
 async function checkMissedCommissions() {
-  if (!App.contract || !App.walletAddress) return;
+  if (!contract || !walletAddress) return;
   try {
-    const stats  = await App.contract.getUserCommissionStats(App.walletAddress);
-    const missed = stats.missed;
-    _missedCommWei = missed;
-    if (missed.isZero()) return;
+    const ownerAddr = (await contract.owner()).toLowerCase();
+    if (walletAddress.toLowerCase() === ownerAddr) return;
 
-    // Only suppress if user has active (unclaimed, not-removed) LP positions
-    const locks     = await App.contract.getUserLPLocks(App.walletAddress);
+    const referrals = await contract.getReferrals(walletAddress);
+    if (!referrals.length) return;
+
+    // Sum L1 commissions that went to the owner instead of to this user.
+    // This happens when the user was ineligible (inactive LP or cap reached) at the time
+    // their direct referral invested.
+    const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
+    let missedWei = ethers.BigNumber.from(0);
+    for (const referral of referrals) {
+      const logs = await provider.getLogs({
+        address: contract.address,
+        topics: [
+          PAID_TOPIC,
+          ethers.utils.hexZeroPad(ownerAddr, 32),
+          ethers.utils.hexZeroPad(referral.toLowerCase(), 32),
+        ],
+        fromBlock: 0,
+        toBlock: 'latest',
+      });
+      for (const log of logs) {
+        const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
+        if (Number(level) === 1) missedWei = missedWei.add(amount);
+      }
+    }
+
+    _missedCommWei = missedWei;
+    if (missedWei.isZero()) return;
+
+    // Only show the alert when the user has no active LP — prompts them to re-invest.
+    const locks     = await contract.getUserLPLocks(walletAddress);
     const hasActive = locks.some(l => !l.claimed && !l.removed);
     if (hasActive) return;
 
-    const ethMissed  = parseFloat(ethers.utils.formatEther(missed));
+    const ethMissed  = parseFloat(ethers.utils.formatEther(missedWei));
     const usdtMissed = ethToUSDT(ethMissed).toLocaleString(undefined, { maximumFractionDigits: 2 });
-    const ethFmt     = ethMissed.toFixed(6);
 
     document.getElementById('missedCommText').innerHTML =
-      `You have <strong style="color:#f87171;">${usdtMissed} USDT (${ethFmt} ETH)</strong> in uncollected referral commissions.<br><br>` +
+      `You have <strong style="color:#f87171;">${usdtMissed} USDT</strong> in uncollected referral commissions.<br><br>` +
       `This occurred because your LP position was inactive, or you had reached your 5× earning cap, when your referrals made investments.<br><br>` +
       `<strong>To become eligible again:</strong> ensure you have an active LP investment. Your pending cap carries forward when you reinvest.`;
 
-    const el = document.getElementById('missedCommAlert');
-    el.style.display = 'flex';
+    document.getElementById('missedCommAlert').style.display = 'flex';
   } catch(e) { console.warn('checkMissedCommissions:', e); }
 }
 
@@ -325,7 +349,7 @@ async function loadLandingStats(eth) {
     if ($('ls-total-users'))   $('ls-total-users').textContent   = totalUsers.toLocaleString();
     if ($('ls-active-users'))  $('ls-active-users').textContent  = activeUsers.toLocaleString();
     if ($('ls-total-funding')) $('ls-total-funding').textContent =
-      totalETH > 0 ? totalETH.toFixed(4) + ' ETH' : '0 ETH';
+      totalETH > 0 ? ethToUSDT(totalETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT';
     if ($('lcf-contract-addr') && typeof CONTRACT_ADDRESS !== 'undefined')
       $('lcf-contract-addr').textContent = CONTRACT_ADDRESS;
   } catch (_) {}

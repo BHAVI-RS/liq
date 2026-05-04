@@ -367,7 +367,7 @@ async function loadOwnerInfo() {
     const rates = [];
     for (let i = 0; i < 10; i++) {
       const r = await contract.referralCommissionRates(i);
-      rates.push((r.toNumber() / 100).toFixed(2) + '%');
+      rates.push((r.toNumber() / 500).toFixed(2).replace(/\.?0+$/, '') + '% of investment');
     }
     const el = document.getElementById('ownerInfoContent');
     el.innerHTML = `
@@ -475,7 +475,7 @@ function onOwnerLiqUSDTChange() {
   const tokEl   = document.getElementById('ownerLiqTokenAmt');
   if (!addr || usdtVal <= 0) { ethEl.textContent = '—'; tokEl.textContent = '—'; return; }
   const ethAmt = usdtVal / 1000;
-  ethEl.textContent = ethAmt.toFixed(6) + ' ETH';
+  ethEl.textContent = (ethAmt * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
 
   if (_ownerLiqIsNewPool) {
     const priceUSDT = parseFloat(document.getElementById('ownerInitialPrice').value) || 0;
@@ -588,7 +588,7 @@ async function _ownerUpdateRemoveEstimate(lpWei) {
     const estTok = rawTok.mul(lpWei).div(totalSupply);
     const estETH = rawETH.mul(lpWei).div(totalSupply);
     document.getElementById('ownerRemoveEstETH').textContent =
-      parseFloat(ethers.utils.formatEther(estETH)).toFixed(6) + ' ETH';
+      (parseFloat(ethers.utils.formatEther(estETH)) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
     document.getElementById('ownerRemoveEstToken').textContent =
       parseFloat(ethers.utils.formatUnits(estTok, _ownerRem_TokenDec)).toFixed(4) + ' ' + _ownerRem_TokenSym;
   } catch(_) {}

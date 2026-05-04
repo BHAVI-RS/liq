@@ -248,8 +248,7 @@ async function loadInvestments() {
           <div class="dash-inv-summary">
             <div class="dis-col">
               <div class="dis-label">PACKAGE</div>
-              <div class="dis-val">${ethInvested.toFixed(4)} ETH</div>
-              <div class="dis-sub">${fmtUSDT(ethInvested, {noEth:true})}</div>
+              <div class="dis-val">${fmtUSDT(ethInvested)}</div>
             </div>
             <div class="dis-col">
               <div class="dis-label">LP TOKENS</div>
@@ -263,12 +262,12 @@ async function loadInvestments() {
             SHOW MORE <span class="dit-arrow">▾</span>
           </button>
           <div class="dash-inv-details">
-            <div class="did-row"><span class="did-label">CURRENT LP VALUE</span><span class="did-val">${currentETH > 0 ? fmtUSDT(currentETH,{noEth:true})+' <span style="color:var(--muted);font-size:10px;">('+currentETH.toFixed(6)+' ETH)</span>' : '—'}</span></div>
-            <div class="did-row"><span class="did-label">GROWTH</span><span class="did-val ${growthCls}" data-field="growth">${currentETH>0 ? (growthETH>=0?'+':'')+growthPct.toFixed(2)+'%  '+fmtUSDT(growthETH,{noEth:true,sign:true}) : '—'}</span></div>
-            <div class="did-row"><span class="did-label">TOKEN PRICE</span><span class="did-val">${priceEth ? fmtUSDT(priceEth,{noEth:true})+' <span style="color:var(--muted);font-size:10px;">('+priceEth.toFixed(8)+' ETH)</span>' : '—'}</span></div>
-            <div class="did-row"><span class="did-label">POOL RESERVES</span><span class="did-val">${pool ? pool.resToken.toLocaleString(undefined,{maximumFractionDigits:2})+' '+td.symbol+' / '+pool.resETH.toFixed(4)+' ETH' : '—'}</span></div>
+            <div class="did-row"><span class="did-label">CURRENT LP VALUE</span><span class="did-val">${currentETH > 0 ? fmtUSDT(currentETH) : '—'}</span></div>
+            <div class="did-row"><span class="did-label">GROWTH</span><span class="did-val ${growthCls}" data-field="growth">${currentETH>0 ? (growthETH>=0?'+':'')+growthPct.toFixed(2)+'%  '+fmtUSDT(growthETH,{sign:true}) : '—'}</span></div>
+            <div class="did-row"><span class="did-label">TOKEN PRICE</span><span class="did-val">${priceEth ? fmtUSDT(priceEth) : '—'}</span></div>
+            <div class="did-row"><span class="did-label">POOL RESERVES</span><span class="did-val">${pool ? pool.resToken.toLocaleString(undefined,{maximumFractionDigits:2})+' '+td.symbol+' / '+(pool.resETH*USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2})+' USDT' : '—'}</span></div>
             <div class="did-row"><span class="did-label">YOUR TOKENS IN POOL</span><span class="did-val">${myTokensInPool > 0 ? myTokensInPool.toLocaleString(undefined,{maximumFractionDigits:4})+' '+td.symbol : '—'}</span></div>
-            <div class="did-row"><span class="did-label">YOUR ETH IN POOL</span><span class="did-val">${myETHInPool > 0 ? myETHInPool.toFixed(6)+' ETH' : '—'}</span></div>
+            <div class="did-row"><span class="did-label">YOUR USDT IN POOL</span><span class="did-val">${myETHInPool > 0 ? (myETHInPool*USDT_PER_ETH).toFixed(2)+' USDT' : '—'}</span></div>
             <hr class="did-hr">
             <div class="did-row"><span class="did-label">LOCK PERIOD</span><span class="did-val">${lockDurLabel}</span></div>
             <div class="did-row"><span class="did-label">LOCKED AT</span><span class="did-val">${lockedAtLabel}</span></div>

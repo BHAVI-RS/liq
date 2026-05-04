@@ -203,12 +203,12 @@ let _graphCleanup      = null;
 let _graphPendingTimer = null;
 
 const GRAPH_OPTS = {
-  invested: { label: 'TOTAL INVESTED',    unit: 'ETH', color: '#c9a84c', yLabel: 'ETH Invested' },
-  lpvalue:  { label: 'LP POSITIONS',       unit: 'ETH', color: '#e2e8f0', yLabel: 'ETH (at current price)' },
-  referral: { label: 'REFERRAL EARNINGS', unit: 'ETH', color: '#4ade80', yLabel: 'ETH Earned' },
-  staking:  { label: 'STAKING REWARDS',   unit: 'ETH', color: '#a78bfa', yLabel: 'ETH value of token rewards' },
-  pnl:      { label: 'OVERALL P/L',       unit: 'ETH', color: '#60a5fa', yLabel: 'ETH P/L' },
-  locks:    { label: 'ACTIVE LOCKS',      unit: '',    color: '#c9a84c', yLabel: 'Positions' },
+  invested: { label: 'TOTAL INVESTED',    unit: 'USDT', color: '#c9a84c', yLabel: 'USDT Invested' },
+  lpvalue:  { label: 'LP POSITIONS',      unit: 'USDT', color: '#e2e8f0', yLabel: 'USDT (at current price)' },
+  referral: { label: 'REFERRAL EARNINGS', unit: 'USDT', color: '#4ade80', yLabel: 'USDT Earned' },
+  staking:  { label: 'STAKING REWARDS',   unit: 'USDT', color: '#a78bfa', yLabel: 'USDT value of token rewards' },
+  pnl:      { label: 'OVERALL P/L',       unit: 'USDT', color: '#60a5fa', yLabel: 'USDT P/L' },
+  locks:    { label: 'ACTIVE LOCKS',      unit: '',     color: '#c9a84c', yLabel: 'Positions' },
 };
 
 async function fetchGraphData() {
@@ -319,6 +319,12 @@ function buildSeries(type, data) {
     pts.push({ time: now, value: locks }); return pts;
   }
   return [start, { time: now, value: 0 }];
+}
+
+// Scale a series from ETH to USDT — applied after buildSeries for all non-locks types
+function _scaleSeriesToUSDT(type, pts) {
+  if (type === 'locks') return pts;
+  return pts.map(p => ({ time: p.time, value: p.value * USDT_PER_ETH }));
 }
 
 function drawLineGraph(canvas, series, color, unitLabel) {
@@ -453,9 +459,11 @@ function drawLineGraph(canvas, series, color, unitLabel) {
     ctx.lineWidth   = 2;
     ctx.fill(); ctx.stroke();
 
-    const valLabel = unitLabel
-      ? best.value.toFixed(best.value >= 1 ? 4 : 8) + ' ' + unitLabel
-      : Math.round(best.value).toString();
+    const valLabel = unitLabel === 'USDT'
+      ? best.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT'
+      : unitLabel
+        ? best.value.toFixed(best.value >= 1 ? 4 : 8) + ' ' + unitLabel
+        : Math.round(best.value).toString();
     tooltip.innerHTML =
       `<div style="color:var(--muted);margin-bottom:3px;">${_fmtTsFull(best.time)}</div>` +
       `<div style="color:${color};font-size:13px;font-weight:bold;">${valLabel}</div>`;
@@ -570,7 +578,7 @@ function openStatGraph(type) {
   panel.style.opacity    = '0';
   panel.style.display    = '';
 
-  const series  = buildSeries(type, _graphCache);
+  const series  = _scaleSeriesToUSDT(type, buildSeries(type, _graphCache));
   const canvas  = document.getElementById('dashGraphCanvas');
   const emptyEl = document.getElementById('dashGraphEmpty');
   const hasData = series.some(p => p.value > 0);
@@ -587,7 +595,7 @@ function openStatGraph(type) {
   if (!_graphCache && contract && walletAddress) {
     fetchGraphData().then(data => {
       _graphCache = data;
-      const s2   = buildSeries(type, data);
+      const s2   = _scaleSeriesToUSDT(type, buildSeries(type, data));
       const has2 = s2.some(p => p.value > 0);
       if (!has2) {
         canvas.style.display  = 'none';
@@ -696,7 +704,7 @@ async function loadDashboard() {
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');
     if (stakingSubEl) stakingSubEl.textContent = 'not available';
     const refLabelEl = document.querySelector('#dashCard-referral .dash-stat-label');
-    if (refLabelEl) refLabelEl.innerHTML = `REFERRAL EARNINGS ${eligBadge} <span class="dash-stat-chart-hint">↗</span>`;
+    if (refLabelEl) refLabelEl.innerHTML = `REFERRAL EARNINGS ${eligBadge} <span class="dash-stat-chart-hint">→</span>`;
 
     const pnlEl = document.getElementById('dashPnL');
     pnlEl.style.color = pnlCls;
@@ -717,6 +725,15 @@ async function loadDashboard() {
   }
 }
 
+function navToRewards(section) {
+  switchTabByName('rewards');
+  setTimeout(() => {
+    const cardId = section === 'staking' ? 'rwStakingCard' : 'rwRefCard';
+    const el = document.getElementById(cardId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 150);
+}
+
 window.loadDashboard        = loadDashboard;
 window.copyRefLink          = copyRefLink;
 window.loadFeaturedBanner   = loadFeaturedBanner;
@@ -728,3 +745,4 @@ window._dashComputeLPValue  = _dashComputeLPValue;
 window._dashFmtCountdown    = _dashFmtCountdown;
 window._dashFmtCompact      = _dashFmtCompact;
 window._dashTickCountdowns  = _dashTickCountdowns;
+window.navToRewards         = navToRewards;
