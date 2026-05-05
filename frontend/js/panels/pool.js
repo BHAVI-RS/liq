@@ -14,6 +14,7 @@ const FACTORY_ABI = [
   "function getPair(address tokenA, address tokenB) view returns (address)"
 ];
 const PAIR_ABI = [
+  "event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)",
   "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
   "function token0() view returns (address)",
   "function totalSupply() view returns (uint256)"
@@ -31,23 +32,101 @@ window._poolReserveETH    = 0n;
 window._poolReserveToken  = 0n;
 window._poolTokenDecimals = 18;
 window._poolTokenSymbol   = '';
+window._poolIsToken0      = false;
+window._poolPollInterval  = null;
 
-function getRouter()  { return new ethers.Contract(DEX_ROUTER,  ROUTER_ABI,  signer); }
-function getFactory() { return new ethers.Contract(DEX_FACTORY, FACTORY_ABI, provider); }
-function getPairContract(addr) { return new ethers.Contract(addr, PAIR_ABI, provider); }
+let _poolRefreshCount = 0;
+
+function _stopPoolPolling() {
+  if (window._poolPollInterval) { clearInterval(window._poolPollInterval); window._poolPollInterval = null; }
+}
+
+function _setStatText(id, value) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== value) el.textContent = value;
+}
+
+async function _refreshPoolData() {
+  const panel = document.getElementById('panel-pool');
+  if (!panel || !panel.classList.contains('active')) { _stopPoolPolling(); return; }
+  const tokenAddr = window._poolSelectedToken;
+  const pairAddr  = window._poolSelectedPair;
+  if (!tokenAddr || !pairAddr || pairAddr === ethers.constants.AddressZero) return;
+  try {
+    const pair = getPairContract(pairAddr);
+    const [[r0, r1], supply] = await Promise.all([pair.getReserves(), pair.totalSupply()]);
+    const isToken0 = window._poolIsToken0;
+    const dec      = window._poolTokenDecimals;
+    const sym      = window._poolTokenSymbol;
+    const resToken = isToken0 ? r0 : r1;
+    const resETH   = isToken0 ? r1 : r0;
+    window._poolReserveToken = resToken;
+    window._poolReserveETH   = resETH;
+    const resTokenF = parseFloat(ethers.utils.formatUnits(resToken, dec));
+    const resETHF   = parseFloat(ethers.utils.formatEther(resETH));
+    const supplyF   = parseFloat(ethers.utils.formatEther(supply));
+    const priceUSDT = ethToUSDT(resETHF / resTokenF);
+    _setStatText('poolStat-price',    priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT');
+    _setStatText('poolStat-tokenres', resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + sym);
+    _setStatText('poolStat-usdtres',  (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT');
+    _setStatText('poolStat-lpsupply', supplyF.toFixed(6) + ' HDEX-LP');
+    _updatePoolRateDisplay(priceUSDT, sym);
+    updateSellBalance(tokenAddr, dec);
+  } catch(_) {}
+}
+
+function _startPoolPolling() {
+  _stopPoolPolling();
+  _poolRefreshCount = 0;
+  window._poolPollInterval = setInterval(_refreshPoolData, 8000);
+}
+
+function getRouter()           { return new ethers.Contract(DEX_ROUTER,  ROUTER_ABI,  signer);   }
+function getFactory()          { return new ethers.Contract(DEX_FACTORY, FACTORY_ABI, provider); }
+function getPairContract(addr) { return new ethers.Contract(addr, PAIR_ABI, provider);            }
+
+async function _getTokenPoolPrice(tokenAddr) {
+  try {
+    const factory  = getFactory();
+    const pairAddr = await factory.getPair(tokenAddr, DEX_WETH);
+    if (!pairAddr || pairAddr === ethers.constants.AddressZero) return null;
+    const pair     = getPairContract(pairAddr);
+    const [r0, r1] = await pair.getReserves();
+    const token0   = await pair.token0();
+    const isToken0 = token0.toLowerCase() === tokenAddr.toLowerCase();
+    const resToken = isToken0 ? r0 : r1;
+    const resETH   = isToken0 ? r1 : r0;
+    const erc20    = new ethers.Contract(tokenAddr, ERC20_ABI, provider);
+    const dec      = Number(await erc20.decimals().catch(() => 18));
+    const resTokenF = parseFloat(ethers.utils.formatUnits(resToken, dec));
+    const resETHF   = parseFloat(ethers.utils.formatEther(resETH));
+    if (resTokenF <= 0) return null;
+    return ethToUSDT(resETHF / resTokenF);
+  } catch(_) { return null; }
+}
 
 async function loadPoolPanel() {
   if (!requireConnected()) return;
+  _stopPoolPolling();
   const list = document.getElementById('poolTokenList');
   list.innerHTML = '<div class="empty-state">Loading pools<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
     const addrs = await contract.getRegisteredTokens();
     if (!addrs.length) { list.innerHTML = '<div class="empty-state">No registered tokens yet.</div>'; return; }
+
+    const reversed = [...addrs].reverse();
+    const [tokens, prices] = await Promise.all([
+      Promise.all(reversed.map(a => contract.getToken(a))),
+      Promise.all(reversed.map(a => _getTokenPoolPrice(a)))
+    ]);
+
     list.innerHTML = '';
-    for (const addr of [...addrs].reverse()) {
-      const t    = await contract.getToken(addr);
-      const meta = getMeta(addr);
-      const div  = document.createElement('div');
+    for (let i = 0; i < reversed.length; i++) {
+      const addr  = reversed[i];
+      const t     = tokens[i];
+      const price = prices[i];
+      const meta  = getMeta(addr);
+      const div   = document.createElement('div');
       div.className = 'token-item';
       div.style.cursor = 'pointer';
       div.innerHTML = `
@@ -60,7 +139,9 @@ async function loadPoolPanel() {
             <div class="token-addr">${t.tokenAddress}</div>
           </div>
         </div>
-        <div class="token-badge">VIEW POOL</div>`;
+        ${price !== null
+          ? `<div style="font-size:16px;color:var(--gold);font-family:var(--font-mono);font-weight:700;flex-shrink:0;letter-spacing:.03em;">$${price.toLocaleString(undefined,{maximumFractionDigits:6})}</div>`
+          : `<div style="font-size:14px;color:var(--muted);font-family:var(--font-mono);flex-shrink:0;">—</div>`}`;
       div.onclick = () => loadPoolInfo(addr);
       list.appendChild(div);
     }
@@ -72,12 +153,15 @@ async function loadPoolPanel() {
 
 async function loadPoolInfo(tokenAddr) {
   if (!requireConnected()) return;
+  _stopPoolPolling();
   window._poolSelectedToken = tokenAddr;
 
   const card = document.getElementById('poolDetailCard');
   card.style.display = 'block';
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   document.getElementById('poolStats').innerHTML = '<div style="color:var(--muted);font-size:12px;font-family:var(--font-mono);">Loading pool data…</div>';
+  const histEl = document.getElementById('poolTradeHistory');
+  if (histEl) histEl.innerHTML = '';
 
   try {
     const t    = await contract.getToken(tokenAddr);
@@ -100,12 +184,13 @@ async function loadPoolInfo(tokenAddr) {
       return;
     }
 
-    const pair = getPairContract(pairAddr);
+    const pair     = getPairContract(pairAddr);
     const [r0, r1] = await pair.getReserves();
     const token0   = await pair.token0();
     const supply   = await pair.totalSupply();
 
     const isToken0 = token0.toLowerCase() === tokenAddr.toLowerCase();
+    window._poolIsToken0 = isToken0;
     const resToken = isToken0 ? r0 : r1;
     const resETH   = isToken0 ? r1 : r0;
 
@@ -122,24 +207,25 @@ async function loadPoolInfo(tokenAddr) {
 
     const priceETH  = resETHF / resTokenF;
     const priceUSDT = ethToUSDT(priceETH);
-    const liqUSDT   = ethToUSDT(resETHF * 2);
 
     const statItems = [
-      { label: 'PRICE',           value: priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT' },
-      { label: 'TOKEN RESERVE',   value: resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + t.symbol },
-      { label: 'USDT RESERVE',    value: (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
-      { label: 'TOTAL LIQUIDITY', value: liqUSDT.toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
-      { label: 'LP SUPPLY',       value: supplyF.toFixed(6) + ' HDEX-LP' },
-      { label: 'PAIR ADDRESS',    value: pairAddr.slice(0,10) + '…' + pairAddr.slice(-8), full: pairAddr },
+      { id: 'poolStat-price',    label: 'PRICE',         value: priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT' },
+      { id: 'poolStat-tokenres', label: 'TOKEN RESERVE', value: resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + t.symbol },
+      { id: 'poolStat-usdtres',  label: 'USDT RESERVE',  value: (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
+      { id: 'poolStat-lpsupply', label: 'LP SUPPLY',     value: supplyF.toFixed(6) + ' HDEX-LP' },
+      { id: 'poolStat-pairaddr', label: 'PAIR ADDRESS',  value: pairAddr.slice(0,10) + '…' + pairAddr.slice(-8), full: pairAddr },
     ];
 
     document.getElementById('poolStats').innerHTML = statItems.map(s => `
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;">
         <div style="font-size:9px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:6px;">${s.label}</div>
-        <div style="font-size:13px;color:var(--cream);font-family:var(--font-mono);word-break:break-all;" ${s.full ? `title="${s.full}"` : ''}>${s.value}</div>
+        <div id="${s.id}" style="font-size:13px;color:var(--cream);font-family:var(--font-mono);word-break:break-all;" ${s.full ? `title="${s.full}"` : ''}>${s.value}</div>
       </div>`).join('');
 
     await updateSellBalance(tokenAddr, dec);
+    _updatePoolRateDisplay(priceUSDT, t.symbol);
+    loadTradeHistory(pairAddr, isToken0, dec, t.symbol);
+    _startPoolPolling();
 
   } catch(e) {
     document.getElementById('poolStats').innerHTML = `<div style="color:#ff5050;font-size:12px;font-family:var(--font-mono);">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
@@ -154,6 +240,126 @@ async function updateSellBalance(tokenAddr, dec) {
     const balF  = parseFloat(ethers.utils.formatUnits(bal, dec));
     document.getElementById('poolSellBal').textContent = balF.toLocaleString(undefined,{maximumFractionDigits:4});
   } catch(_) {}
+}
+
+function _updatePoolRateDisplay(priceUSDT, tokenSymbol) {
+  const buyEl  = document.getElementById('poolBuyRate');
+  const sellEl = document.getElementById('poolSellRate');
+  if (!priceUSDT || priceUSDT <= 0) {
+    if (buyEl)  buyEl.textContent = '—';
+    if (sellEl) sellEl.textContent = '—';
+    return;
+  }
+  const tokensPerUSDT = 1 / priceUSDT;
+  const buyText  = `1 USDT ≈ ${tokensPerUSDT.toLocaleString(undefined,{maximumFractionDigits:4})} ${tokenSymbol}`;
+  const sellText = `1 ${tokenSymbol} ≈ ${priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6})} USDT`;
+  if (buyEl  && buyEl.textContent  !== buyText)  buyEl.textContent  = buyText;
+  if (sellEl && sellEl.textContent !== sellText) sellEl.textContent = sellText;
+}
+
+async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol) {
+  const histEl = document.getElementById('poolTradeHistory');
+  if (!histEl) return;
+  histEl.innerHTML = `
+    <div style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
+      <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:14px;">RECENT TRADES</div>
+      <div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);">Loading…</div>
+    </div>`;
+
+  try {
+    const pair  = getPairContract(pairAddr);
+    const swaps = await pair.queryFilter('Swap', 0, 'latest').catch(() => []);
+
+    const fmtAmt = n => n < 0.0001
+      ? n.toExponential(2)
+      : n.toLocaleString(undefined, { maximumFractionDigits: 4, useGrouping: false });
+    const fmtP = n => n < 0.000001
+      ? n.toExponential(2)
+      : n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+
+    const trades = swaps.reverse().map(ev => {
+      const { amount0In, amount0Out, amount1In, amount1Out } = ev.args;
+      let isBuy, tokenAmt, ethAmt;
+
+      if (isToken0) {
+        if (!amount1In.isZero()) {
+          isBuy = true;
+          tokenAmt = parseFloat(ethers.utils.formatUnits(amount0Out, dec));
+          ethAmt   = parseFloat(ethers.utils.formatEther(amount1In));
+        } else {
+          isBuy = false;
+          tokenAmt = parseFloat(ethers.utils.formatUnits(amount0In, dec));
+          ethAmt   = parseFloat(ethers.utils.formatEther(amount1Out));
+        }
+      } else {
+        if (!amount0In.isZero()) {
+          isBuy = true;
+          tokenAmt = parseFloat(ethers.utils.formatUnits(amount1Out, dec));
+          ethAmt   = parseFloat(ethers.utils.formatEther(amount0In));
+        } else {
+          isBuy = false;
+          tokenAmt = parseFloat(ethers.utils.formatUnits(amount1In, dec));
+          ethAmt   = parseFloat(ethers.utils.formatEther(amount0Out));
+        }
+      }
+
+      const usdtAmt = ethToUSDT(ethAmt);
+      const price   = tokenAmt > 0 ? usdtAmt / tokenAmt : 0;
+      return { isBuy, tokenAmt, usdtAmt, price };
+    });
+
+    const buys  = trades.filter(t => t.isBuy).slice(0, 5);
+    const sells = trades.filter(t => !t.isBuy).slice(0, 5);
+
+    if (!buys.length && !sells.length) {
+      histEl.innerHTML = `
+        <div style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
+          <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:14px;">RECENT TRADES</div>
+          <div style="color:var(--muted);font-size:12px;font-family:var(--font-mono);">No trades yet.</div>
+        </div>`;
+      return;
+    }
+
+    const mkRows = (list, color, side) => list.length
+      ? list.map(r => `
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="color:${color};font-family:var(--font-mono);font-size:11px;">$${fmtP(r.price)}</div>
+            <div style="color:${color};font-family:var(--font-mono);font-size:11px;">${fmtAmt(r.tokenAmt)}</div>
+            <div style="color:${color};font-family:var(--font-mono);font-size:11px;">$${fmtAmt(r.usdtAmt)}</div>
+          </div>`).join('')
+      : `<div style="color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:8px 0;">No ${side} trades yet</div>`;
+
+    histEl.innerHTML = `
+      <div style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
+        <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:14px;">RECENT TRADES</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div>
+            <div style="font-size:10px;color:#4ade80;font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:8px;font-weight:700;">▲ BUYS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid rgba(74,222,128,0.25);">
+              <div style="font-size:9px;color:#4ade80;font-family:var(--font-mono);letter-spacing:1px;">PRICE</div>
+              <div style="font-size:9px;color:#4ade80;font-family:var(--font-mono);letter-spacing:1px;">AMT (${tokenSymbol})</div>
+              <div style="font-size:9px;color:#4ade80;font-family:var(--font-mono);letter-spacing:1px;">USDT</div>
+            </div>
+            ${mkRows(buys, '#4ade80', 'buy')}
+          </div>
+          <div>
+            <div style="font-size:10px;color:#f87171;font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:8px;font-weight:700;">▼ SELLS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid rgba(248,113,113,0.25);">
+              <div style="font-size:9px;color:#f87171;font-family:var(--font-mono);letter-spacing:1px;">PRICE</div>
+              <div style="font-size:9px;color:#f87171;font-family:var(--font-mono);letter-spacing:1px;">AMT (${tokenSymbol})</div>
+              <div style="font-size:9px;color:#f87171;font-family:var(--font-mono);letter-spacing:1px;">USDT</div>
+            </div>
+            ${mkRows(sells, '#f87171', 'sell')}
+          </div>
+        </div>
+      </div>`;
+  } catch(e) {
+    histEl.innerHTML = `
+      <div style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
+        <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;margin-bottom:8px;">RECENT TRADES</div>
+        <div style="color:#ff5050;font-size:11px;font-family:var(--font-mono);">Failed to load trades.</div>
+      </div>`;
+  }
 }
 
 function switchPoolMode(mode) {
@@ -255,20 +461,15 @@ async function poolBuyTokens() {
     const amounts  = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
     const minOut   = amounts[1].mul(1000 - slipPct * 10).div(1000);
     const deadline = Math.floor(Date.now()/1000) + 300;
-
     toast('Confirm transaction in MetaMask…', 'info');
     const tx = await router.swapExactETHForTokens(
-      minOut,
-      [DEX_WETH, window._poolSelectedToken],
-      walletAddress,
-      deadline,
-      { value: ethIn }
+      minOut, [DEX_WETH, window._poolSelectedToken], walletAddress, deadline, { value: ethIn }
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
     toast('Buy successful!', 'success');
-    document.getElementById('poolBuyETH').value = '';
+    document.getElementById('poolBuyETH').value   = '';
     document.getElementById('poolBuyToken').value = '';
     loadPoolInfo(window._poolSelectedToken);
   } catch(e) {
@@ -287,7 +488,6 @@ async function poolSellTokens() {
   try {
     const erc20  = new ethers.Contract(window._poolSelectedToken, ERC20_ABI, signer);
     const amtIn  = ethers.utils.parseUnits(amt.toString(), window._poolTokenDecimals);
-
     const balance = await erc20.balanceOf(walletAddress);
     if (balance.lt(amtIn)) {
       const have = parseFloat(ethers.utils.formatUnits(balance, window._poolTokenDecimals));
@@ -295,25 +495,19 @@ async function poolSellTokens() {
       _txDone();
       return;
     }
-
-    const router  = getRouter();
-    const amounts = await router.getAmountsOut(amtIn, [window._poolSelectedToken, DEX_WETH]);
-    const minETH  = amounts[1].mul(1000 - slipPct * 10).div(1000);
+    const router   = getRouter();
+    const amounts  = await router.getAmountsOut(amtIn, [window._poolSelectedToken, DEX_WETH]);
+    const minETH   = amounts[1].mul(1000 - slipPct * 10).div(1000);
     const deadline = Math.floor(Date.now()/1000) + 300;
-
     const allowance = await erc20.allowance(walletAddress, DEX_ROUTER);
     if (allowance.lt(amtIn)) {
       toast('Approve token spend in MetaMask…', 'info');
       const approveTx = await erc20.approve(DEX_ROUTER, amtIn);
       await approveTx.wait();
     }
-
     toast('Confirm swap in MetaMask…', 'info');
     const tx = await router.swapExactTokensForETH(
-      amtIn, minETH,
-      [window._poolSelectedToken, DEX_WETH],
-      walletAddress,
-      deadline
+      amtIn, minETH, [window._poolSelectedToken, DEX_WETH], walletAddress, deadline
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
@@ -331,6 +525,7 @@ async function poolSellTokens() {
 window.loadPoolPanel    = loadPoolPanel;
 window.loadPoolInfo     = loadPoolInfo;
 window.switchPoolMode   = switchPoolMode;
+window._stopPoolPolling = _stopPoolPolling;
 window.onBuyEthInput    = onBuyEthInput;
 window.onBuyTokenInput  = onBuyTokenInput;
 window.onSellTokenInput = onSellTokenInput;

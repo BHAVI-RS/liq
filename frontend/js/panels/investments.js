@@ -51,7 +51,8 @@ async function loadInvestments() {
     // the saved entry is stale and we start fresh from the real blockNow.
     if (_lastLoadWallTime === 0) {
       try {
-        const saved = JSON.parse(sessionStorage.getItem('hordex_eff_time') || 'null');
+        const _rawSaved = localStorage.getItem('hordex_eff_time') || sessionStorage.getItem('hordex_eff_time');
+        const saved = JSON.parse(_rawSaved || 'null');
         if (saved && saved.blockNow === blockNow) {
           const elapsed = Math.max(0, wallNow - saved.wallNow);
           _maxEffectiveNow = Math.max(blockNow, saved.effectiveNow + elapsed);
@@ -70,7 +71,9 @@ async function loadInvestments() {
 
     // Persist for the next page load / session restore
     try {
-      sessionStorage.setItem('hordex_eff_time', JSON.stringify({ blockNow, effectiveNow, wallNow }));
+      const _effTimeStr = JSON.stringify({ blockNow, effectiveNow, wallNow });
+      sessionStorage.setItem('hordex_eff_time', _effTimeStr);
+      localStorage.setItem('hordex_eff_time', _effTimeStr);
     } catch(_) {}
 
     if (!lpLocks.length) {

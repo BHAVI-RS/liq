@@ -80,8 +80,8 @@
           <div class="landing-stat-label">Total Funding</div>
         </div>
         <div class="landing-stat">
-          <div class="landing-stat-val">$0</div>
-          <div class="landing-stat-label">Staking Rewards</div>
+          <div class="landing-stat-val" id="ls-staking-rewards">—</div>
+          <div class="landing-stat-label">Staking Rewards Paid</div>
         </div>
       </div>
 
@@ -416,12 +416,12 @@
     <div id="dashStatsRow" style="display:none;">
       <!-- Row 1 -->
       <div class="dash-stat-card" id="dashCard-pnl" data-graph="pnl" onclick="openStatGraph('pnl')" title="Click to view chart">
-        <div class="dash-stat-label">OVERALL P/L <span class="dash-stat-chart-hint">↗</span></div>
+        <div class="dash-stat-label">My Wealth <span class="dash-stat-chart-hint">↗</span></div>
         <div id="dashPnL" class="dash-stat-val">—</div>
         <div id="dashPnLPct" class="dash-stat-sub"></div>
       </div>
-      <div class="dash-stat-card" id="dashCard-invested" style="cursor:default;">
-        <div class="dash-stat-label">TOTAL INVESTED</div>
+      <div class="dash-stat-card" id="dashCard-invested" onclick="switchTabByName('investments')" title="Click to view investments" style="cursor:pointer;">
+        <div class="dash-stat-label">TOTAL INVESTED <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashTotalInvested" class="dash-stat-val" style="color:var(--gold);">—</div>
         <div id="dashTotalInvestedUSD" class="dash-stat-sub"></div>
       </div>
@@ -433,12 +433,12 @@
       </div>
       <div class="dash-stat-card" id="dashCard-staking" onclick="navToRewards('staking')" title="Click to view staking rewards">
         <div class="dash-stat-label">STAKING REWARDS <span class="dash-stat-chart-hint">→</span></div>
-        <div id="dashStakingRewards" class="dash-stat-val" style="color:#a78bfa;">—</div>
+        <div id="dashStakingRewards" class="dash-stat-val" style="color:var(--gold);">—</div>
         <div class="dash-stat-sub">no active staking</div>
       </div>
       <!-- Row 3 -->
-      <div class="dash-stat-card" id="dashCard-lpvalue" style="cursor:default;">
-        <div class="dash-stat-label">LP POSITIONS</div>
+      <div class="dash-stat-card" id="dashCard-lpvalue" onclick="navToRewards('lpfees')" title="Click to view LP fees" style="cursor:pointer;">
+        <div class="dash-stat-label">LP Fees <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
         <div id="dashTotalValueUSD" class="dash-stat-sub"></div>
         <div id="dashLPTokens" class="dash-stat-sub" style="margin-top:2px;color:var(--muted);"></div>
@@ -575,17 +575,14 @@
         <button onclick="loadPoolInfo(window._poolSelectedToken)" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">↻ REFRESH</button>
       </div>
 
-      <!-- Stats grid -->
-      <div id="poolStats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px;"></div>
-
-      <!-- Trade section -->
-      <div style="border-top:1px solid var(--border);padding-top:20px;">
+      <!-- Trade section (above stats) -->
+      <div style="margin-bottom:24px;">
         <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:18px;width:fit-content;">
           <button id="poolBuyBtn"  onclick="switchPoolMode('buy')"  style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--success,#26d97f);color:#000;font-weight:700;">BUY</button>
           <button id="poolSellBtn" onclick="switchPoolMode('sell')" style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--surface);color:var(--muted);">SELL</button>
         </div>
 
-        <!-- BUY form — bidirectional: type ETH or type tokens, the other auto-fills -->
+        <!-- BUY form -->
         <div id="poolBuyForm">
           <div class="field">
             <label>ETH to spend</label>
@@ -601,9 +598,7 @@
             <input id="poolBuyToken" type="number" min="0" step="1" placeholder="0"
                    oninput="onBuyTokenInput()" onfocus="this.select()">
           </div>
-          <div style="margin:6px 0 12px;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
-            Price impact &amp; 0.3% fee included · type either amount
-          </div>
+          <div id="poolBuyRate" style="margin:6px 0 12px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
           <div class="field">
             <label style="display:flex;justify-content:space-between;"><span>Slippage tolerance</span><span id="poolBuySlipLabel" style="color:var(--gold);">1%</span></label>
             <input type="range" id="poolBuySlip" min="1" max="50" value="1" oninput="document.getElementById('poolBuySlipLabel').textContent=this.value+'%'" style="width:100%;accent-color:var(--gold);">
@@ -611,7 +606,7 @@
           <button class="btn btn-primary" onclick="poolBuyTokens()">BUY TOKENS</button>
         </div>
 
-        <!-- SELL form — bidirectional: type tokens or type ETH desired, the other auto-fills -->
+        <!-- SELL form -->
         <div id="poolSellForm" style="display:none;">
           <div class="field">
             <label style="display:flex;justify-content:space-between;">
@@ -629,9 +624,7 @@
             <input id="poolSellETH" type="number" min="0" step="0.0001" placeholder="0.00000000"
                    oninput="onSellEthInput()" onfocus="this.select()">
           </div>
-          <div style="margin:6px 0 12px;font-size:10px;color:var(--muted);font-family:var(--font-mono);">
-            Price impact &amp; 0.3% fee included · type either amount
-          </div>
+          <div id="poolSellRate" style="margin:6px 0 12px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
           <div class="field">
             <label style="display:flex;justify-content:space-between;"><span>Slippage tolerance</span><span id="poolSellSlipLabel" style="color:var(--gold);">1%</span></label>
             <input type="range" id="poolSellSlip" min="1" max="50" value="1" oninput="document.getElementById('poolSellSlipLabel').textContent=this.value+'%'" style="width:100%;accent-color:var(--gold);">
@@ -639,6 +632,12 @@
           <button class="btn btn-primary" onclick="poolSellTokens()">SELL TOKENS</button>
         </div>
       </div>
+
+      <!-- Stats grid -->
+      <div id="poolStats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px;"></div>
+
+      <!-- Trade history / orderbook -->
+      <div id="poolTradeHistory"></div>
     </div>
   </div>
 
@@ -684,7 +683,7 @@
     </div>
 
     <!-- LP POOL FEES -->
-    <div class="card">
+    <div class="card" id="rwLPFeesCard">
       <div class="card-title">LP POOL FEES <span style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1px;font-family:var(--font-body);font-weight:400;">(UNISWAP V2 · 0.3%)</span></div>
       <div id="rwLPFeesContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
     </div>

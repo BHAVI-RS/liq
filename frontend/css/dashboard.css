@@ -270,7 +270,7 @@
 
 /* ── RESPONSIVE — phone (≤ 480px) ── */
 @media (max-width: 480px) {
-  .dash-stat-val   { font-size: 15px; }
+  .dash-stat-val   { font-size: 17px; }
   .dash-inv-card   { padding: 14px 12px; }
   .dash-inv-grid   { gap: 10px 12px; }
   .dash-countdown .cd-num { font-size: 15px; }

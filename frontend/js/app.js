@@ -38,11 +38,6 @@ async function checkMissedCommissions() {
     _missedCommWei = missedWei;
     if (missedWei.isZero()) return;
 
-    // Only show the alert when the user has no active LP — prompts them to re-invest.
-    const locks     = await contract.getUserLPLocks(walletAddress);
-    const hasActive = locks.some(l => !l.claimed && !l.removed);
-    if (hasActive) return;
-
     const ethMissed  = parseFloat(ethers.utils.formatEther(missedWei));
     const usdtMissed = ethToUSDT(ethMissed).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
@@ -244,6 +239,11 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('lcf-contract-addr');
   if (el && typeof CONTRACT_ADDRESS !== 'undefined') el.textContent = CONTRACT_ADDRESS;
+  const footerLink = document.getElementById('footerContractLink');
+  if (footerLink && typeof CONTRACT_ADDRESS !== 'undefined') {
+    footerLink.href = `https://etherscan.io/address/${CONTRACT_ADDRESS}`;
+    footerLink.textContent = CONTRACT_ADDRESS;
+  }
 });
 
 // Close mobile nav on ESC
@@ -319,10 +319,11 @@ async function loadLandingStats(eth) {
     const readProvider = new ethers.providers.Web3Provider(eth);
     const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
 
-    const [regEvents, investEvents, removeEvents] = await Promise.all([
+    const [regEvents, investEvents, removeEvents, stakingEvents] = await Promise.all([
       readContract.queryFilter(readContract.filters.UserRegistered()),
       readContract.queryFilter(readContract.filters.Invested()),
       readContract.queryFilter(readContract.filters.LPRemoved()),
+      readContract.queryFilter(readContract.filters.StakingRewardClaimed()).catch(() => []),
     ]);
 
     const totalUsers = regEvents.length + 1;
@@ -346,10 +347,20 @@ async function loadLandingStats(eth) {
     const totalETH = parseFloat(ethers.utils.formatEther(totalWei));
 
     const $ = id => document.getElementById(id);
+    let totalStakingETH = 0;
+    for (const ev of stakingEvents) {
+      const ethEq = parseFloat(ethers.utils.formatEther(ev.args.ethEquivalent || 0));
+      if (ethEq > 0) totalStakingETH += ethEq;
+    }
+
     if ($('ls-total-users'))   $('ls-total-users').textContent   = totalUsers.toLocaleString();
     if ($('ls-active-users'))  $('ls-active-users').textContent  = activeUsers.toLocaleString();
     if ($('ls-total-funding')) $('ls-total-funding').textContent =
       totalETH > 0 ? ethToUSDT(totalETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT';
+    if ($('ls-staking-rewards')) $('ls-staking-rewards').textContent =
+      totalStakingETH > 0
+        ? ethToUSDT(totalStakingETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT'
+        : '0 USDT';
     if ($('lcf-contract-addr') && typeof CONTRACT_ADDRESS !== 'undefined')
       $('lcf-contract-addr').textContent = CONTRACT_ADDRESS;
   } catch (_) {}
@@ -561,7 +572,8 @@ async function _onLoginCheckInvestments() {
     // same effectiveNow reference even before loadInvestments() has been called.
     let effectiveNow = blockNow;
     try {
-      const saved = JSON.parse(sessionStorage.getItem('hordex_eff_time') || 'null');
+      const _rawEff = localStorage.getItem('hordex_eff_time') || sessionStorage.getItem('hordex_eff_time');
+      const saved = JSON.parse(_rawEff || 'null');
       if (saved && saved.blockNow === blockNow) {
         effectiveNow = Math.max(blockNow, saved.effectiveNow + Math.max(0, wallNow - saved.wallNow));
       }

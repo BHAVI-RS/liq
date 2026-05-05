@@ -2,6 +2,12 @@
 // var (not let) so these are window-level globals visible across script tags
 var _dashCountdownInterval = null;
 var _invCountdownInterval  = null;
+
+// ── Dashboard staking live ticker ──
+var _dashStakingTickInterval = null;
+var _dashStakingTickLocks    = [];
+var _dashStakingTickBase     = 0;
+var _dashStakingTickWall     = 0;
 var _dashRefNow    = 0;
 var _dashWallRef   = 0;
 // Offset between blockchain time and wall clock (can differ on Hardhat mainnet forks).
@@ -123,6 +129,38 @@ function _dashTickCountdowns() {
   }
 }
 
+function _dashStopStakingTicker() {
+  if (_dashStakingTickInterval) { clearInterval(_dashStakingTickInterval); _dashStakingTickInterval = null; }
+}
+
+function _dashStartStakingTicker() {
+  _dashStopStakingTicker();
+  if (!_dashStakingTickLocks.length) return;
+  _dashStakingTickInterval = setInterval(() => {
+    const el = document.getElementById('dashStakingRewards');
+    if (!el) { _dashStopStakingTicker(); return; }
+    const now = _dashStakingTickBase + (Math.floor(Date.now() / 1000) - _dashStakingTickWall);
+    // Total staking earned = completed locks (full 30%) + ongoing locks (partial, ticking).
+    // Pure time-based — no price dependency, so the value is stable across refreshes
+    // and only increases as ongoing locks accumulate.
+    let totalETH = 0;
+    for (let i = 0; i < _dashStakingTickLocks.length; i++) {
+      const lock       = _dashStakingTickLocks[i];
+      if (lock.removed) continue;
+      const ut         = Number(lock.unlockTime);
+      const la         = Number(lock.lockedAt) || (ut - 60);
+      const dur        = Math.max(ut - la, 60);
+      const eth        = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const effectiveNow = now >= ut ? ut : now;
+      const elapsed    = Math.max(0, effectiveNow - la);
+      totalETH += dur > 0 ? eth * 0.30 * elapsed / dur : 0;
+    }
+    el.innerHTML = totalETH > 0.000001
+      ? `<span style="color:var(--gold);">${fmtUSDT(totalETH)}</span>`
+      : '<span style="color:var(--muted);">—</span>';
+  }, 1000);
+}
+
 async function _dashGetPoolPrice(tokenAddr) {
   try {
     const factory  = getFactory();
@@ -204,10 +242,10 @@ let _graphPendingTimer = null;
 
 const GRAPH_OPTS = {
   invested: { label: 'TOTAL INVESTED',    unit: 'USDT', color: '#c9a84c', yLabel: 'USDT Invested' },
-  lpvalue:  { label: 'LP POSITIONS',      unit: 'USDT', color: '#e2e8f0', yLabel: 'USDT (at current price)' },
+  lpvalue:  { label: 'LP FEES',           unit: 'USDT', color: '#e2e8f0', yLabel: 'USDT (LP P/L)' },
   referral: { label: 'REFERRAL EARNINGS', unit: 'USDT', color: '#4ade80', yLabel: 'USDT Earned' },
   staking:  { label: 'STAKING REWARDS',   unit: 'USDT', color: '#a78bfa', yLabel: 'USDT value of token rewards' },
-  pnl:      { label: 'OVERALL P/L',       unit: 'USDT', color: '#60a5fa', yLabel: 'USDT P/L' },
+  pnl:      { label: 'My Wealth',         unit: 'USDT', color: '#60a5fa', yLabel: 'USDT Total Value' },
   locks:    { label: 'ACTIVE LOCKS',      unit: '',     color: '#c9a84c', yLabel: 'Positions' },
 };
 
@@ -631,6 +669,7 @@ async function loadDashboard() {
       '<div class="empty-state" style="margin-top:20px;">Connect wallet to load your dashboard.</div>';
     return;
   }
+  _dashStopStakingTicker();
   _tabLoaded.add('dashboard');
   document.getElementById('dashLoadingState').innerHTML = '';
 
@@ -643,10 +682,18 @@ async function loadDashboard() {
   }
   document.getElementById('dashStatsRow').style.display = 'grid';
 
+  // Show refreshing state so user sees feedback immediately on refresh clicks.
+  const _stakingElRef = document.getElementById('dashStakingRewards');
+  if (_stakingElRef) _stakingElRef.innerHTML = '<span style="color:var(--muted);font-size:12px;">···</span>';
+
   try {
-    const [lpLocks, commStats] = await Promise.all([
+    const [lpLocks, commStats, stakingReward, platformToken, stakingEvents, latestBlock] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
-      contract.getUserCommissionStats(walletAddress).catch(() => null)
+      contract.getUserCommissionStats(walletAddress).catch(() => null),
+      contract.getStakingReward(walletAddress).catch(() => null),
+      contract.platformToken(),
+      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress)).catch(() => []),
+      provider.getBlock('latest').catch(() => null),
     ]);
 
     const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned))       : 0;
@@ -659,10 +706,13 @@ async function loadDashboard() {
     let totalCurrentETH  = 0;
     let activeLocks      = 0;
     let totalLPTokens    = 0;
+    let poolCache        = new Map();
+
+    // Use blockchain time to match what the contract uses for lock expiry.
+    const _nowTs = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
 
     if (lpLocks.length) {
       const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
-      const poolCache = new Map();
       await Promise.all(tokenSet.map(async addr => {
         const d = await _dashGetPoolPrice(addr);
         if (d) poolCache.set(addr, d);
@@ -670,13 +720,49 @@ async function loadDashboard() {
 
       for (const lock of lpLocks) {
         totalInvestedETH += parseFloat(ethers.utils.formatEther(lock.ethInvested));
-        if (!lock.claimed && !lock.removed) {
+        if (!lock.claimed && !lock.removed && Number(lock.unlockTime) > _nowTs) {
           activeLocks++;
           totalLPTokens += parseFloat(ethers.utils.formatEther(lock.lpAmount));
         }
         const pool = poolCache.get(lock.token.toLowerCase());
         if (pool && !lock.removed) totalCurrentETH += _dashComputeLPValue(lock.lpAmount, pool.resETH, pool.totalLPSupply);
       }
+    }
+
+    // ── Staking live ticker setup ──
+    const _wallNow = Math.floor(Date.now() / 1000);
+    const _blockTs = latestBlock ? latestBlock.timestamp : _wallNow;
+    // Keep _effNow monotonically advancing: take max(fresh block time,
+    // wall-clock-advanced saved time). This prevents the ticker from restarting
+    // on refresh when the blockchain hasn't mined a new block (e.g. Hardhat).
+    let _effNow = _blockTs;
+    try {
+      const _rawRef = localStorage.getItem('hordex_staking_ref') || sessionStorage.getItem('hordex_staking_ref');
+      const _sv = JSON.parse(_rawRef || 'null');
+      if (_sv && typeof _sv.effNow === 'number' && typeof _sv.wallNow === 'number') {
+        _effNow = Math.max(_blockTs, _sv.effNow + Math.max(0, _wallNow - _sv.wallNow));
+      }
+    } catch(_) {}
+    const _stakingRefStr = JSON.stringify({ effNow: _effNow, wallNow: _wallNow });
+    sessionStorage.setItem('hordex_staking_ref', _stakingRefStr);
+    localStorage.setItem('hordex_staking_ref', _stakingRefStr);
+
+    _dashStakingTickLocks  = lpLocks;
+    _dashStakingTickBase   = _effNow;
+    _dashStakingTickWall   = _wallNow;
+
+    let _initTotalETH = 0, _initAnyActive = false;
+    for (let _i = 0; _i < lpLocks.length; _i++) {
+      const _l          = lpLocks[_i];
+      if (_l.removed) continue;
+      const _ut         = Number(_l.unlockTime);
+      const _la         = Number(_l.lockedAt) || (_ut - 60);
+      const _dur        = Math.max(_ut - _la, 60);
+      const _eth        = parseFloat(ethers.utils.formatEther(_l.ethInvested));
+      const _effLockNow = _effNow >= _ut ? _ut : _effNow;
+      const _el2        = Math.max(0, _effLockNow - _la);
+      _initTotalETH += _dur > 0 ? _eth * 0.30 * _el2 / _dur : 0;
+      if (_effNow < _ut) _initAnyActive = true;
     }
 
     const totalValueETH = totalCurrentETH + refEarningsETH;
@@ -686,7 +772,9 @@ async function loadDashboard() {
 
     document.getElementById('dashTotalInvested').innerHTML     = fmtUSDT(totalInvestedETH);
     document.getElementById('dashTotalInvestedUSD').innerHTML  = '';
-    document.getElementById('dashTotalValue').innerHTML        = totalCurrentETH > 0 ? fmtUSDT(totalCurrentETH) : '—';
+    const lpFeesETH = Math.max(0, totalCurrentETH - totalInvestedETH);
+    document.getElementById('dashTotalValue').innerHTML        = totalInvestedETH > 0 ? fmtUSDT(lpFeesETH) : '—';
+    document.getElementById('dashTotalValue').style.color      = 'white';
     document.getElementById('dashTotalValueUSD').innerHTML     = '';
     const lpTokensEl = document.getElementById('dashLPTokens');
     if (lpTokensEl) lpTokensEl.textContent = totalLPTokens > 0 ? totalLPTokens.toFixed(6) + ' LP' : '';
@@ -700,18 +788,21 @@ async function loadDashboard() {
     const eligBadge = isEligible
       ? '<span style="font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">ELIGIBLE</span>'
       : '<span style="font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">INELIGIBLE</span>';
-    document.getElementById('dashStakingRewards').innerHTML = '—';
+    document.getElementById('dashStakingRewards').innerHTML = _initTotalETH > 0.000001
+      ? `<span style="color:var(--gold);">${fmtUSDT(_initTotalETH)}</span>` : '<span style="color:var(--muted);">—</span>';
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');
-    if (stakingSubEl) stakingSubEl.textContent = 'not available';
+    if (stakingSubEl) stakingSubEl.textContent = _initAnyActive
+      ? 'accumulating'
+      : lpLocks.length ? 'period complete · claim in rewards' : 'no active staking';
+    _dashStartStakingTicker();
     const refLabelEl = document.querySelector('#dashCard-referral .dash-stat-label');
     if (refLabelEl) refLabelEl.innerHTML = `REFERRAL EARNINGS ${eligBadge} <span class="dash-stat-chart-hint">→</span>`;
 
     const pnlEl = document.getElementById('dashPnL');
-    pnlEl.style.color = pnlCls;
-    pnlEl.innerHTML = totalInvestedETH > 0 ? fmtUSDT(pnlETH, {sign: true}) : '—';
+    pnlEl.style.color = '#4ade80'; // Always green for My Wealth
+    pnlEl.innerHTML = totalValueETH > 0 ? fmtUSDT(totalValueETH) : '—';
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
-    pnlPctEl.textContent  = totalInvestedETH > 0 ? (pnlETH >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%  (LP + Referral)' : '';
 
     document.getElementById('dashActiveLocks').textContent = activeLocks || '0';
 
@@ -728,7 +819,9 @@ async function loadDashboard() {
 function navToRewards(section) {
   switchTabByName('rewards');
   setTimeout(() => {
-    const cardId = section === 'staking' ? 'rwStakingCard' : 'rwRefCard';
+    const cardId = section === 'staking' ? 'rwStakingCard'
+                 : section === 'lpfees'  ? 'rwLPFeesCard'
+                 :                         'rwRefCard';
     const el = document.getElementById(cardId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, 150);
