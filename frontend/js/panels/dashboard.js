@@ -693,13 +693,6 @@ async function loadDashboard(silent = false) {
   _tabLoaded.add('dashboard');
   document.getElementById('dashLoadingState').innerHTML = '';
 
-  loadFeaturedBanner();
-
-  if (!_isOwner) {
-    const refBase = window.location.href.split('?')[0];
-    document.getElementById('dashRefLink').value = refBase + '?ref=' + walletAddress;
-    document.getElementById('dashRefCard').style.display = '';
-  }
   document.getElementById('dashStatsRow').style.display = 'grid';
 
   // Show refreshing indicator on user-triggered loads only; skip on background polls.

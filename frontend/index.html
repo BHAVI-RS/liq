@@ -383,22 +383,7 @@
   <!-- DASHBOARD PANEL -->
   <div id="panel-dashboard" class="panel active">
 
-    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
-      <button class="btn btn-secondary" onclick="loadDashboard()" style="width:auto;padding:10px 20px;">↻ REFRESH</button>
-    </div>
 
-    <!-- NEW LAUNCH NOTIFICATION BANNER -->
-    <div id="dashFeaturedBanner" style="display:none;position:relative;background:#c9a84c;border-radius:8px;padding:11px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="background:#22c55e;color:#fff;font-size:9px;letter-spacing:2px;padding:3px 10px;border-radius:4px;font-family:var(--font-mono);flex-shrink:0;font-weight:600;">FEATURED</span>
-      <div id="featuredLogo" style="width:28px;height:28px;border-radius:5px;overflow:hidden;background:rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">⬡</div>
-      <div style="flex:1;min-width:0;">
-        <span id="featuredSymbol" style="font-family:var(--font-display);font-size:15px;letter-spacing:2px;color:#1a1209;"></span>
-        <span id="featuredName" style="font-size:11px;color:rgba(0,0,0,0.55);margin-left:8px;"></span>
-      </div>
-      <span style="font-size:10px;color:rgba(0,0,0,0.55);font-family:var(--font-mono);letter-spacing:1px;">NEW LAUNCH</span>
-      <button onclick="(typeof mobileNavSwitch==='function'?mobileNavSwitch('invest'):switchTabByName('invest'))" style="background:rgba(0,0,0,0.15);border:none;padding:7px 16px;border-radius:4px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;color:#1a1209;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='rgba(0,0,0,0.25)'" onmouseout="this.style.background='rgba(0,0,0,0.15)'">INVEST NOW</button>
-      <button onclick="dismissFeaturedBanner()" style="background:none;border:none;color:rgba(0,0,0,0.45);font-size:20px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;">&times;</button>
-    </div>
 
     <!-- MISSED COMMISSIONS NOTIFICATION -->
     <div id="dashMissedCommBanner" class="dash-missed-banner" style="display:none;">
@@ -408,18 +393,6 @@
         <div class="dmb-msg">You have missed <span id="dashMissedAmount" class="dmb-amount">—</span> in referral commissions. Invest more to unlock your full earning capacity.</div>
       </div>
       <button class="dmb-action" onclick="navToRewards('referral')">VIEW DETAILS</button>
-    </div>
-
-    <!-- REFERRAL LINK -->
-    <div class="card" id="dashRefCard" style="display:none;">
-      <div class="card-title">YOUR REFERRAL LINK</div>
-      <div style="display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;">
-        <input id="dashRefLink" type="text" readonly
-          style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:11px 14px;font-family:var(--font-mono);font-size:12px;color:var(--gold);outline:none;cursor:pointer;"
-          onclick="this.select()" />
-        <button class="btn btn-secondary" onclick="copyRefLink()"
-          style="width:auto;padding:10px 22px;flex-shrink:0;">COPY</button>
-      </div>
     </div>
 
     <!-- STATS GRID -->
@@ -484,9 +457,6 @@
 
   <!-- INVESTMENTS PANEL -->
   <div id="panel-investments" class="panel">
-    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
-      <button class="btn btn-secondary" onclick="loadInvestments()" style="width:auto;padding:10px 20px;">↻ REFRESH</button>
-    </div>
     <div id="investmentsContent">
       <div class="empty-state">Connect wallet to view your investments.</div>
     </div>
@@ -496,7 +466,6 @@
   <div id="panel-invest" class="panel">
     <div class="card">
       <div class="card-title">NEW LAUNCHES</div>
-      <button class="btn btn-secondary" onclick="loadInvestTokens()" style="margin-bottom:20px;width:auto;padding:10px 20px;">↻ REFRESH</button>
       <div id="investTokenList" class="token-list">
         <div class="empty-state">Loading available tokens<span class='ld'><span></span><span></span><span></span></span></div>
       </div>
@@ -713,7 +682,6 @@
           <button id="geneListBtn" onclick="switchGeneView('list')" style="padding:9px 20px;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;border:none;cursor:pointer;background:var(--gold);color:#000;transition:background .15s;">LIST</button>
           <button id="geneTreeBtn" onclick="switchGeneView('tree')" style="padding:9px 20px;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;border:none;cursor:pointer;background:var(--surface);color:var(--muted);transition:background .15s;">TREE</button>
         </div>
-        <button class="btn btn-secondary" onclick="loadGenealogy()" style="width:auto;padding:9px 20px;">↻ REFRESH</button>
       </div>
 
       <!-- list view -->
@@ -727,9 +695,6 @@
 
   <!-- REWARDS PANEL -->
   <div id="panel-rewards" class="panel">
-    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
-      <button class="btn btn-secondary" onclick="loadRewards()" style="width:auto;padding:10px 20px;">↻ REFRESH</button>
-    </div>
 
     <!-- REFERRAL COMMISSIONS -->
     <div class="card" id="rwRefCard">
@@ -766,8 +731,6 @@
       <div style="display:flex;align-items:center;gap:0;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;">
         <button id="histTab-invest" class="hist-subtab active" onclick="switchHistoryTab('invest')">INVESTMENTS</button>
         <button id="histTab-pool"   class="hist-subtab"        onclick="switchHistoryTab('pool')">SWAP ACTIVITY</button>
-        <button class="btn btn-secondary" id="histRefreshBtn" onclick="_refreshHistoryTab()"
-          style="width:auto;padding:6px 14px;font-size:11px;margin-left:auto;margin-bottom:6px;">↻ REFRESH</button>
       </div>
 
       <!-- Investment history sub-panel -->
@@ -796,7 +759,6 @@
     <div class="card" id="ownerStatsCard">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
         <div class="card-title" style="margin-bottom:0;">PLATFORM OVERVIEW</div>
-        <button class="btn btn-secondary" onclick="loadOwnerStats()" style="width:auto;padding:8px 18px;font-size:11px;">↻ REFRESH</button>
       </div>
       <div id="ownerStatsContent">
         <div class="empty-state">Loading platform stats…</div>

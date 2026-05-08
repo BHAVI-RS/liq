@@ -340,20 +340,6 @@ async function loadOwnerStats() {
       </div>
     ` : '<div class="empty-state">No tokens registered.</div>';
 
-    if (shortageTokens.length > 0) {
-      const listEl = document.getElementById('shortagePopupList');
-      listEl.innerHTML = shortageTokens.map(t => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(224,80,80,0.07);border:1px solid rgba(224,80,80,0.25);border-radius:4px;">
-          <div>
-            <span style="color:var(--gold);font-size:12px;letter-spacing:1px;">${t.symbol}</span>
-            <span style="color:var(--muted);font-size:10px;margin-left:8px;">${t.addr.slice(0,10)}…</span>
-          </div>
-          <span style="color:var(--danger);font-size:12px;">${t.allowFloat.toFixed(2)} tokens remaining</span>
-        </div>
-      `).join('');
-      document.getElementById('shortagePopup').style.display = 'flex';
-    }
-
   } catch(e) {
     statsEl.innerHTML    = `<div style="color:var(--danger);font-size:12px;">Error loading stats: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
     approvalEl.innerHTML = `<div style="color:var(--danger);font-size:12px;">Error loading allowances.</div>`;
