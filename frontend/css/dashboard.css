@@ -238,14 +238,18 @@
 .stake-modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 32px 28px; width: min(420px,90vw); }
 .stake-modal-title { font-family: var(--font-display); font-size: 22px; letter-spacing: 2px; color: var(--cream); margin-bottom: 4px; }
 .stake-modal-sub { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 24px; }
-.stake-days-grid { display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; margin-bottom: 20px; }
+.stake-days-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 20px; }
 .stake-day-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; padding: 14px 4px; cursor: pointer; font-family: var(--font-mono); text-align: center; transition: all 0.15s; }
 .stake-day-btn .sdb-num { font-size: 18px; color: var(--cream); display: block; }
 .stake-day-btn .sdb-lbl { font-size: 9px; letter-spacing: 1.5px; color: var(--muted); display: block; margin-top: 2px; }
+.stake-day-btn .sdb-streak { font-size: 8px; letter-spacing: 1px; color: rgba(201,168,76,0.7); display: block; margin-top: 5px; text-transform: uppercase; }
+.stake-day-btn .sdb-reward { font-size: 10px; color: var(--gold); display: block; margin-top: 3px; }
+.stake-day-btn .sdb-pct { font-size: 9px; color: var(--muted); display: block; margin-top: 2px; letter-spacing: 0.5px; }
 .stake-day-btn:hover { border-color: var(--gold); }
 .stake-day-btn.selected { border-color: var(--gold); background: rgba(201,168,76,0.12); }
 .stake-day-btn.selected .sdb-num { color: var(--gold); }
 .stake-day-btn.selected .sdb-lbl { color: var(--gold); }
+.stake-day-btn.selected .sdb-pct { color: var(--gold); }
 .stake-unlock-info { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-height: 18px; margin-bottom: 20px; }
 .stake-unlock-info span { color: var(--cream); }
 .stake-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
@@ -278,4 +282,56 @@
   .dis-col { border-right: none; border-bottom: 1px solid var(--border); }
   .dis-col:last-child { border-bottom: none; }
   .dis-col-action { align-items: flex-start; min-width: unset; }
+}
+
+/* ── MISSED COMMISSIONS BANNER ── */
+.dash-missed-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(255,184,0,0.07);
+  border: 1px solid rgba(255,184,0,0.35);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.dmb-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  color: var(--warn);
+}
+.dmb-body { flex: 1; min-width: 0; }
+.dmb-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--warn);
+  margin-bottom: 5px;
+}
+.dmb-msg {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cream);
+  line-height: 1.55;
+}
+.dmb-amount { color: var(--warn); font-weight: 600; }
+.dmb-action {
+  background: rgba(255,184,0,0.1);
+  border: 1px solid rgba(255,184,0,0.4);
+  color: var(--warn);
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.dmb-action:hover { background: rgba(255,184,0,0.2); }
+@media (max-width: 480px) {
+  .dash-missed-banner { flex-direction: column; align-items: flex-start; }
+  .dmb-action { align-self: stretch; text-align: center; }
 }

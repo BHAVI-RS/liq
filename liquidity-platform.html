@@ -2851,27 +2851,81 @@ function fmtUSDT(ethFloat, opts = {}) {
 // ── MISSED COMMISSION TRACKING ──
 let _missedCommWei = null;
 
+async function _computeMissedWei() {
+  const ownerAddr = (await contract.owner()).toLowerCase();
+  if (walletAddress.toLowerCase() === ownerAddr) return ethers.BigNumber.from(0);
+
+  const PAID_TOPIC  = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
+  const userPadded  = ethers.utils.hexZeroPad(walletAddress.toLowerCase(), 32).toLowerCase();
+  let missedWei = ethers.BigNumber.from(0);
+
+  const visited = new Set([walletAddress.toLowerCase()]);
+  let frontier = [walletAddress.toLowerCase()];
+
+  for (let depth = 1; depth <= 10; depth++) {
+    const nextFrontier = [];
+    const membersAtDepth = [];
+
+    await Promise.all(frontier.map(async (addr) => {
+      const refs = await contract.getReferrals(addr).catch(() => []);
+      for (const ref of refs) {
+        const refLower = ref.toLowerCase();
+        if (!visited.has(refLower)) {
+          visited.add(refLower);
+          nextFrontier.push(refLower);
+          membersAtDepth.push(refLower);
+        }
+      }
+    }));
+
+    if (membersAtDepth.length === 0) break;
+
+    await Promise.all(membersAtDepth.map(async (member) => {
+      const logs = await provider.getLogs({
+        address: contract.address,
+        topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
+        fromBlock: 0,
+        toBlock: 'latest',
+      });
+
+      let totalAtLevel    = ethers.BigNumber.from(0);
+      let receivedAtLevel = ethers.BigNumber.from(0);
+
+      for (const log of logs) {
+        const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
+        if (Number(level) !== depth) continue;
+        totalAtLevel = totalAtLevel.add(amount);
+        if (log.topics[1].toLowerCase() === userPadded) {
+          receivedAtLevel = receivedAtLevel.add(amount);
+        }
+      }
+
+      if (totalAtLevel.gt(receivedAtLevel)) {
+        missedWei = missedWei.add(totalAtLevel.sub(receivedAtLevel));
+      }
+    }));
+
+    frontier = nextFrontier;
+  }
+
+  return missedWei;
+}
+
 async function checkMissedCommissions() {
   if (!contract || !walletAddress) return;
   try {
-    const stats  = await contract.getUserCommissionStats(walletAddress);
-    const missed = stats.missed;
-    _missedCommWei = missed;
-    if (missed.isZero()) return;
+    const missedWei = await _computeMissedWei();
+    _missedCommWei = missedWei;
+    if (missedWei.isZero()) return;
 
-    // Only suppress if user has active (unclaimed, not-removed) LP positions
-    const locks     = await contract.getUserLPLocks(walletAddress);
-    const hasActive = locks.some(l => !l.claimed && !l.removed);
-    if (hasActive) return;
-
-    const ethMissed  = parseFloat(ethers.utils.formatEther(missed));
+    const ethMissed  = parseFloat(ethers.utils.formatEther(missedWei));
     const usdtMissed = ethToUSDT(ethMissed).toLocaleString(undefined, { maximumFractionDigits: 2 });
     const ethFmt     = ethMissed.toFixed(6);
 
     document.getElementById('missedCommText').innerHTML =
-      `You have <strong style="color:#f87171;">${usdtMissed} USDT (${ethFmt} ETH)</strong> in uncollected referral commissions.<br><br>` +
-      `This occurred because your LP position was inactive, or you had reached your 5× earning cap, when your referrals made investments.<br><br>` +
-      `<strong>To become eligible again:</strong> ensure you have an active LP investment. Your pending cap carries forward when you reinvest.`;
+      `You have <strong style="color:#f87171;">${usdtMissed} USDT (${ethFmt} ETH)</strong> in missed referral commissions.<br><br>` +
+      `This includes commissions that fully bypassed you (inactive LP or cap reached) and commissions where you hit your 5× cap mid-payment — the excess that spilled to the next eligible upline is counted here.<br><br>` +
+      `<strong>To receive future commissions in full:</strong> ensure you have an active LP investment and sufficient cap remaining.`;
 
     const el = document.getElementById('missedCommAlert');
     el.style.display = 'flex';
@@ -3179,9 +3233,26 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── LANDING PAGE STATS ──
+const _LANDING_STATS_CACHE_KEY = 'hordex_landing_stats_v1';
+
+function _applyLandingStats(stats) {
+  const $ = id => document.getElementById(id);
+  if ($('ls-total-users'))   $('ls-total-users').textContent   = stats.totalUsers;
+  if ($('ls-active-users'))  $('ls-active-users').textContent  = stats.activeUsers;
+  if ($('ls-total-funding')) $('ls-total-funding').textContent = stats.totalFunding;
+}
+
 async function loadLandingStats(eth) {
+  if (typeof CONTRACT_ADDRESS === 'undefined' || typeof CONTRACT_ABI === 'undefined') return;
+
+  // ── Show cached stats immediately (instant) ──
   try {
-    if (typeof CONTRACT_ADDRESS === 'undefined' || typeof CONTRACT_ABI === 'undefined') return;
+    const cached = JSON.parse(localStorage.getItem(_LANDING_STATS_CACHE_KEY) || 'null');
+    if (cached) _applyLandingStats(cached);
+  } catch(_) {}
+
+  // ── Fetch fresh data from chain in background ──
+  try {
     const readProvider = new ethers.providers.Web3Provider(eth);
     const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
 
@@ -3191,10 +3262,8 @@ async function loadLandingStats(eth) {
       readContract.queryFilter(readContract.filters.LPRemoved()),
     ]);
 
-    // Total registered users: UserRegistered events + 1 (owner registered in constructor)
     const totalUsers = regEvents.length + 1;
 
-    // Active investors: invested but haven't removed all their LP positions
     const investCount = {}, removeCount = {};
     for (const e of investEvents) {
       const u = e.args.user.toLowerCase();
@@ -3209,18 +3278,24 @@ async function loadLandingStats(eth) {
       if ((investCount[u] || 0) > (removeCount[u] || 0)) activeUsers++;
     }
 
-    // Total funding: sum of ethAmount from all Invested events
     let totalWei = ethers.BigNumber.from(0);
     for (const e of investEvents) totalWei = totalWei.add(e.args.ethAmount);
     const totalETH = parseFloat(ethers.utils.formatEther(totalWei));
 
+    const stats = {
+      totalUsers:   totalUsers.toLocaleString(),
+      activeUsers:  activeUsers.toLocaleString(),
+      totalFunding: totalETH > 0 ? totalETH.toFixed(4) + ' ETH' : '0 ETH',
+    };
+
+    _applyLandingStats(stats);
+
     const $ = id => document.getElementById(id);
-    if ($('ls-total-users'))   $('ls-total-users').textContent   = totalUsers.toLocaleString();
-    if ($('ls-active-users'))  $('ls-active-users').textContent  = activeUsers.toLocaleString();
-    if ($('ls-total-funding')) $('ls-total-funding').textContent =
-      totalETH > 0 ? totalETH.toFixed(4) + ' ETH' : '0 ETH';
     if ($('lcf-contract-addr') && typeof CONTRACT_ADDRESS !== 'undefined')
       $('lcf-contract-addr').textContent = CONTRACT_ADDRESS;
+
+    // ── Cache fresh stats for instant display next load ──
+    try { localStorage.setItem(_LANDING_STATS_CACHE_KEY, JSON.stringify(stats)); } catch(_) {}
   } catch (_) {
     // Stats are optional — silently skip on error (node offline, contract not deployed)
   }

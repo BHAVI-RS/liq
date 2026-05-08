@@ -2,10 +2,25 @@
 // var (not let) so these are window-level globals visible across script tags
 var _dashCountdownInterval = null;
 var _invCountdownInterval  = null;
+var _dashPollInterval      = null;
+
+function _dashStopPoll() {
+  if (_dashPollInterval) { clearInterval(_dashPollInterval); _dashPollInterval = null; }
+}
+
+function _dashStartPoll() {
+  _dashStopPoll();
+  _dashPollInterval = setInterval(() => {
+    const panel = document.getElementById('panel-dashboard');
+    if (!panel || !panel.classList.contains('active')) { _dashStopPoll(); return; }
+    loadDashboard(true);
+  }, 10000);
+}
 
 // ── Dashboard staking live ticker ──
 var _dashStakingTickInterval = null;
 var _dashStakingTickLocks    = [];
+var _dashStakingTickPrices   = [];
 var _dashStakingTickBase     = 0;
 var _dashStakingTickWall     = 0;
 var _dashRefNow    = 0;
@@ -140,20 +155,25 @@ function _dashStartStakingTicker() {
     const el = document.getElementById('dashStakingRewards');
     if (!el) { _dashStopStakingTicker(); return; }
     const now = _dashStakingTickBase + (Math.floor(Date.now() / 1000) - _dashStakingTickWall);
-    // Total staking earned = completed locks (full 30%) + ongoing locks (partial, ticking).
-    // Pure time-based — no price dependency, so the value is stable across refreshes
-    // and only increases as ongoing locks accumulate.
+    // Total = claimed (on-chain) + pending (live, ticking) + accumulated token value.
     let totalETH = 0;
     for (let i = 0; i < _dashStakingTickLocks.length; i++) {
-      const lock       = _dashStakingTickLocks[i];
+      const lock         = _dashStakingTickLocks[i];
       if (lock.removed) continue;
-      const ut         = Number(lock.unlockTime);
-      const la         = Number(lock.lockedAt) || (ut - 60);
-      const dur        = Math.max(ut - la, 60);
-      const eth        = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const ut           = Number(lock.unlockTime);
+      const la           = Number(lock.lockedAt) || (ut - 60);
+      const dur          = Math.max(ut - la, 60);
+      const eth          = parseFloat(ethers.utils.formatEther(lock.ethInvested));
       const effectiveNow = now >= ut ? ut : now;
-      const elapsed    = Math.max(0, effectiveNow - la);
-      totalETH += dur > 0 ? eth * 0.30 * elapsed / dur : 0;
+      const elapsed      = Math.max(0, effectiveNow - la);
+      const ratePPM_tick = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+      const rwEth_tick   = ratePPM_tick > 0 ? eth * ratePPM_tick / 1_000_000 : 0;
+      const earnedETH    = dur > 0 ? rwEth_tick * elapsed / dur : 0;
+      const claimedETH   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
+      const tokensAcc    = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
+      const priceEth     = _dashStakingTickPrices[i] || 0;
+      const pendingETH   = Math.max(0, earnedETH - claimedETH);
+      totalETH += claimedETH + pendingETH + tokensAcc * priceEth;
     }
     el.innerHTML = totalETH > 0.000001
       ? `<span style="color:var(--gold);">${fmtUSDT(totalETH)}</span>`
@@ -663,7 +683,7 @@ function closeStatGraph() {
   if (_graphCleanup) { _graphCleanup(); _graphCleanup = null; }
 }
 
-async function loadDashboard() {
+async function loadDashboard(silent = false) {
   if (!contract || !walletAddress) {
     document.getElementById('dashLoadingState').innerHTML =
       '<div class="empty-state" style="margin-top:20px;">Connect wallet to load your dashboard.</div>';
@@ -682,9 +702,11 @@ async function loadDashboard() {
   }
   document.getElementById('dashStatsRow').style.display = 'grid';
 
-  // Show refreshing state so user sees feedback immediately on refresh clicks.
-  const _stakingElRef = document.getElementById('dashStakingRewards');
-  if (_stakingElRef) _stakingElRef.innerHTML = '<span style="color:var(--muted);font-size:12px;">···</span>';
+  // Show refreshing indicator on user-triggered loads only; skip on background polls.
+  if (!silent) {
+    const _stakingElRef = document.getElementById('dashStakingRewards');
+    if (_stakingElRef) _stakingElRef.innerHTML = '<span style="color:var(--muted);font-size:12px;">···</span>';
+  }
 
   try {
     const [lpLocks, commStats, stakingReward, platformToken, stakingEvents, latestBlock] = await Promise.all([
@@ -701,6 +723,16 @@ async function loadDashboard() {
     const capETH         = commStats ? parseFloat(ethers.utils.formatEther(commStats.totalCap))     : 0;
     const capRemETH      = commStats ? parseFloat(ethers.utils.formatEther(commStats.remainingCap)) : 0;
     const isEligible     = commStats ? (commStats.active.gt(0) && commStats.remainingCap.gt(0))     : false;
+
+    const missedBanner = document.getElementById('dashMissedCommBanner');
+    if (missedBanner) {
+      const showBanner = missedETH > 0 && capRemETH <= 0;
+      missedBanner.style.display = showBanner ? 'flex' : 'none';
+      if (showBanner) {
+        const amtEl = document.getElementById('dashMissedAmount');
+        if (amtEl) amtEl.textContent = fmtUSDT(missedETH, { noEth: true });
+      }
+    }
 
     let totalInvestedETH = 0;
     let totalCurrentETH  = 0;
@@ -748,6 +780,7 @@ async function loadDashboard() {
     localStorage.setItem('hordex_staking_ref', _stakingRefStr);
 
     _dashStakingTickLocks  = lpLocks;
+    _dashStakingTickPrices = lpLocks.map(l => (poolCache.get(l.token.toLowerCase()) || {}).priceEth || 0);
     _dashStakingTickBase   = _effNow;
     _dashStakingTickWall   = _wallNow;
 
@@ -761,7 +794,13 @@ async function loadDashboard() {
       const _eth        = parseFloat(ethers.utils.formatEther(_l.ethInvested));
       const _effLockNow = _effNow >= _ut ? _ut : _effNow;
       const _el2        = Math.max(0, _effLockNow - _la);
-      _initTotalETH += _dur > 0 ? _eth * 0.30 * _el2 / _dur : 0;
+      const _ratePPM    = _l.rewardRatePPM ? _l.rewardRatePPM.toNumber() : 0;
+      const _rwEth      = _ratePPM > 0 ? _eth * _ratePPM / 1_000_000 : 0;
+      const _earnedETH  = _dur > 0 ? _rwEth * _el2 / _dur : 0;
+      const _claimedETH = parseFloat(ethers.utils.formatEther(_l.rewardClaimedETH || ethers.BigNumber.from(0)));
+      const _tokensAcc  = parseFloat(ethers.utils.formatEther(_l.tokensAccumulated || ethers.BigNumber.from(0)));
+      const _priceEth   = _dashStakingTickPrices[_i] || 0;
+      _initTotalETH += _claimedETH + Math.max(0, _earnedETH - _claimedETH) + _tokensAcc * _priceEth;
       if (_effNow < _ut) _initAnyActive = true;
     }
 
@@ -828,6 +867,8 @@ function navToRewards(section) {
 }
 
 window.loadDashboard        = loadDashboard;
+window._dashStopPoll        = _dashStopPoll;
+window._dashStartPoll       = _dashStartPoll;
 window.copyRefLink          = copyRefLink;
 window.loadFeaturedBanner   = loadFeaturedBanner;
 window.dismissFeaturedBanner = dismissFeaturedBanner;

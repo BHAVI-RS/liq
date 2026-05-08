@@ -7,6 +7,7 @@ let _rwRefSortKey    = 'ts';
 let _rwRefSortDir    = -1;
 
 // ─── Staking live ticker ──────────────────────────────────────────────────────
+let _rwPollInterval    = null;
 let _rwStakingInterval = null;
 let _rwStakingLocks    = [];
 let _rwStakingPrices   = [];   // parallel array: priceEth per lock
@@ -14,6 +15,20 @@ let _rwStakingTokenSyms = [];  // parallel array: token symbol per lock
 let _rwStakingFirstSym  = 'HORDEX';
 let _rwStakingBaseTime = 0;
 let _rwStakingWallBase = 0;
+
+function _rwStopPoll() {
+  if (_rwPollInterval) { clearInterval(_rwPollInterval); _rwPollInterval = null; }
+}
+
+function _rwStartPoll() {
+  _rwStopPoll();
+  _rwPollInterval = setInterval(() => {
+    const panel = document.getElementById('panel-rewards');
+    if (!panel || !panel.classList.contains('active')) { _rwStopPoll(); return; }
+    loadRwStaking(true);
+    loadRwLPFees(true);
+  }, 5000);
+}
 
 function _rwStopTicker() {
   if (_rwStakingInterval) { clearInterval(_rwStakingInterval); _rwStakingInterval = null; }
@@ -29,7 +44,8 @@ function _rwComputeLiveUsdt(now) {
     const la   = Number(lock.lockedAt) || (ut - 60);
     const dur  = Math.max(ut - la, 60);
     const eth  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
-    const rwEth       = eth * 0.30;
+    const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+    const rwEth   = ratePPM > 0 ? eth * ratePPM / 1_000_000 : 0;
     const elapsed     = Math.min(dur, Math.max(0, now - la));
     const isActive    = elapsed < dur && !lock.removed;
     const earnedEth   = dur > 0 ? rwEth * elapsed / dur : 0;
@@ -138,6 +154,8 @@ function _rwRefHistHtml() {
   const end    = Math.min(start + _rwRefPerPage, total);
   const slice  = sorted.slice(start, end);
 
+  const RATES = [5000,2500,1000,300,250,225,200,200,175,150];
+
   let rows = '';
   for (const ev of slice) {
     const ts      = _rwRefBlockTsMap.get(ev.blockNumber);
@@ -145,15 +163,26 @@ function _rwRefHistHtml() {
     const from    = ev.args.from;
     const amt     = parseFloat(ethers.utils.formatEther(ev.args.amount));
     const level   = Number(ev.args.level);
-    const ratePct = ([5000,2500,1000,300,250,225,200,200,175,150][level-1] || 0) / 500;
+    const ratePct = (RATES[level - 1] || 0) / 500;
     const txUrl   = `https://sepolia.etherscan.io/tx/${ev.transactionHash}`;
-    rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);">
-      <td style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
-      <td style="padding:7px 8px;"><a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${from.slice(0,6)}…${from.slice(-4)}</a></td>
-      <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
-      <td style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
-      <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${ethToUSDT(amt).toFixed(2)} USDT ↗</a></td>
-    </tr>`;
+
+    if (ev._missed) {
+      rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);background:rgba(248,113,113,0.04);">
+        <td style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
+        <td style="padding:7px 8px;"><a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" style="color:rgba(248,113,113,0.7);text-decoration:none;">${from.slice(0,6)}…${from.slice(-4)}</a></td>
+        <td style="padding:7px 8px;text-align:center;color:#f87171;">L${level}</td>
+        <td style="padding:7px 8px;text-align:center;color:rgba(248,113,113,0.6);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
+        <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;" title="Missed commission">⚠ −${ethToUSDT(amt).toFixed(2)} USDT ↗</a></td>
+      </tr>`;
+    } else {
+      rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);">
+        <td style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
+        <td style="padding:7px 8px;"><a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${from.slice(0,6)}…${from.slice(-4)}</a></td>
+        <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
+        <td style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
+        <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${ethToUSDT(amt).toFixed(2)} USDT ↗</a></td>
+      </tr>`;
+    }
   }
 
   const perPageBtns = [10, 50, 100].map(n =>
@@ -240,6 +269,47 @@ function sortRwRef(key) {
   if (el) el.innerHTML = _rwRefHistHtml();
 }
 
+// ─── Live commission append (avoids full reload on CommissionPaid event) ──────
+// Called from app.js _startChainListeners when a CommissionPaid fires.
+// Only runs if the rewards tab has already been loaded (i.e. _rwRefAllEvents is populated).
+// Pushes the new event into the existing list and re-renders just the table row section.
+
+async function _rwAppendCommission(ev, from, amount, level) {
+  // If the tab hasn't been loaded yet, the full loadRwReferral() will handle it
+  if (!_rwRefAllEvents.length && !document.getElementById('rwRefHistContainer')) return;
+
+  try {
+    // Fetch block timestamp (needed for date column)
+    const blk = await provider.getBlock(ev.blockNumber).catch(() => null);
+    if (blk) _rwRefBlockTsMap.set(ev.blockNumber, blk.timestamp);
+
+    // Build synthetic event in the same shape loadRwReferral() produces
+    const syntheticEv = {
+      _missed: false,
+      args: { from, amount, level },
+      blockNumber:     ev.blockNumber,
+      transactionHash: ev.transactionHash,
+    };
+
+    // Prepend (newest first)
+    _rwRefAllEvents = [syntheticEv, ..._rwRefAllEvents];
+    _rwRefPage = 1;
+
+    // Re-render table
+    const container = document.getElementById('rwRefHistContainer');
+    if (container) container.innerHTML = _rwRefHistHtml();
+
+    // Update earned / cap stats from a single contract call (no event scan)
+    const stats = await contract.getUserCommissionStats(walletAddress).catch(() => null);
+    if (stats) {
+      const earnedEl     = document.querySelector('#rwRefContent [data-field="earned"]');
+      const remainingEl  = document.querySelector('#rwRefContent [data-field="remaining"]');
+      if (earnedEl)    earnedEl.textContent    = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.earned)));
+      if (remainingEl) remainingEl.textContent = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.remainingCap)));
+    }
+  } catch(_) {}
+}
+
 // ─── loadRewards ──────────────────────────────────────────────────────────────
 
 async function loadRewards() {
@@ -262,34 +332,48 @@ async function loadRwReferral() {
   const el = document.getElementById('rwRefContent');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
-    const [commStats, commEvents, activeCountRaw, minInvRaw] = await Promise.all([
+    const [commStats, commEvents, activeCountRaw, minInvRaw, missedResult] = await Promise.all([
       contract.getUserCommissionStats(walletAddress),
       contract.queryFilter(contract.filters.CommissionPaid(walletAddress)).catch(() => []),
       contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
-      contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0))
+      contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
+      _computeMissedWei().catch(() => ({ total: ethers.BigNumber.from(0), entries: [] })),
     ]);
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
     const minInvLabel = minInvETH > 0 ? `≥ ${fmtUSDT(minInvETH,{noEth:true})} each` : 'any active investment';
 
     const earned    = parseFloat(ethers.utils.formatEther(commStats.earned));
-    const missed    = parseFloat(ethers.utils.formatEther(commStats.missed));
+    const missed    = parseFloat(ethers.utils.formatEther(missedResult.total));
     const remaining = parseFloat(ethers.utils.formatEther(commStats.remainingCap));
 
-    const blockNums = [...new Set(commEvents.map(e => e.blockNumber))];
+    // Collect all block numbers (received + missed) for timestamp lookup
+    const allBlockNums = [...new Set([
+      ...commEvents.map(e => e.blockNumber),
+      ...missedResult.entries.map(e => e.blockNumber),
+    ])];
     _rwRefBlockTsMap = new Map();
-    await Promise.all(blockNums.map(async bn => {
+    await Promise.all(allBlockNums.map(async bn => {
       const blk = await provider.getBlock(bn).catch(() => null);
       if (blk) _rwRefBlockTsMap.set(bn, blk.timestamp);
     }));
 
-    _rwRefAllEvents = [...commEvents].sort((a, b) => b.blockNumber - a.blockNumber);
+    // Normalise received events and append synthetic missed entries
+    const receivedEvs = commEvents.map(e => ({ ...e, _missed: false }));
+    const missedEvs   = missedResult.entries.map(e => ({
+      _missed: true,
+      args: { from: e.from, level: e.level, amount: e.amount },
+      blockNumber: e.blockNumber,
+      transactionHash: e.transactionHash,
+    }));
+
+    _rwRefAllEvents = [...receivedEvs, ...missedEvs].sort((a, b) => b.blockNumber - a.blockNumber);
     _rwRefPage = 1;
 
     const missedWarn = missed > 0.000001
       ? `<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;color:#f87171;">
            <span style="letter-spacing:1px;">⚠ MISSED COMMISSIONS: ${fmtUSDT(missed)}</span>
-           <div style="margin-top:4px;color:rgba(248,113,113,0.7);font-size:10px;">You were ineligible when these commissions passed through your position. Invest to earn future commissions.</div>
+           <div style="margin-top:4px;color:rgba(248,113,113,0.7);font-size:10px;">Includes commissions that bypassed you entirely (ineligible) and excess that spilled past your 5× cap. Invest to earn future commissions in full.</div>
          </div>` : '';
 
     const maxEligibleLevel = Math.min(activeCount, 10);
@@ -317,15 +401,15 @@ async function loadRwReferral() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:4px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL EARNED</div>
-          <div style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned)}</div>
+          <div data-field="earned" style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned)}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CAP REMAINING</div>
-          <div style="font-size:18px;color:var(--gold);font-family:var(--font-display);">${fmtUSDT(remaining)}</div>
+          <div data-field="remaining" style="font-size:18px;color:var(--gold);font-family:var(--font-display);">${fmtUSDT(remaining)}</div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">MISSED</div>
-          <div style="font-size:18px;font-family:var(--font-display);${missed > 0.000001 ? 'color:#f87171' : 'color:var(--muted)'};">${missed > 0.000001 ? fmtUSDT(missed) : '—'}</div>
+        <div style="background:${missed > 0.000001 ? 'rgba(248,113,113,0.07)' : 'var(--bg)'};border:1px solid ${missed > 0.000001 ? 'rgba(248,113,113,0.35)' : 'var(--border)'};border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:${missed > 0.000001 ? '#f87171' : 'var(--muted)'};margin-bottom:6px;">MISSED</div>
+          <div style="font-size:18px;font-family:var(--font-display);color:${missed > 0.000001 ? '#f87171' : 'var(--muted)'};">${missed > 0.000001 ? fmtUSDT(missed) : '—'}</div>
         </div>
       </div>
       ${missedWarn}
@@ -338,10 +422,12 @@ async function loadRwReferral() {
 
 // ─── loadRwStaking ────────────────────────────────────────────────────────────
 
-async function loadRwStaking() {
+async function loadRwStaking(silent = false) {
   _rwStopTicker();
   const el = document.getElementById('rwStakingContent');
-  el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  if (!silent) {
+    el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  }
   try {
     const [stakingData, lpLocks, latestBlock] = await Promise.all([
       contract.getStakingReward(walletAddress),
@@ -399,7 +485,8 @@ async function loadRwStaking() {
       const tokensAccumulated = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
       const totalClaimed      = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
       const elapsed           = Math.min(lockDurSecs, Math.max(0, now - lockedAt));
-      const rewardTotalETH    = ethInvested * 0.30;
+      const ratePPM_lock   = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+      const rewardTotalETH = ratePPM_lock > 0 ? ethInvested * ratePPM_lock / 1_000_000 : 0;
       const earnedETH         = lockDurSecs > 0 ? rewardTotalETH * elapsed / lockDurSecs : 0;
       const pendingETH        = Math.max(0, earnedETH - rewardClaimedETH);
       // Same formula as investments tab
@@ -520,9 +607,11 @@ async function claimStakingReward() {
 
 // ─── loadRwLPFees ─────────────────────────────────────────────────────────────
 
-async function loadRwLPFees() {
+async function loadRwLPFees(silent = false) {
   const el = document.getElementById('rwLPFeesContent');
-  el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  if (!silent) {
+    el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  }
   try {
     const lpLocks = await contract.getUserLPLocks(walletAddress);
     if (!lpLocks.length) {
@@ -615,10 +704,13 @@ async function loadRwLPFees() {
   }
 }
 
+window._rwAppendCommission = _rwAppendCommission;
 window.loadRewards        = loadRewards;
 window.loadRwReferral     = loadRwReferral;
 window.loadRwStaking      = loadRwStaking;
 window.loadRwLPFees       = loadRwLPFees;
+window._rwStopPoll        = _rwStopPoll;
+window._rwStartPoll       = _rwStartPoll;
 window.claimStakingReward = claimStakingReward;
 window.setRwRefPerPage    = setRwRefPerPage;
 window.setRwRefPage       = setRwRefPage;

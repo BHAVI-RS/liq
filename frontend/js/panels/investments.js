@@ -1,4 +1,19 @@
 
+var _invPollInterval = null;
+
+function _invStopPoll() {
+  if (_invPollInterval) { clearInterval(_invPollInterval); _invPollInterval = null; }
+}
+
+function _invStartPoll() {
+  _invStopPoll();
+  _invPollInterval = setInterval(() => {
+    const panel = document.getElementById('panel-investments');
+    if (!panel || !panel.classList.contains('active')) { _invStopPoll(); return; }
+    loadInvestments();
+  }, 5000);
+}
+
 function toggleInvDetails(btn) {
   const details = btn.nextElementSibling;
   if (!details) return;
@@ -108,6 +123,9 @@ async function loadInvestments() {
       const td   = tokenMeta.get(key) || { symbol: lock.token.slice(0,6), name: '', meta: {} };
 
       const ethInvested     = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const restakeCounts   = lock.restakeCounts
+        ? Array.from(lock.restakeCounts).map(c => typeof c.toNumber === 'function' ? c.toNumber() : Number(c))
+        : [0,0,0,0,0,0];
       const lpAmount        = lock.lpAmount;
       const unlockTime      = Number(lock.unlockTime);
       const isClaimed       = lock.claimed;
@@ -147,9 +165,11 @@ async function loadInvestments() {
       const unlockLabel   = new Date(unlockTime * 1000).toLocaleString();
 
       // ── Staking reward data ──
-      const rewardTotalETH     = ethInvested * 0.30;
       const stakingPriceEth    = pool ? pool.priceEth : 0;
       const lockDurForStaking  = lockDurSecs > 0 ? lockDurSecs : 60;
+      const rewardRatePPM      = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+      const rewardTotalETH     = rewardRatePPM > 0 ? ethInvested * rewardRatePPM / 1_000_000 : 0;
+      const rewardTotalUSDT    = rewardTotalETH * USDT_PER_ETH;
       const elapsedStaking     = Math.min(lockDurForStaking, Math.max(0, effectiveNow - lockedAt));
       const tokenSymbol        = td.symbol || 'HORDEX';
       const rewardClaimedETH   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
@@ -204,7 +224,7 @@ async function loadInvestments() {
              data-tokens-accumulated="${tokensAccumulated.toFixed(18)}"
              data-per-sec-usdt="${perSecUSDT.toFixed(12)}">
           <div class="dis-staking-header">
-            <span class="dis-sl-label">STAKING REWARD · 30% / ${lockDurForStaking}s · CONTINUOUS</span>
+            <span class="dis-sl-label">STAKING REWARD · ${rewardTotalUSDT.toLocaleString(undefined,{maximumFractionDigits:2})} USDT · ${lockDurLabel} · CONTINUOUS</span>
             <span class="dis-sl-reward">${initialRewardStr}</span>
           </div>
           <div class="dis-slots">${initialSlotHtml}</div>
@@ -225,7 +245,7 @@ async function loadInvestments() {
         </div>`;
       } else if (isUnlocked) {
         actionColHtml = `<div id="${cdId}" class="dis-col dis-col-action" style="gap:8px;">
-          <button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i})" class="inv-action-btn inv-btn-remove">REMOVE LP</button>
+          <button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i}, '${lock.token}', '${lpAmountHex}')" class="inv-action-btn inv-btn-remove">REMOVE LP</button>
           <button onclick="openStakeModal(${i})" class="inv-action-btn inv-btn-stake">STAKE</button>
         </div>`;
       } else {
@@ -241,8 +261,20 @@ async function loadInvestments() {
         ? `<button id="removeLPBtn-${i}" onclick="removeLP(${i}, '${lock.token}', '${lpAmountHex}')" style="background:transparent;border:1px solid #f87171;color:#f87171;border-radius:4px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;padding:9px 18px;cursor:pointer;transition:background 0.2s,color 0.2s;" onmouseover="this.style.background='rgba(248,113,113,0.15)'" onmouseout="this.style.background='transparent'">REMOVE LP</button>`
         : '';
 
+      // Per-duration streak summary: indices 1-5 = 30s/60s/90s/180s/360s
+      const _durStreakMeta = [[1,'30s'],[2,'60s'],[3,'90s'],[4,'180s'],[5,'360s']];
+      const streakLabel = _durStreakMeta.map(([idx, lbl]) => {
+        const cnt = restakeCounts[idx] || 0;
+        const dot = cnt >= 3
+          ? `<span style="color:var(--gold)">●</span>`
+          : cnt > 0
+            ? `<span style="color:var(--cream)">●</span>`
+            : `<span style="color:var(--muted)">○</span>`;
+        return `${dot}&nbsp;${lbl}:${cnt >= 3 ? '<span style="color:var(--gold)">MAX</span>' : cnt}`;
+      }).join('&nbsp;&nbsp;');
+
       cards.push(`
-        <div class="dash-inv-card${isClaimed ? ' claimed' : ''}" data-lock-index="${i}">
+        <div class="dash-inv-card${isClaimed ? ' claimed' : ''}" data-lock-index="${i}" data-eth-invested="${ethInvested.toFixed(12)}" data-eth-invested-wei="${lock.ethInvested.toHexString()}" data-restake-counts='${JSON.stringify(restakeCounts)}' data-lock-dur-secs="${lockDurSecs}">
           <div class="dash-inv-header">
             <div class="dash-inv-logo">${logoSrc}</div>
             <div class="dash-inv-title"><div class="sym">${td.symbol}</div><div class="nm">${td.name}</div></div>
@@ -272,6 +304,7 @@ async function loadInvestments() {
             <div class="did-row"><span class="did-label">YOUR TOKENS IN POOL</span><span class="did-val">${myTokensInPool > 0 ? myTokensInPool.toLocaleString(undefined,{maximumFractionDigits:4})+' '+td.symbol : '—'}</span></div>
             <div class="did-row"><span class="did-label">YOUR USDT IN POOL</span><span class="did-val">${myETHInPool > 0 ? (myETHInPool*USDT_PER_ETH).toFixed(2)+' USDT' : '—'}</span></div>
             <hr class="did-hr">
+            <div class="did-row"><span class="did-label">RESTAKE STREAK</span><span class="did-val" style="font-size:12px;">${streakLabel}</span></div>
             <div class="did-row"><span class="did-label">LOCK PERIOD</span><span class="did-val">${lockDurLabel}</span></div>
             <div class="did-row"><span class="did-label">LOCKED AT</span><span class="did-val">${lockedAtLabel}</span></div>
             <div class="did-row"><span class="did-label">UNLOCKS AT</span><span class="did-val" style="color:${isUnlocked?'#4ade80':'var(--cream)'};">${unlockLabel}</span></div>
@@ -331,21 +364,110 @@ async function claimLP(lockIndex) {
   }
 }
 
+let _pendingRemoveLPInfo = null;
+
+async function _computeRemoveLPPreview(tokenAddr, lpAmountHex) {
+  const factoryAbi = ['function getPair(address,address) view returns (address)'];
+  const pairAbi    = ['function getReserves() view returns (uint112,uint112,uint32)', 'function token0() view returns (address)', 'function totalSupply() view returns (uint256)'];
+  const erc20Abi   = ['function decimals() view returns (uint8)'];
+
+  const lpAmount = ethers.BigNumber.from(lpAmountHex);
+  const factory  = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, provider);
+  const pairAddr = await factory.getPair(tokenAddr, WETH_ADDRESS);
+  if (!pairAddr || pairAddr === ethers.constants.AddressZero) throw new Error('Pool not found');
+
+  const pair = new ethers.Contract(pairAddr, pairAbi, provider);
+  const [[r0, r1], tok0, totalSupply] = await Promise.all([pair.getReserves(), pair.token0(), pair.totalSupply()]);
+  const isToken0 = tok0.toLowerCase() === tokenAddr.toLowerCase();
+  const resToken = isToken0 ? r0 : r1;
+  const resETH   = isToken0 ? r1 : r0;
+
+  const erc20 = new ethers.Contract(tokenAddr, erc20Abi, provider);
+  const dec   = Number(await erc20.decimals().catch(() => 18));
+
+  const lpF      = parseFloat(ethers.utils.formatEther(lpAmount));
+  const totalF   = parseFloat(ethers.utils.formatEther(totalSupply));
+  const share    = totalF > 0 ? lpF / totalF : 0;
+  const tokensOut = share * parseFloat(ethers.utils.formatUnits(resToken, dec));
+  const usdtOut   = share * parseFloat(ethers.utils.formatEther(resETH)) * USDT_PER_ETH;
+
+  let sym = tokenAddr.slice(0, 6) + '…';
+  try { const t = await contract.getToken(tokenAddr); sym = t.symbol; } catch(_) {}
+
+  return { tokensOut, usdtOut, sym };
+}
+
 async function removeLP(lockIndex, tokenAddr, lpAmountHex) {
   if (!requireConnected()) return;
-  const btn      = document.getElementById('removeLPBtn-' + lockIndex);
   const lpAmount = ethers.BigNumber.from(lpAmountHex);
   if (lpAmount.isZero()) { toast('No LP tokens to remove', 'error'); return; }
+
+  _pendingRemoveLPInfo = { lockIndex, isFromWallet: true, tokenAddr, lpAmountHex };
+  document.getElementById('removeLPTokenAmt').textContent = '…';
+  document.getElementById('removeLPTokenSym').textContent = '';
+  document.getElementById('removeLPUsdtAmt').textContent  = '…';
+  document.getElementById('removeLPModal').style.display  = 'flex';
+
+  try {
+    const { tokensOut, usdtOut, sym } = await _computeRemoveLPPreview(tokenAddr, lpAmountHex);
+    document.getElementById('removeLPTokenAmt').textContent = tokensOut.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    document.getElementById('removeLPTokenSym').textContent = sym;
+    document.getElementById('removeLPUsdtAmt').textContent  = usdtOut.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
+  } catch(_) {
+    document.getElementById('removeLPTokenAmt').textContent = 'Unable to estimate';
+    document.getElementById('removeLPUsdtAmt').textContent  = 'Unable to estimate';
+  }
+}
+
+async function removeLPDirect(lockIndex, tokenAddr, lpAmountHex) {
+  if (!requireConnected()) return;
+
+  _pendingRemoveLPInfo = { lockIndex, isFromWallet: false, tokenAddr, lpAmountHex };
+  document.getElementById('removeLPTokenAmt').textContent = '…';
+  document.getElementById('removeLPTokenSym').textContent = '';
+  document.getElementById('removeLPUsdtAmt').textContent  = '…';
+  document.getElementById('removeLPModal').style.display  = 'flex';
+
+  try {
+    const { tokensOut, usdtOut, sym } = await _computeRemoveLPPreview(tokenAddr, lpAmountHex);
+    document.getElementById('removeLPTokenAmt').textContent = tokensOut.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    document.getElementById('removeLPTokenSym').textContent = sym;
+    document.getElementById('removeLPUsdtAmt').textContent  = usdtOut.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
+  } catch(_) {
+    document.getElementById('removeLPTokenAmt').textContent = 'Unable to estimate';
+    document.getElementById('removeLPUsdtAmt').textContent  = 'Unable to estimate';
+  }
+}
+
+function closeRemoveLPModal() {
+  document.getElementById('removeLPModal').style.display = 'none';
+  _pendingRemoveLPInfo = null;
+}
+
+async function confirmRemoveLP() {
+  if (!_pendingRemoveLPInfo) return;
+  const { lockIndex, isFromWallet, tokenAddr, lpAmountHex } = _pendingRemoveLPInfo;
+  closeRemoveLPModal();
+  if (isFromWallet) {
+    await _execRemoveLP(lockIndex, tokenAddr, lpAmountHex);
+  } else {
+    await _execRemoveLPDirect(lockIndex);
+  }
+}
+
+async function _execRemoveLP(lockIndex, tokenAddr, lpAmountHex) {
+  const btn      = document.getElementById('removeLPBtn-' + lockIndex);
+  const lpAmount = ethers.BigNumber.from(lpAmountHex);
   if (btn) { btn.disabled = true; btn.textContent = 'REMOVING…'; }
   _txBegin();
   try {
-    const factory  = new ethers.Contract(DEX_FACTORY, FACTORY_ABI, provider);
-    const pairAddr = await factory.getPair(tokenAddr, DEX_WETH);
+    const factory  = new ethers.Contract(FACTORY_ADDRESS, ['function getPair(address,address) view returns (address)'], provider);
+    const pairAddr = await factory.getPair(tokenAddr, WETH_ADDRESS);
     if (!pairAddr || pairAddr === ethers.constants.AddressZero) throw new Error('Pool not found');
 
     toast('Step 1/2 — Approve LP tokens to platform in MetaMask…', 'info');
-    const pairERC20  = new ethers.Contract(pairAddr, ['function approve(address spender, uint256 amount) returns (bool)'], signer);
-    const approveTx  = await pairERC20.approve(CONTRACT_ADDRESS, lpAmount);
+    const pairERC20 = new ethers.Contract(pairAddr, ['function approve(address spender, uint256 amount) returns (bool)'], signer);
+    const approveTx = await pairERC20.approve(CONTRACT_ADDRESS, lpAmount);
     await approveTx.wait();
 
     toast('Step 2/2 — Confirm Remove LP in MetaMask…', 'info');
@@ -364,8 +486,7 @@ async function removeLP(lockIndex, tokenAddr, lpAmountHex) {
   }
 }
 
-async function removeLPDirect(lockIndex) {
-  if (!requireConnected()) return;
+async function _execRemoveLPDirect(lockIndex) {
   const btn = document.getElementById('removeLPDirectBtn-' + lockIndex);
   if (btn) { btn.disabled = true; btn.textContent = 'REMOVING…'; }
   _txBegin();
@@ -389,13 +510,79 @@ async function removeLPDirect(lockIndex) {
 let _stakeModalLockIndex = null;
 let _stakeSelectedDays   = null;
 
-function openStakeModal(lockIndex) {
+async function openStakeModal(lockIndex) {
   _stakeModalLockIndex = lockIndex;
   _stakeSelectedDays   = null;
-  document.querySelectorAll('.stake-day-btn').forEach(b => b.classList.remove('selected'));
+
+  const card   = document.querySelector(`#investmentsContent .dash-inv-card[data-lock-index="${lockIndex}"]`);
+  const weiHex = card ? card.dataset.ethInvestedWei : null;
+
+  // stakingDurations = [7,30,60,90,180,360] → indices 0-5
+  const _durToIdx = { 7:0, 30:1, 60:2, 90:3, 180:4, 360:5 };
+  // Streak PPM increment per duration index — must match _setTieredRates() in contract
+  const _streakIncrPPM = [0, 5_000, 26_000, 30_000, 50_000, 100_000];
+
+  // Per-duration restake counts and the current lock's own duration
+  let restakeCounts = [0,0,0,0,0,0];
+  let lockDurSecs   = 90; // default to 90s if not stored
+  try { if (card && card.dataset.restakeCounts) restakeCounts = JSON.parse(card.dataset.restakeCounts); } catch(_) {}
+  try { if (card && card.dataset.lockDurSecs)   lockDurSecs   = Number(card.dataset.lockDurSecs); } catch(_) {}
+
+  // Reset buttons to loading state
+  document.querySelectorAll('.stake-day-btn').forEach(b => {
+    b.classList.remove('selected');
+    ['sdb-reward','sdb-pct','sdb-streak'].forEach(cls => {
+      const el = b.querySelector('.' + cls);
+      if (el) el.textContent = cls === 'sdb-reward' ? '…' : '';
+    });
+  });
   document.getElementById('stakeUnlockInfo').innerHTML = '&nbsp;';
   document.getElementById('stakeConfirmBtn').disabled  = true;
-  document.getElementById('stakeModal').style.display  = 'flex';
+  const streakInfoEl = document.getElementById('stakeStreakInfo');
+  if (streakInfoEl) streakInfoEl.style.display = 'none';
+  document.getElementById('stakeModal').style.display = 'flex';
+
+  if (!weiHex) return;
+  try {
+    const ethInvestedBN = ethers.BigNumber.from(weiHex);
+    const investedUSDT  = parseFloat(ethers.utils.formatEther(ethInvestedBN)) * USDT_PER_ETH;
+    const [durSecs, ratesPPM] = await contract.getStakingRatesForAmount(ethInvestedBN);
+
+    document.querySelectorAll('.stake-day-btn').forEach(b => {
+      const secs     = Number(b.dataset.days);
+      const cIdx     = Array.from(durSecs).findIndex(d => Number(d) === secs);
+      const rewardEl = b.querySelector('.sdb-reward');
+      const pctEl    = b.querySelector('.sdb-pct');
+      const streakEl = b.querySelector('.sdb-streak');
+      if (!rewardEl) return;
+      if (cIdx === -1) { rewardEl.textContent = '—'; return; }
+
+      // Streak bonus only applies when continuing the SAME duration as the current lock,
+      // AND only when a base reward rate exists (packages below $100 earn no staking reward).
+      const isSameDur   = secs === lockDurSecs;
+      const baseRatePPM = Number(ratesPPM[cIdx]);
+      let streakBonusPPM = 0;
+      let streakLabel    = 'BASE';
+      if (isSameDur && baseRatePPM > 0) {
+        const dIdx       = _durToIdx[secs] !== undefined ? _durToIdx[secs] : -1;
+        const curCount   = dIdx >= 0 ? (restakeCounts[dIdx] || 0) : 0;
+        const nextStreak = Math.min(curCount + 1, 3);
+        const incrPPM    = dIdx >= 0 ? _streakIncrPPM[dIdx] : 50_000;
+        streakBonusPPM   = nextStreak * incrPPM;
+        streakLabel      = nextStreak >= 3 ? 'STREAK MAX' : `STREAK ${nextStreak}`;
+      }
+
+      const ratePPM    = baseRatePPM + streakBonusPPM;
+      const rewardUSDT = investedUSDT * ratePPM / 1_000_000;
+      const pct        = rewardUSDT > 0 ? (rewardUSDT / investedUSDT * 100).toFixed(1) + '%' : '';
+
+      rewardEl.textContent = rewardUSDT > 0 ? '$' + rewardUSDT.toLocaleString(undefined, {maximumFractionDigits: 2}) : '—';
+      if (pctEl)    pctEl.textContent    = pct;
+      if (streakEl) streakEl.textContent = streakLabel;
+    });
+  } catch(_) {
+    document.querySelectorAll('.stake-day-btn .sdb-reward').forEach(el => { el.textContent = '—'; });
+  }
 }
 
 function selectStakeDays(days) {
@@ -403,14 +590,16 @@ function selectStakeDays(days) {
   document.querySelectorAll('.stake-day-btn').forEach(b =>
     b.classList.toggle('selected', Number(b.dataset.days) === days)
   );
-  const unlockDate = new Date(Date.now() + days * 86400 * 1000);
+  const unlockDate = new Date(Date.now() + days * 1000);
   document.getElementById('stakeUnlockInfo').innerHTML =
-    `Unlocks: <span>${unlockDate.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' })}</span>`;
+    `Unlocks: <span>${unlockDate.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</span>`;
   document.getElementById('stakeConfirmBtn').disabled = false;
 }
 
 function closeStakeModal() {
   document.getElementById('stakeModal').style.display = 'none';
+  const streakInfoEl = document.getElementById('stakeStreakInfo');
+  if (streakInfoEl) streakInfoEl.style.display = 'none';
   _stakeModalLockIndex = null;
   _stakeSelectedDays   = null;
 }
@@ -423,12 +612,12 @@ async function confirmRestake() {
 
   _txBegin();
   try {
-    toast(`Confirm stake for ${days} days in MetaMask…`, 'info');
+    toast(`Confirm stake for ${days} seconds in MetaMask…`, 'info');
     const tx = await contract.restakeLP(lockIndex, days);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
-    toast(`LP staked for ${days} days! Timer restarted.`, 'success');
+    toast(`LP staked for ${days} seconds! Timer restarted.`, 'success');
     invalidateTabs('dashboard', 'investments');
     loadInvestments();
   } catch(e) {
@@ -465,13 +654,18 @@ function revealDashboard() {
   document.querySelector('.tabs').classList.add('visible');
   document.querySelector('main').classList.add('visible');
   setTimeout(checkMissedCommissions, 1500);
+  if (window._startChainListeners) window._startChainListeners();
 }
 
 window.claimStakingRewardForLock = claimStakingRewardForLock;
 window.loadInvestments      = loadInvestments;
+window._invStopPoll         = _invStopPoll;
+window._invStartPoll        = _invStartPoll;
 window.claimLP              = claimLP;
 window.removeLP             = removeLP;
 window.removeLPDirect       = removeLPDirect;
+window.closeRemoveLPModal   = closeRemoveLPModal;
+window.confirmRemoveLP      = confirmRemoveLP;
 window.openStakeModal       = openStakeModal;
 window.selectStakeDays      = selectStakeDays;
 window.closeStakeModal      = closeStakeModal;

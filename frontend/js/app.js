@@ -4,37 +4,80 @@ const contractAddress = CONTRACT_ADDRESS;
 // ── MISSED COMMISSION TRACKING ──
 let _missedCommWei = null;
 
-async function checkMissedCommissions() {
-  if (!contract || !walletAddress) return;
-  try {
-    const ownerAddr = (await contract.owner()).toLowerCase();
-    if (walletAddress.toLowerCase() === ownerAddr) return;
+// Returns { total: BigNumber, entries: Array } for the connected wallet.
+// "Missed" covers fully bypassed commissions (user ineligible) and partial-cap
+// spills (user received some, excess went upline).
+// entries: [{ from, level, amount: BigNumber, blockNumber, transactionHash }]
+async function _computeMissedWei() {
+  const ownerAddr = (await contract.owner()).toLowerCase();
+  const zero = ethers.BigNumber.from(0);
+  if (walletAddress.toLowerCase() === ownerAddr) return { total: zero, entries: [] };
 
-    const referrals = await contract.getReferrals(walletAddress);
-    if (!referrals.length) return;
+  const PAID_TOPIC  = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
+  const userPadded  = ethers.utils.hexZeroPad(walletAddress.toLowerCase(), 32).toLowerCase();
+  let total = zero;
+  const entries = [];
 
-    // Sum L1 commissions that went to the owner instead of to this user.
-    // This happens when the user was ineligible (inactive LP or cap reached) at the time
-    // their direct referral invested.
-    const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
-    let missedWei = ethers.BigNumber.from(0);
-    for (const referral of referrals) {
+  const visited = new Set([walletAddress.toLowerCase()]);
+  let frontier = [walletAddress.toLowerCase()];
+
+  for (let depth = 1; depth <= 10; depth++) {
+    const nextFrontier = [];
+    const membersAtDepth = [];
+
+    await Promise.all(frontier.map(async (addr) => {
+      const refs = await contract.getReferrals(addr).catch(() => []);
+      for (const ref of refs) {
+        const refLower = ref.toLowerCase();
+        if (!visited.has(refLower)) {
+          visited.add(refLower);
+          nextFrontier.push(refLower);
+          membersAtDepth.push(refLower);
+        }
+      }
+    }));
+
+    if (membersAtDepth.length === 0) break;
+
+    await Promise.all(membersAtDepth.map(async (member) => {
       const logs = await provider.getLogs({
         address: contract.address,
-        topics: [
-          PAID_TOPIC,
-          ethers.utils.hexZeroPad(ownerAddr, 32),
-          ethers.utils.hexZeroPad(referral.toLowerCase(), 32),
-        ],
+        topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
         fromBlock: 0,
         toBlock: 'latest',
       });
+
+      // Group by transaction — each tx is one invest() call with one level-d pool.
+      const byTx = new Map();
       for (const log of logs) {
         const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-        if (Number(level) === 1) missedWei = missedWei.add(amount);
+        if (Number(level) !== depth) continue;
+        const key = log.transactionHash;
+        if (!byTx.has(key)) byTx.set(key, { blockNumber: log.blockNumber, total: zero, received: zero });
+        const tx = byTx.get(key);
+        tx.total = tx.total.add(amount);
+        if (log.topics[1].toLowerCase() === userPadded) tx.received = tx.received.add(amount);
       }
-    }
 
+      for (const [txHash, tx] of byTx) {
+        if (tx.total.gt(tx.received)) {
+          const missed = tx.total.sub(tx.received);
+          total = total.add(missed);
+          entries.push({ from: member, level: depth, amount: missed, blockNumber: tx.blockNumber, transactionHash: txHash });
+        }
+      }
+    }));
+
+    frontier = nextFrontier;
+  }
+
+  return { total, entries };
+}
+
+async function checkMissedCommissions() {
+  if (!contract || !walletAddress) return;
+  try {
+    const { total: missedWei } = await _computeMissedWei();
     _missedCommWei = missedWei;
     if (missedWei.isZero()) return;
 
@@ -42,9 +85,9 @@ async function checkMissedCommissions() {
     const usdtMissed = ethToUSDT(ethMissed).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
     document.getElementById('missedCommText').innerHTML =
-      `You have <strong style="color:#f87171;">${usdtMissed} USDT</strong> in uncollected referral commissions.<br><br>` +
-      `This occurred because your LP position was inactive, or you had reached your 5× earning cap, when your referrals made investments.<br><br>` +
-      `<strong>To become eligible again:</strong> ensure you have an active LP investment. Your pending cap carries forward when you reinvest.`;
+      `You have <strong style="color:#f87171;">${usdtMissed} USDT</strong> in missed referral commissions.<br><br>` +
+      `This includes commissions that fully bypassed you (inactive LP or cap reached) and commissions where you hit your 5× cap mid-payment — the excess that spilled to the next eligible upline is counted here.<br><br>` +
+      `<strong>To receive future commissions in full:</strong> ensure you have an active LP investment and sufficient cap remaining.`;
 
     document.getElementById('missedCommAlert').style.display = 'flex';
   } catch(e) { console.warn('checkMissedCommissions:', e); }
@@ -180,6 +223,8 @@ function registerEthereumListeners(eth) {
       App.signer   = App.provider.getSigner();
       if (contractAddress) {
         App.contract = new ethers.Contract(contractAddress, CONTRACT_ABI, App.signer);
+        _stopChainListeners();
+        _startChainListeners();
       }
     }
   });
@@ -313,21 +358,38 @@ document.addEventListener('click', (e) => {
 });
 
 // ── LANDING PAGE STATS ──
+let _landingStatsPollInterval = null;
+const _LANDING_STATS_CACHE_KEY = 'hordex_landing_stats_v2';
+
+function _applyLandingStats(stats) {
+  const $ = id => document.getElementById(id);
+  if ($('ls-total-users'))     $('ls-total-users').textContent     = stats.totalUsers;
+  if ($('ls-active-users'))    $('ls-active-users').textContent    = stats.activeUsers;
+  if ($('ls-total-funding'))   $('ls-total-funding').textContent   = stats.totalFunding;
+  if ($('ls-staking-rewards')) $('ls-staking-rewards').textContent = stats.stakingRewards;
+}
+
 async function loadLandingStats(eth) {
+  if (typeof CONTRACT_ADDRESS === 'undefined' || typeof CONTRACT_ABI === 'undefined') return;
+
+  // ── Show cached stats instantly (< 1 ms) ──
   try {
-    if (typeof CONTRACT_ADDRESS === 'undefined' || typeof CONTRACT_ABI === 'undefined') return;
+    const cached = JSON.parse(localStorage.getItem(_LANDING_STATS_CACHE_KEY) || 'null');
+    if (cached) _applyLandingStats(cached);
+  } catch(_) {}
+
+  try {
     const readProvider = new ethers.providers.Web3Provider(eth);
     const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
 
-    const [regEvents, investEvents, removeEvents, stakingEvents] = await Promise.all([
-      readContract.queryFilter(readContract.filters.UserRegistered()),
+    // ── Single view call for 3 of 4 stats — near-instant, no event scanning ──
+    const [platformStats, investEvents, removeEvents] = await Promise.all([
+      readContract.getPlatformStats().catch(() => null),
       readContract.queryFilter(readContract.filters.Invested()),
       readContract.queryFilter(readContract.filters.LPRemoved()),
-      readContract.queryFilter(readContract.filters.StakingRewardClaimed()).catch(() => []),
     ]);
 
-    const totalUsers = regEvents.length + 1;
-
+    // Active investors: count users who have more invests than removes
     const investCount = {}, removeCount = {};
     for (const e of investEvents) {
       const u = e.args.user.toLowerCase();
@@ -342,28 +404,40 @@ async function loadLandingStats(eth) {
       if ((investCount[u] || 0) > (removeCount[u] || 0)) activeUsers++;
     }
 
-    let totalWei = ethers.BigNumber.from(0);
-    for (const e of investEvents) totalWei = totalWei.add(e.args.ethAmount);
-    const totalETH = parseFloat(ethers.utils.formatEther(totalWei));
+    const totalUsers    = platformStats ? Number(platformStats._totalUsers) : (investEvents.length + 1);
+    const totalEthWei   = platformStats ? platformStats._totalEthInvested : ethers.BigNumber.from(0);
+    const stakingEthWei = platformStats ? platformStats._totalStakingRewardsPaidETH : ethers.BigNumber.from(0);
+    const totalETH      = parseFloat(ethers.utils.formatEther(totalEthWei));
+    const stakingETH    = parseFloat(ethers.utils.formatEther(stakingEthWei));
+
+    const stats = {
+      totalUsers:     totalUsers.toLocaleString(),
+      activeUsers:    activeUsers.toLocaleString(),
+      totalFunding:   totalETH > 0     ? ethToUSDT(totalETH).toLocaleString(undefined,  { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT',
+      stakingRewards: stakingETH > 0   ? ethToUSDT(stakingETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT',
+    };
+
+    _applyLandingStats(stats);
 
     const $ = id => document.getElementById(id);
-    let totalStakingETH = 0;
-    for (const ev of stakingEvents) {
-      const ethEq = parseFloat(ethers.utils.formatEther(ev.args.ethEquivalent || 0));
-      if (ethEq > 0) totalStakingETH += ethEq;
-    }
-
-    if ($('ls-total-users'))   $('ls-total-users').textContent   = totalUsers.toLocaleString();
-    if ($('ls-active-users'))  $('ls-active-users').textContent  = activeUsers.toLocaleString();
-    if ($('ls-total-funding')) $('ls-total-funding').textContent =
-      totalETH > 0 ? ethToUSDT(totalETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT';
-    if ($('ls-staking-rewards')) $('ls-staking-rewards').textContent =
-      totalStakingETH > 0
-        ? ethToUSDT(totalStakingETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT'
-        : '0 USDT';
     if ($('lcf-contract-addr') && typeof CONTRACT_ADDRESS !== 'undefined')
       $('lcf-contract-addr').textContent = CONTRACT_ADDRESS;
+
+    try { localStorage.setItem(_LANDING_STATS_CACHE_KEY, JSON.stringify(stats)); } catch(_) {}
   } catch (_) {}
+
+  // Poll every 30 s while landing overlay is visible — avoids overlapping scans
+  if (!_landingStatsPollInterval) {
+    _landingStatsPollInterval = setInterval(() => {
+      const overlay = document.getElementById('landingOverlay');
+      if (!overlay || overlay.style.display === 'none' || overlay.classList.contains('hidden')) {
+        clearInterval(_landingStatsPollInterval);
+        _landingStatsPollInterval = null;
+        return;
+      }
+      loadLandingStats(eth);
+    }, 30000);
+  }
 }
 
 // Auto-connect on load — restores session on every page reload without landing screen
@@ -487,6 +561,7 @@ function mobileNavSwitch(name) {
 }
 
 function disconnectWallet() {
+  _stopChainListeners();
   App.walletAddress = null;
   App.provider = null;
   App.signer = null;
@@ -875,6 +950,10 @@ function switchTabByName(name) {
   if (name !== 'investments' && _invCountdownInterval) {
     clearInterval(_invCountdownInterval); _invCountdownInterval = null;
   }
+  if (name !== 'dashboard'   && window._dashStopPoll)    window._dashStopPoll();
+  if (name !== 'investments' && window._invStopPoll)     window._invStopPoll();
+  if (name !== 'rewards'     && window._rwStopPoll)      window._rwStopPoll();
+  if (name !== 'invest'      && window._investStopPoll)  window._investStopPoll();
 
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -888,15 +967,124 @@ function switchTabByName(name) {
   });
 
   if (!App.contract || !App.walletAddress) return;
-  if (name === 'invest') { loadInvestTokens(); fetchEthPrice(); renderPkgGrid(); }
+  if (name === 'invest') { loadInvestTokens(); fetchEthPrice(); renderPkgGrid(); if (window._investStartPoll) window._investStartPoll(); }
   if (name === 'pool')   { fetchEthPrice(); loadPoolPanel(); }
   if (name === 'owner')  { loadOwnerStats(); ownerPopulateLiqDropdowns(); }
-  if (name === 'dashboard'   && !_tabLoaded.has('dashboard'))   { _tabLoaded.add('dashboard');   loadDashboard(); }
-  if (name === 'investments') { _tabLoaded.add('investments'); loadInvestments(); }
+  if (name === 'dashboard')   { _tabLoaded.add('dashboard');   loadDashboard();   if (window._dashStartPoll) window._dashStartPoll(); }
+  if (name === 'investments') { _tabLoaded.add('investments'); loadInvestments(); if (window._invStartPoll)  window._invStartPoll();  }
   if (name === 'myinfo'      && !_tabLoaded.has('myinfo'))      { _tabLoaded.add('myinfo');      loadMyInfo(); }
   if (name === 'history'     && !_tabLoaded.has('history'))     { _tabLoaded.add('history');     switchHistoryTab(_activeHistTab); }
   if (name === 'genealogy'   && !_tabLoaded.has('genealogy'))   { _tabLoaded.add('genealogy');   loadGenealogy(); }
-  if (name === 'rewards'     && !_tabLoaded.has('rewards'))     { _tabLoaded.add('rewards');     loadRewards(); }
+  if (name === 'rewards')     { _tabLoaded.add('rewards');     loadRewards();     if (window._rwStartPoll)   window._rwStartPoll();   }
+}
+
+// ── CHAIN EVENT LISTENERS ──
+// Subscribes to contract events so every device refreshes within ~1 s of any
+// on-chain action — including actions taken on another device.
+
+const _refreshDebounce = {};
+
+function _triggerRefresh(panels, delay = 600) {
+  for (const panel of panels) {
+    clearTimeout(_refreshDebounce[panel]);
+    _refreshDebounce[panel] = setTimeout(() => {
+      delete _refreshDebounce[panel];
+      _doRefresh(panel);
+    }, delay);
+  }
+}
+
+function _doRefresh(panel) {
+  switch (panel) {
+    case 'dashboard':
+      if (window.loadDashboard)   window.loadDashboard(true);   break;
+    case 'investments':
+      if (window.loadInvestments) window.loadInvestments();      break;
+    case 'rewards-ref':
+      if (window.loadRwReferral)  window.loadRwReferral();       break;
+    case 'rewards-staking':
+      if (window.loadRwStaking)   window.loadRwStaking(true);
+      if (window.loadRwLPFees)    window.loadRwLPFees(true);     break;
+  }
+}
+
+let _chainListenersActive = false;
+let _listenedContract     = null;
+
+function _startChainListeners() {
+  _stopChainListeners(); // always tear down before re-subscribing
+  if (!contract || !walletAddress) return;
+
+  _listenedContract     = contract;
+  _chainListenersActive = true;
+  const addr = walletAddress;
+
+  try {
+    // ── User's own on-chain actions ──────────────────────────────────────
+    contract.on(contract.filters.Invested(addr), () =>
+      _triggerRefresh(['dashboard', 'investments']));
+
+    contract.on(contract.filters.LPClaimed(addr), () =>
+      _triggerRefresh(['dashboard', 'investments', 'rewards-staking']));
+
+    contract.on(contract.filters.LPRemoved(addr), () =>
+      _triggerRefresh(['dashboard', 'investments', 'rewards-staking']));
+
+    contract.on(contract.filters.LPRestaked(addr), () =>
+      _triggerRefresh(['dashboard', 'investments', 'rewards-staking']));
+
+    contract.on(contract.filters.StakingRewardClaimed(addr), () =>
+      _triggerRefresh(['rewards-staking']));
+
+    // ── Commission received — fires on ANY device when a referral invests ──
+    // This is the core cross-device sync event.
+    contract.on(contract.filters.CommissionPaid(addr),
+      (_recipient, _from, amount, level, ev) => {
+        try {
+          const eth  = parseFloat(ethers.utils.formatEther(amount));
+          const usdt = ethToUSDT(eth);
+          toast(`+${usdt.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT commission · L${Number(level)}`, 'success');
+        } catch (_) {}
+        // If rewards tab is already rendered, do a lightweight row append instead of full reload
+        if (_tabLoaded.has('rewards') && window._rwAppendCommission) {
+          window._rwAppendCommission(ev, _from, amount, level);
+        } else {
+          _triggerRefresh(['rewards-ref']);
+        }
+        _triggerRefresh(['dashboard']);
+      });
+
+    // ── Any investment on the platform ───────────────────────────────────
+    // A referral investing changes active-referral counts and eligibility.
+    // Use a longer delay so the commission cascade has time to land first.
+    contract.on(contract.filters.Invested(), () =>
+      _triggerRefresh(['dashboard'], 2000));
+
+    // ── New token registered by owner ─────────────────────────────────────
+    // Reload the invest token list so the new token appears immediately.
+    contract.on(contract.filters.TokenRegistered(), () => {
+      if (_tabLoaded.has('invest') && window.loadInvestTokens) {
+        window.loadInvestTokens();
+      }
+    });
+
+  } catch (e) {
+    console.warn('_startChainListeners:', e);
+    _chainListenersActive = false;
+    _listenedContract     = null;
+  }
+}
+
+function _stopChainListeners() {
+  if (_listenedContract) {
+    try { _listenedContract.removeAllListeners(); } catch (_) {}
+    _listenedContract = null;
+  }
+  _chainListenersActive = false;
+  for (const key of Object.keys(_refreshDebounce)) {
+    clearTimeout(_refreshDebounce[key]);
+    delete _refreshDebounce[key];
+  }
 }
 
 // ── EXPOSE TO WINDOW ──
@@ -925,3 +1113,6 @@ window.switchTabByName     = switchTabByName;
 window.toggleTabsCollapse  = toggleTabsCollapse;
 window.dismissMissedAlert  = dismissMissedAlert;
 window.checkMissedCommissions = checkMissedCommissions;
+window._computeMissedWei   = _computeMissedWei;
+window._startChainListeners = _startChainListeners;
+window._stopChainListeners  = _stopChainListeners;

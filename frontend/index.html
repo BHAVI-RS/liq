@@ -400,6 +400,16 @@
       <button onclick="dismissFeaturedBanner()" style="background:none;border:none;color:rgba(0,0,0,0.45);font-size:20px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;">&times;</button>
     </div>
 
+    <!-- MISSED COMMISSIONS NOTIFICATION -->
+    <div id="dashMissedCommBanner" class="dash-missed-banner" style="display:none;">
+      <div class="dmb-icon">⚠</div>
+      <div class="dmb-body">
+        <div class="dmb-title">MISSED COMMISSIONS</div>
+        <div class="dmb-msg">You have missed <span id="dashMissedAmount" class="dmb-amount">—</span> in referral commissions. Invest more to unlock your full earning capacity.</div>
+      </div>
+      <button class="dmb-action" onclick="navToRewards('referral')">VIEW DETAILS</button>
+    </div>
+
     <!-- REFERRAL LINK -->
     <div class="card" id="dashRefCard" style="display:none;">
       <div class="card-title">YOUR REFERRAL LINK</div>
@@ -539,15 +549,31 @@
       <!-- hidden amount field read by invest() -->
       <input type="hidden" id="investAmount" value=""/>
 
-      <div id="investBreakdown" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:16px;margin-bottom:16px;font-size:12px;line-height:2;">
-        <div style="color:var(--muted);letter-spacing:1px;font-size:10px;margin-bottom:8px;">INVESTMENT BREAKDOWN</div>
-        <div>Half A — token acquisition: <span id="brkA" style="color:var(--gold)"></span></div>
-        <div style="padding-left:16px;">↳ 60% pool buy: <span id="brkA60" style="color:var(--cream)"></span></div>
-        <div style="padding-left:16px;">↳ 40% commissions: <span id="brkA40" style="color:var(--cream)"></span></div>
-        <div style="margin-top:6px;">Half B — liquidity: <span id="brkB" style="color:var(--gold)"></span></div>
-        <div style="margin-top:8px;font-size:10px;color:var(--muted);">Excess tokens &amp; unused funds from the router are returned to the platform.</div>
+      <div id="investTokenPreview" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px 16px;margin-bottom:16px;">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:10px;">ESTIMATED TOKEN ACQUISITION</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <div style="font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:4px;">POOL BUY</div>
+            <div id="previewPoolTokens" style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">—</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:4px;">PLATFORM BUY</div>
+            <div id="previewPlatformTokens" style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">—</div>
+          </div>
+        </div>
+        <div style="padding-top:10px;border-top:1px solid var(--border);">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:4px;">TOTAL TOKENS</div>
+          <div id="previewTotalTokens" style="font-family:var(--font-mono);font-size:16px;color:var(--gold);">—</div>
+        </div>
+        <div style="padding-top:10px;margin-top:10px;border-top:1px solid var(--border);">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:6px;">INITIAL STAKING REWARD · 90-DAY BASE RATE</div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <div id="previewStakingUSDT" style="font-family:var(--font-mono);font-size:15px;color:#4ade80;">—</div>
+            <div id="previewStakingPct" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);letter-spacing:.5px;">—</div>
+          </div>
+        </div>
       </div>
-      <button class="btn btn-primary" id="investBtn" onclick="invest()">PROVIDE LIQUIDITY</button>
+      <button class="btn btn-primary" id="investBtn" onclick="showInvestConfirmModal()">PROVIDE LIQUIDITY</button>
     </div>
   </div>
 
@@ -565,79 +591,114 @@
     <!-- Pool detail + trade (hidden until token selected) -->
     <div class="card" id="poolDetailCard" style="display:none;">
 
-      <!-- Header -->
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap;">
-        <div id="poolTokenIcon" style="width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">⬡</div>
+      <!-- Header: pair + contract + live price -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+          <div id="poolTokenIcon" style="width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">⬡</div>
+          <div style="min-width:0;">
+            <div id="poolTokenLabel" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--cream);letter-spacing:.06em;line-height:1.2;"></div>
+            <div id="poolTokenAddr" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:5px;word-break:break-all;cursor:pointer;transition:color .2s;" title="Click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.full||this.textContent);this.style.color='var(--gold)';setTimeout(()=>this.style.color='',1200)"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;margin-left:auto;flex-shrink:0;">
+          <div style="text-align:right;">
+            <div id="poolHeaderPrice" class="pool-header-price" style="color:var(--muted);">—</div>
+            <div id="poolHeaderChange" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:2px;transition:color .4s;">—</div>
+          </div>
+          <button onclick="loadPoolInfo(window._poolSelectedToken)" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">↻</button>
+        </div>
+      </div>
+
+      <!-- Price chart (full width) -->
+      <div style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;">PRICE CHART (USDT)</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button onclick="switchPriceChart('1h')"  id="pct-1h"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--gold);color:#000;">1H</button>
+            <button onclick="switchPriceChart('4h')"  id="pct-4h"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">4H</button>
+            <button onclick="switchPriceChart('12h')" id="pct-12h" style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">12H</button>
+            <button onclick="switchPriceChart('24h')" id="pct-24h" style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">24H</button>
+            <button onclick="switchPriceChart('1w')"  id="pct-1w"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">1W</button>
+            <button onclick="switchPriceChart('1m')"  id="pct-1m"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">1M</button>
+            <button onclick="switchPriceChart('1y')"  id="pct-1y"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">1Y</button>
+            <button onclick="switchPriceChart('all')" id="pct-all" style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">ALL</button>
+          </div>
+        </div>
+        <div style="position:relative;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;">
+          <canvas id="poolPriceCanvas" style="width:100%;display:block;"></canvas>
+          <div id="poolChartTooltip" class="pool-chart-tooltip"></div>
+        </div>
+      </div>
+
+      <!-- Two-column: trade form LEFT, recent trades RIGHT -->
+      <div class="pool-main-layout">
+
+        <!-- LEFT: buy / sell -->
         <div>
-          <div id="poolTokenLabel" style="font-family:var(--font-mono);font-size:16px;color:var(--cream);letter-spacing:.05em;"></div>
-          <div id="poolTokenAddr" style="font-size:10px;color:var(--gold);font-family:var(--font-mono);margin-top:3px;word-break:break-all;"></div>
+          <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:18px;width:fit-content;">
+            <button id="poolBuyBtn"  onclick="switchPoolMode('buy')"  style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--success,#26d97f);color:#000;font-weight:700;">BUY</button>
+            <button id="poolSellBtn" onclick="switchPoolMode('sell')" style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--surface);color:var(--muted);">SELL</button>
+          </div>
+
+          <!-- BUY form -->
+          <div id="poolBuyForm">
+            <div class="field">
+              <label style="display:flex;justify-content:space-between;">
+                <span>USDT to spend</span>
+                <span id="poolBuyUsdtBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;" onclick="poolBuyMax()">
+                  BAL: <span id="poolBuyUsdtBal">—</span> USDT &nbsp;MAX
+                </span>
+              </label>
+              <input id="poolBuyUSDT" type="number" min="0" step="0.01" placeholder="0.00"
+                     oninput="onBuyUsdtInput()" onfocus="this.select()">
+            </div>
+            <div class="pool-swap-sep">↕</div>
+            <div class="field">
+              <label style="display:flex;justify-content:space-between;">
+                <span>Tokens to receive</span>
+                <span id="poolBuyOutSym" style="color:var(--gold);font-size:10px;"></span>
+              </label>
+              <input id="poolBuyToken" type="number" min="0" step="1" placeholder="0"
+                     oninput="onBuyTokenInput()" onfocus="this.select()">
+            </div>
+            <div id="poolBuyRate" style="margin:6px 0 6px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
+            <div id="poolBuyHint" style="min-height:16px;margin-bottom:10px;font-size:10px;font-family:var(--font-mono);letter-spacing:.04em;"></div>
+            <button class="btn btn-primary" onclick="poolBuyTokens()">BUY TOKENS</button>
+          </div>
+
+          <!-- SELL form -->
+          <div id="poolSellForm" style="display:none;">
+            <div class="field">
+              <label style="display:flex;justify-content:space-between;">
+                <span>Tokens to sell</span>
+                <span id="poolSellBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;" onclick="poolSellMax()">
+                  BAL: <span id="poolSellBal">—</span> &nbsp;MAX
+                </span>
+              </label>
+              <input id="poolSellAmt" type="number" min="0" step="1" placeholder="0"
+                     oninput="onSellTokenInput()" onfocus="this.select()">
+            </div>
+            <div class="pool-swap-sep">↕</div>
+            <div class="field">
+              <label>USDT to receive</label>
+              <input id="poolSellUSDT" type="number" min="0" step="0.01" placeholder="0.00"
+                     oninput="onSellUsdtInput()" onfocus="this.select()">
+            </div>
+            <div id="poolSellRate" style="margin:6px 0 12px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
+            <button class="btn btn-primary" onclick="poolSellTokens()">SELL TOKENS</button>
+          </div>
         </div>
-        <button onclick="loadPoolInfo(window._poolSelectedToken)" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">↻ REFRESH</button>
+
+        <!-- RIGHT: recent trades -->
+        <div class="pool-trades-panel" id="poolTradeHistory"></div>
       </div>
 
-      <!-- Trade section (above stats) -->
-      <div style="margin-bottom:24px;">
-        <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:18px;width:fit-content;">
-          <button id="poolBuyBtn"  onclick="switchPoolMode('buy')"  style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--success,#26d97f);color:#000;font-weight:700;">BUY</button>
-          <button id="poolSellBtn" onclick="switchPoolMode('sell')" style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--surface);color:var(--muted);">SELL</button>
-        </div>
-
-        <!-- BUY form -->
-        <div id="poolBuyForm">
-          <div class="field">
-            <label>ETH to spend</label>
-            <input id="poolBuyETH" type="number" min="0" step="0.001" placeholder="0.000000"
-                   oninput="onBuyEthInput()" onfocus="this.select()">
-          </div>
-          <div class="pool-swap-sep">↕</div>
-          <div class="field">
-            <label style="display:flex;justify-content:space-between;">
-              <span>Tokens to receive</span>
-              <span id="poolBuyOutSym" style="color:var(--gold);font-size:10px;"></span>
-            </label>
-            <input id="poolBuyToken" type="number" min="0" step="1" placeholder="0"
-                   oninput="onBuyTokenInput()" onfocus="this.select()">
-          </div>
-          <div id="poolBuyRate" style="margin:6px 0 12px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
-          <div class="field">
-            <label style="display:flex;justify-content:space-between;"><span>Slippage tolerance</span><span id="poolBuySlipLabel" style="color:var(--gold);">1%</span></label>
-            <input type="range" id="poolBuySlip" min="1" max="50" value="1" oninput="document.getElementById('poolBuySlipLabel').textContent=this.value+'%'" style="width:100%;accent-color:var(--gold);">
-          </div>
-          <button class="btn btn-primary" onclick="poolBuyTokens()">BUY TOKENS</button>
-        </div>
-
-        <!-- SELL form -->
-        <div id="poolSellForm" style="display:none;">
-          <div class="field">
-            <label style="display:flex;justify-content:space-between;">
-              <span>Tokens to sell</span>
-              <span id="poolSellBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;" onclick="poolSellMax()">
-                BAL: <span id="poolSellBal">—</span> &nbsp;MAX
-              </span>
-            </label>
-            <input id="poolSellAmt" type="number" min="0" step="1" placeholder="0"
-                   oninput="onSellTokenInput()" onfocus="this.select()">
-          </div>
-          <div class="pool-swap-sep">↕</div>
-          <div class="field">
-            <label>ETH to receive</label>
-            <input id="poolSellETH" type="number" min="0" step="0.0001" placeholder="0.00000000"
-                   oninput="onSellEthInput()" onfocus="this.select()">
-          </div>
-          <div id="poolSellRate" style="margin:6px 0 12px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
-          <div class="field">
-            <label style="display:flex;justify-content:space-between;"><span>Slippage tolerance</span><span id="poolSellSlipLabel" style="color:var(--gold);">1%</span></label>
-            <input type="range" id="poolSellSlip" min="1" max="50" value="1" oninput="document.getElementById('poolSellSlipLabel').textContent=this.value+'%'" style="width:100%;accent-color:var(--gold);">
-          </div>
-          <button class="btn btn-primary" onclick="poolSellTokens()">SELL TOKENS</button>
-        </div>
+      <!-- Stats: collapsed behind "Show More" -->
+      <div>
+        <button onclick="togglePoolStats()" id="poolStatsToggleBtn" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 16px;border-radius:4px;cursor:pointer;letter-spacing:1px;margin-bottom:14px;">SHOW MORE ▾</button>
+        <div id="poolStats" style="display:none;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:8px;"></div>
       </div>
 
-      <!-- Stats grid -->
-      <div id="poolStats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px;"></div>
-
-      <!-- Trade history / orderbook -->
-      <div id="poolTradeHistory"></div>
     </div>
   </div>
 
@@ -1007,19 +1068,59 @@
   </div>
 </div>
 
+<!-- INVEST CONFIRMATION MODAL -->
+<div id="investConfirmModal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeInvestConfirmModal()">
+  <div style="background:var(--panel);border:1px solid rgba(201,168,76,0.3);border-radius:12px;max-width:400px;width:92%;padding:28px;">
+    <div style="font-family:var(--font-display);font-size:18px;letter-spacing:2px;color:var(--gold);margin-bottom:4px;">CONFIRM INVESTMENT</div>
+    <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px;">Estimated token acquisition</div>
+    <div id="investPreviewContent" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+    <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px;line-height:1.6;">Amounts are estimates based on current pool price and may vary at execution time.</div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closeInvestConfirmModal()" style="flex:1;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;">CANCEL</button>
+      <button onclick="confirmInvest()" style="flex:1;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:var(--success,#26d97f);border:none;border-radius:4px;color:#000;cursor:pointer;font-weight:700;">CONFIRM &amp; INVEST</button>
+    </div>
+  </div>
+</div>
+
+<!-- REMOVE LP CONFIRMATION MODAL -->
+<div id="removeLPModal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeRemoveLPModal()">
+  <div style="background:var(--panel);border:1px solid rgba(248,113,113,0.3);border-radius:12px;max-width:400px;width:92%;padding:28px;">
+    <div style="font-family:var(--font-display);font-size:18px;letter-spacing:2px;color:#f87171;margin-bottom:4px;">REMOVE LIQUIDITY</div>
+    <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px;">Estimated amounts you will receive</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;">TOKENS</div>
+        <div id="removeLPTokenAmt" style="font-family:var(--font-mono);font-size:15px;color:var(--gold);">—</div>
+        <div id="removeLPTokenSym" style="font-size:10px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;">USDT</div>
+        <div id="removeLPUsdtAmt" style="font-family:var(--font-mono);font-size:15px;color:#4ade80;">—</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px;line-height:1.6;">Actual amounts may vary slightly due to pool price changes at transaction time.</div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closeRemoveLPModal()" style="flex:1;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;">CANCEL</button>
+      <button onclick="confirmRemoveLP()" style="flex:1;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:#f87171;border:none;border-radius:4px;color:#fff;cursor:pointer;font-weight:700;">CONFIRM REMOVE</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Stake LP duration modal ── -->
 <div id="stakeModal" class="stake-modal-overlay" style="display:none;" onclick="if(event.target===this)closeStakeModal()">
   <div class="stake-modal-box">
     <div class="stake-modal-title">STAKE LP</div>
     <div class="stake-modal-sub">SELECT LOCK DURATION</div>
     <div class="stake-days-grid">
-      <button class="stake-day-btn" data-days="30"  onclick="selectStakeDays(30)"><span class="sdb-num">30</span><span class="sdb-lbl">DAYS</span></button>
-      <button class="stake-day-btn" data-days="60"  onclick="selectStakeDays(60)"><span class="sdb-num">60</span><span class="sdb-lbl">DAYS</span></button>
-      <button class="stake-day-btn" data-days="90"  onclick="selectStakeDays(90)"><span class="sdb-num">90</span><span class="sdb-lbl">DAYS</span></button>
-      <button class="stake-day-btn" data-days="180" onclick="selectStakeDays(180)"><span class="sdb-num">180</span><span class="sdb-lbl">DAYS</span></button>
-      <button class="stake-day-btn" data-days="360" onclick="selectStakeDays(360)"><span class="sdb-num">360</span><span class="sdb-lbl">DAYS</span></button>
+      <button class="stake-day-btn" data-days="7"   onclick="selectStakeDays(7)"><span class="sdb-num">7</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="30"  onclick="selectStakeDays(30)"><span class="sdb-num">30</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="60"  onclick="selectStakeDays(60)"><span class="sdb-num">60</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="90"  onclick="selectStakeDays(90)"><span class="sdb-num">90</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="180" onclick="selectStakeDays(180)"><span class="sdb-num">180</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="360" onclick="selectStakeDays(360)"><span class="sdb-num">360</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
     </div>
     <div class="stake-unlock-info" id="stakeUnlockInfo">&nbsp;</div>
+    <div id="stakeStreakInfo" style="display:none;margin:0 0 10px;padding:7px 12px;border-radius:5px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.25);font-family:var(--font-mono);font-size:11px;letter-spacing:.8px;color:var(--gold);text-align:center;"></div>
     <div class="stake-modal-actions">
       <button class="stake-modal-cancel" onclick="closeStakeModal()">CANCEL</button>
       <button class="stake-modal-confirm" id="stakeConfirmBtn" disabled onclick="confirmRestake()">CONFIRM STAKE</button>

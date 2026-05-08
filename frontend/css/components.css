@@ -583,6 +583,50 @@ input[type="email"]::placeholder { color: var(--muted); }
   background: var(--border);
 }
 
+/* ── POOL TRADING LAYOUT ── */
+.pool-main-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+.pool-trades-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.pool-trades-panel::-webkit-scrollbar { width: 4px; }
+.pool-trades-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.pool-header-price {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  transition: color 0.4s;
+}
+.pool-chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cream);
+  white-space: nowrap;
+  display: none;
+  z-index: 10;
+  line-height: 1.7;
+}
+@media (max-width: 900px) {
+  .pool-main-layout { grid-template-columns: 1fr; }
+  .pool-trades-panel { max-height: 360px; }
+}
+
 /* ── HISTORY TAB ── */
 .hist-subtab {
   padding: 10px 20px;
