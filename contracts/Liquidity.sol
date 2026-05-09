@@ -93,6 +93,8 @@ contract Liquidity {
     mapping(address => uint256) public userCommissionsEarned;
     mapping(address => uint256) public lastStakingClaim;
     mapping(address => uint256) public stakingRewardPaid;
+    // Encrypted referral labels: owner => ref => AES-GCM ciphertext (iv + ciphertext)
+    mapping(address => mapping(address => bytes)) private _refLabels;
 
     // ── Platform-wide aggregate counters (instant view without event scans) ──
     uint256 public totalRegisteredUsers;
@@ -770,6 +772,128 @@ contract Liquidity {
         active       = userTotalInvested[_user];
     }
 
+    // Raw parameters for client-side wealth computation with live wall-clock elapsed.
+    // lockedAt / unlockTime are set at investment time and don't change — the frontend uses
+    // Date.now() - lockedAt for smooth per-second accumulation even when block.timestamp is frozen.
+    struct WealthLockParam {
+        uint256 ethInvested;
+        uint256 rewardRatePPM;
+        uint256 lockedAt;
+        uint256 unlockTime;
+        bool    removed;
+        uint256 tokensAccumulated;
+        uint256 lpAmount;
+        uint256 reserveETH;      // ETH reserve in the Uniswap pair at call time
+        uint256 totalLPSupply;   // LP token total supply at call time
+    }
+
+    struct WealthParams {
+        uint256            refEarnings;
+        uint256            platformTokenPriceEth;  // 1e18-scaled (wei ETH per 1e18 platform tokens)
+        uint256            lpLockDuration;          // LP_LOCK_DURATION constant (fallback if unlockTime==lockedAt)
+        WealthLockParam[]  locks;
+    }
+
+    // Returns all parameters needed for the frontend to compute live wealth without block.timestamp.
+    // The frontend uses wall-clock now - lockedAt for per-second accumulation that advances even on Hardhat.
+    function getWealthParams(address _user) external view returns (WealthParams memory p) {
+        p.refEarnings           = userCommissionsEarned[_user];
+        p.platformTokenPriceEth = _tokenPriceInETH();
+        p.lpLockDuration        = LP_LOCK_DURATION;
+
+        LPLock[] storage locks = userLPLocks[_user];
+        p.locks = new WealthLockParam[](locks.length);
+        for (uint256 i = 0; i < locks.length; i++) {
+            LPLock storage l = locks[i];
+            p.locks[i].ethInvested       = l.ethInvested;
+            p.locks[i].rewardRatePPM     = l.rewardRatePPM;
+            p.locks[i].lockedAt          = l.lockedAt;
+            p.locks[i].unlockTime        = l.unlockTime;
+            p.locks[i].removed           = l.removed;
+            p.locks[i].tokensAccumulated = l.tokensAccumulated;
+            p.locks[i].lpAmount          = l.lpAmount;
+            if (!l.removed && l.lpAmount > 0) {
+                address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(WETH, l.token);
+                if (pair != address(0)) {
+                    (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
+                    address t0 = IUniswapV2Pair(pair).token0();
+                    p.locks[i].reserveETH    = (t0 == WETH) ? uint256(r0) : uint256(r1);
+                    p.locks[i].totalLPSupply = IUniswapV2Pair(pair).totalSupply();
+                }
+            }
+        }
+    }
+
+    // Returns the user's total wealth in ETH (wei), computed entirely on-chain.
+    // wealth = refEarnings + max(0, currentLP - invested) + invested + stakingPending + tokensAccumulatedETH
+    function getWealthOf(address _user) external view returns (uint256 wealthWei) {
+        LPLock[] storage locks = userLPLocks[_user];
+        uint256 refEarnings    = userCommissionsEarned[_user];
+        uint256 totalInvested  = 0;
+        uint256 totalCurrentLP = 0;
+        uint256 totalStaking   = 0;
+        uint256 tokenPrice     = _tokenPriceInETH();
+
+        for (uint256 i = 0; i < locks.length; i++) {
+            LPLock storage l = locks[i];
+            totalInvested += l.ethInvested;
+            if (!l.removed) {
+                address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(WETH, l.token);
+                if (pair != address(0) && l.lpAmount > 0) {
+                    (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
+                    address t0 = IUniswapV2Pair(pair).token0();
+                    uint256 reserveETH = (t0 == WETH) ? uint256(r0) : uint256(r1);
+                    uint256 totalLP    = IUniswapV2Pair(pair).totalSupply();
+                    if (totalLP > 0) {
+                        totalCurrentLP += (l.lpAmount * reserveETH * 2) / totalLP;
+                    }
+                }
+                totalStaking += _calcPendingRewardETH(l);
+                if (l.tokensAccumulated > 0 && tokenPrice > 0) {
+                    totalStaking += (l.tokensAccumulated * tokenPrice) / 1e18;
+                }
+            }
+        }
+
+        uint256 lpFees = totalCurrentLP > totalInvested ? totalCurrentLP - totalInvested : 0;
+        wealthWei = refEarnings + lpFees + totalInvested + totalStaking;
+    }
+
+    // Per-lock staking snapshot computed at block.timestamp.
+    // earnedETH = total reward earned so far (claimed + pending).
+    // isActive   = lock is still within its staking period on-chain.
+    // elapsed / lockDur let the frontend advance the ticker by wall clock without drifting.
+    struct LockStakingSnapshot {
+        uint256 earnedETH;
+        uint256 claimedETH;
+        uint256 tokensAccumulated;
+        bool    isActive;
+        uint256 lockDur;
+        uint256 elapsed;
+    }
+
+    function getLockStakingSnapshots(address _user) external view returns (LockStakingSnapshot[] memory snaps) {
+        LPLock[] storage locks = userLPLocks[_user];
+        snaps = new LockStakingSnapshot[](locks.length);
+        for (uint256 i = 0; i < locks.length; i++) {
+            LPLock storage l = locks[i];
+            uint256 dur = l.unlockTime > l.lockedAt ? l.unlockTime - l.lockedAt : LP_LOCK_DURATION;
+            uint256 el  = block.timestamp > l.lockedAt ? block.timestamp - l.lockedAt : 0;
+            if (el > dur) el = dur;
+            uint256 earned = (l.removed || l.rewardRatePPM == 0 || dur == 0)
+                ? l.rewardClaimedETH
+                : (l.ethInvested * l.rewardRatePPM * el) / (1_000_000 * dur);
+            snaps[i] = LockStakingSnapshot({
+                earnedETH:         earned,
+                claimedETH:        l.rewardClaimedETH,
+                tokensAccumulated: l.tokensAccumulated,
+                isActive:          !l.removed && block.timestamp < l.unlockTime,
+                lockDur:           dur,
+                elapsed:           el
+            });
+        }
+    }
+
     function getLockTimesLeft(address _user) external view returns (uint256[] memory) {
         LPLock[] storage locks = userLPLocks[_user];
         uint256[] memory times = new uint256[](locks.length);
@@ -839,6 +963,14 @@ contract Liquidity {
         baseRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationSecs, 0);
         totalRatePPM   = _getRewardRatePPM(lock.ethInvested, _durationSecs, sIdx);
         streakBonusPPM = totalRatePPM - baseRatePPM;
+    }
+
+    function setRefLabel(address _ref, bytes calldata _label) external {
+        _refLabels[msg.sender][_ref] = _label;
+    }
+
+    function getRefLabel(address _owner, address _ref) external view returns (bytes memory) {
+        return _refLabels[_owner][_ref];
     }
 
     receive() external payable {}

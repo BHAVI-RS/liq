@@ -420,6 +420,17 @@
         <div class="dash-stat-sub">no active staking</div>
       </div>
       <!-- Row 3 -->
+      <div class="dash-stat-card" id="dashCard-teamvol" onclick="navToGeneView('tree')" style="cursor:pointer;" title="Click to view genealogy tree">
+        <div class="dash-stat-label">TEAM VOLUME <span class="dash-stat-chart-hint">→</span></div>
+        <div id="dashTeamVolume" class="dash-stat-val" style="color:var(--cream);">—</div>
+        <div class="dash-stat-sub">active users under you</div>
+      </div>
+      <div class="dash-stat-card" id="dashCard-teambiz" onclick="navToGeneView('list')" style="cursor:pointer;" title="Click to view team list">
+        <div class="dash-stat-label">TEAM BUSINESS <span class="dash-stat-chart-hint">→</span></div>
+        <div id="dashTeamBusiness" class="dash-stat-val" style="color:#4ade80;">—</div>
+        <div class="dash-stat-sub">total team investment</div>
+      </div>
+      <!-- Row 4 -->
       <div class="dash-stat-card" id="dashCard-lpvalue" onclick="navToRewards('lpfees')" title="Click to view LP fees" style="cursor:pointer;">
         <div class="dash-stat-label">LP Fees <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
@@ -449,10 +460,23 @@
       </div>
     </div>
 
+    <!-- DIRECT REFERRAL PERFORMANCE -->
+    <div id="dashDirectRefsSection" style="display:none;margin-top:8px;">
+      <div class="dash-dref-header">DIRECT REFERRAL PERFORMANCE</div>
+      <div id="dashDirectRefsList"></div>
+    </div>
+
     <div id="dashLoadingState">
       <div class="empty-state" style="margin-top:20px;">Connect wallet to load your dashboard.</div>
     </div>
 
+  </div>
+
+  <!-- REFERRAL DETAIL POPUP -->
+  <div id="dashRefPopupOverlay" onclick="closeRefPopup()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:9500;align-items:center;justify-content:center;">
+    <div id="dashRefPopupBox" class="dash-refpop-box" onclick="event.stopPropagation()">
+      <div id="dashRefPopupContent"></div>
+    </div>
   </div>
 
   <!-- INVESTMENTS PANEL -->
@@ -729,12 +753,20 @@
     <div class="card">
       <!-- Sub-tab bar -->
       <div style="display:flex;align-items:center;gap:0;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;">
-        <button id="histTab-invest" class="hist-subtab active" onclick="switchHistoryTab('invest')">INVESTMENTS</button>
-        <button id="histTab-pool"   class="hist-subtab"        onclick="switchHistoryTab('pool')">SWAP ACTIVITY</button>
+        <button id="histTab-rewards" class="hist-subtab active" onclick="switchHistoryTab('rewards')">REWARD CLAIMS</button>
+        <button id="histTab-invest"  class="hist-subtab"        onclick="switchHistoryTab('invest')">INVESTMENTS</button>
+        <button id="histTab-pool"    class="hist-subtab"        onclick="switchHistoryTab('pool')">SWAP ACTIVITY</button>
+      </div>
+
+      <!-- Reward claims sub-panel -->
+      <div id="histPanel-rewards">
+        <div id="rewardHistoryList">
+          <div class="empty-state">Connect wallet to view reward claims.</div>
+        </div>
       </div>
 
       <!-- Investment history sub-panel -->
-      <div id="histPanel-invest">
+      <div id="histPanel-invest" style="display:none;">
         <div id="historyList">
           <div class="empty-state">Connect wallet to view history.</div>
         </div>

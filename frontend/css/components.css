@@ -665,10 +665,11 @@ input[type="email"]::placeholder { color: var(--muted); }
   white-space: nowrap;
   flex-shrink: 0;
 }
-.ph-badge.buy    { background: rgba(62,207,142,0.12); color: var(--success); border: 1px solid rgba(62,207,142,0.25); }
-.ph-badge.sell   { background: rgba(224,80,80,0.1);   color: var(--danger);  border: 1px solid rgba(224,80,80,0.2);  }
-.ph-badge.claim  { background: rgba(201,168,76,0.1);  color: var(--gold);    border: 1px solid rgba(201,168,76,0.2); }
-.ph-badge.remove { background: rgba(74,106,122,0.15); color: var(--muted);   border: 1px solid var(--border); }
+.ph-badge.buy          { background: rgba(62,207,142,0.12);  color: var(--success); border: 1px solid rgba(62,207,142,0.25);  }
+.ph-badge.sell         { background: rgba(224,80,80,0.1);    color: var(--danger);  border: 1px solid rgba(224,80,80,0.2);   }
+.ph-badge.claim        { background: rgba(201,168,76,0.1);   color: var(--gold);    border: 1px solid rgba(201,168,76,0.2);  }
+.ph-badge.remove       { background: rgba(74,106,122,0.15);  color: var(--muted);   border: 1px solid var(--border);         }
+.ph-badge.reward-claim { background: rgba(139,92,246,0.12);  color: #a78bfa;        border: 1px solid rgba(139,92,246,0.25); }
 .ph-main  { flex: 1; min-width: 0; }
 .ph-title { color: var(--cream); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-sub   { color: var(--muted); font-size: 10px; margin-top: 2px; }

@@ -581,6 +581,15 @@ async function loadRwStaking(silent = false) {
         </table>
       </div>` : '<div class="empty-state">No investments yet. Go to INVEST to get started.</div>'}`;
 
+    // Snap bars to their rendered positions without CSS transition.
+    // loadRwStaking re-creates DOM elements each call (including silent polls every 5s),
+    // so without this the 0.9s transition animates bars from 0 each time, making them
+    // appear to reset and re-accumulate even after the lock period ends.
+    el.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = 'none');
+    requestAnimationFrame(() => requestAnimationFrame(() =>
+      el.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = '')
+    ));
+
     _rwStartTicker();
 
   } catch(e) {

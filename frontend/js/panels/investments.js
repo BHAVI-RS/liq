@@ -1,6 +1,10 @@
 
 var _invPollInterval = null;
 
+var _invLPLocks = [];
+var _invTokenMetaMap = new Map();
+var _invPoolCacheMap = new Map();
+
 function _invStopPoll() {
   if (_invPollInterval) { clearInterval(_invPollInterval); _invPollInterval = null; }
 }
@@ -108,6 +112,10 @@ async function loadInvestments() {
       })
     ]);
 
+    _invLPLocks = lpLocks;
+    _invTokenMetaMap = tokenMeta;
+    _invPoolCacheMap = poolCache;
+
     const expandedIndices = new Set();
     el.querySelectorAll('.dash-inv-card[data-lock-index]').forEach(card => {
       if (card.querySelector('.dash-inv-details.open'))
@@ -186,6 +194,11 @@ async function loadInvestments() {
       const claimableTokensAtPrice = (stakingPriceEth > 0 ? pendingETH / stakingPriceEth : 0) + tokensAccumulated;
       const canClaimStaking        = claimableTokensAtPrice > 0;
 
+      const isInActiveLock  = !isUnlocked && !isClaimed && !isRemoved;
+      const showStakingRow  = rewardTotalETH > 0 && (isInActiveLock || canClaimStaking);
+      const tokensDeposited = priceEth > 0 ? (ethInvested / 2) / priceEth : myTokensInPool;
+      const usdtDeposited   = ethInvested * USDT_PER_ETH / 2;
+
       // Progress bar: claimed portion + pending (earned but not yet claimed).
       const claimedPct  = rewardTotalETH > 0 ? Math.min(100, rewardClaimedETH / rewardTotalETH * 100) : 0;
       const pendingPct  = rewardTotalETH > 0 ? Math.min(100 - claimedPct, pendingETH / rewardTotalETH * 100) : 0;
@@ -227,7 +240,7 @@ async function loadInvestments() {
             <span class="dis-sl-label">STAKING REWARD · ${rewardTotalUSDT.toLocaleString(undefined,{maximumFractionDigits:2})} USDT · ${lockDurLabel} · CONTINUOUS</span>
             <span class="dis-sl-reward">${initialRewardStr}</span>
           </div>
-          <div class="dis-slots">${initialSlotHtml}</div>
+          ${isInActiveLock ? `<div class="dis-slots">${initialSlotHtml}</div>` : ''}
           <div class="dis-staking-footer">${stakingFooterHtml}</div>
         </div>`;
 
@@ -278,37 +291,38 @@ async function loadInvestments() {
           <div class="dash-inv-header">
             <div class="dash-inv-logo">${logoSrc}</div>
             <div class="dash-inv-title"><div class="sym">${td.symbol}</div><div class="nm">${td.name}</div></div>
-            ${badgeHtml}
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">${badgeHtml}<button class="lock-hist-btn" onclick="showLockHistory(${i})">LOCK HISTORY</button></div>
           </div>
           <div class="dash-inv-summary">
             <div class="dis-col">
               <div class="dis-label">PACKAGE</div>
-              <div class="dis-val">${fmtUSDT(ethInvested)}</div>
+              <div class="dis-val dis-val-package">${fmtUSDT(ethInvested)}</div>
             </div>
             <div class="dis-col">
               <div class="dis-label">LP TOKENS</div>
               <div class="dis-val">${lpFmt}</div>
               <div class="dis-sub">position #${i+1}</div>
             </div>
+            <div class="dis-col">
+              <div class="dis-label">REWARDS CLAIMED</div>
+              <div class="dis-val" style="color:#4ade80;">${totalTokensClaimed > 0 ? totalTokensClaimed.toFixed(4) + ' ' + tokenSymbol : '—'}</div>
+            </div>
             ${actionColHtml}
           </div>
-          ${stakingRowHtml}
+          ${showStakingRow ? stakingRowHtml : ''}
           <button class="dash-inv-toggle" onclick="toggleInvDetails(this)">
             SHOW MORE <span class="dit-arrow">▾</span>
           </button>
           <div class="dash-inv-details">
-            <div class="did-row"><span class="did-label">CURRENT LP VALUE</span><span class="did-val">${currentETH > 0 ? fmtUSDT(currentETH) : '—'}</span></div>
-            <div class="did-row"><span class="did-label">GROWTH</span><span class="did-val ${growthCls}" data-field="growth">${currentETH>0 ? (growthETH>=0?'+':'')+growthPct.toFixed(2)+'%  '+fmtUSDT(growthETH,{sign:true}) : '—'}</span></div>
-            <div class="did-row"><span class="did-label">TOKEN PRICE</span><span class="did-val">${priceEth ? fmtUSDT(priceEth) : '—'}</span></div>
-            <div class="did-row"><span class="did-label">POOL RESERVES</span><span class="did-val">${pool ? pool.resToken.toLocaleString(undefined,{maximumFractionDigits:2})+' '+td.symbol+' / '+(pool.resETH*USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2})+' USDT' : '—'}</span></div>
-            <div class="did-row"><span class="did-label">YOUR TOKENS IN POOL</span><span class="did-val">${myTokensInPool > 0 ? myTokensInPool.toLocaleString(undefined,{maximumFractionDigits:4})+' '+td.symbol : '—'}</span></div>
-            <div class="did-row"><span class="did-label">YOUR USDT IN POOL</span><span class="did-val">${myETHInPool > 0 ? (myETHInPool*USDT_PER_ETH).toFixed(2)+' USDT' : '—'}</span></div>
-            <hr class="did-hr">
-            <div class="did-row"><span class="did-label">RESTAKE STREAK</span><span class="did-val" style="font-size:12px;">${streakLabel}</span></div>
-            <div class="did-row"><span class="did-label">LOCK PERIOD</span><span class="did-val">${lockDurLabel}</span></div>
-            <div class="did-row"><span class="did-label">LOCKED AT</span><span class="did-val">${lockedAtLabel}</span></div>
-            <div class="did-row"><span class="did-label">UNLOCKS AT</span><span class="did-val" style="color:${isUnlocked?'#4ade80':'var(--cream)'};">${unlockLabel}</span></div>
-            <div class="did-row"><span class="did-label">STAKING CLAIMED</span><span class="did-val" style="color:#4ade80;">${totalTokensClaimed > 0 ? totalTokensClaimed.toFixed(4) + ' ' + tokenSymbol : '—'}</span></div>
+            <div class="did-row"><span class="did-label">RESTAKE STREAK</span><span class="did-val" style="font-size:11px;">${streakLabel}</span></div>
+            <div class="did-row">
+              <span class="did-label">DEPOSITED</span>
+              <span class="did-val">${tokensDeposited > 0 ? tokensDeposited.toFixed(4)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+usdtDeposited.toFixed(2)+' USDT' : '—'}</span>
+            </div>
+            <div class="did-row">
+              <span class="did-label">AVAILABLE</span>
+              <span class="did-val">${myTokensInPool > 0 ? myTokensInPool.toLocaleString(undefined,{maximumFractionDigits:4})+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+(myETHInPool*USDT_PER_ETH).toFixed(2)+' USDT' : '—'}</span>
+            </div>
             ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val"><a href="https://sepolia.etherscan.io/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr.slice(0,10)}…${pool.pairAddr.slice(-6)} ↗</a></span></div>` : ''}
             ${removeLPBtn ? `<div class="did-actions">${removeLPBtn}</div>` : ''}
           </div>
@@ -657,7 +671,167 @@ function revealDashboard() {
   if (window._startChainListeners) window._startChainListeners();
 }
 
+async function showLockHistory(lockIndex) {
+  const lock = _invLPLocks[lockIndex];
+  if (!lock) return;
+
+  const key          = lock.token.toLowerCase();
+  const td           = _invTokenMetaMap.get(key) || { symbol: lock.token.slice(0, 6), name: '' };
+  const ethInvested  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+  const totalClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
+
+  function fmtDur(s) {
+    if (s <= 0)    return '—';
+    if (s < 60)    return s + 's';
+    if (s < 3600)  return (s / 60).toFixed(0) + ' min';
+    if (s < 86400) return (s / 3600).toFixed(1) + ' hr';
+    return Math.round(s / 86400) + ' day' + (Math.round(s / 86400) !== 1 ? 's' : '');
+  }
+  function fmtTs(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    return d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'2-digit' }) +
+      ' ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  }
+
+  const existing = document.getElementById('lockHistoryModal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'lockHistoryModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:600;background:rgba(4,8,15,0.88);backdrop-filter:blur(16px);display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:var(--panel);border:1px solid rgba(201,168,76,0.2);border-radius:8px;max-width:700px;width:96%;max-height:88vh;overflow-y:auto;padding:24px 28px;" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-family:var(--font-display);font-size:18px;letter-spacing:2px;color:var(--gold);">LOCK HISTORY</div>
+        <button onclick="document.getElementById('lockHistoryModal').remove()" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:1px;margin-bottom:16px;">${td.symbol} · Position #${lockIndex+1} · ${fmtUSDT(ethInvested)} invested</div>
+      <div id="lhBody" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);text-align:center;padding:28px 0;">Loading lock history<span class="ld"><span></span><span></span><span></span></span></div>
+    </div>`;
+  modal.onclick = () => modal.remove();
+  document.body.appendChild(modal);
+
+  const body = document.getElementById('lhBody');
+
+  try {
+    const [investedEvs, restakedEvs, claimEvs] = await Promise.all([
+      contract.queryFilter(contract.filters.Invested(walletAddress, lock.token)).catch(() => []),
+      contract.queryFilter(contract.filters.LPRestaked(walletAddress, lock.token)).catch(() => []),
+      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress)).catch(() => []),
+    ]);
+
+    investedEvs.sort((a, b) => a.blockNumber - b.blockNumber);
+    restakedEvs.sort((a, b) => a.blockNumber - b.blockNumber);
+    claimEvs.sort((a, b)    => a.blockNumber - b.blockNumber);
+
+    const allBlocks = [...new Set([
+      ...investedEvs.map(e => e.blockNumber),
+      ...restakedEvs.map(e => e.blockNumber),
+      ...claimEvs.map(e    => e.blockNumber),
+    ])];
+    const btsMap = new Map();
+    await Promise.all(allBlocks.map(async bn => {
+      const blk = await provider.getBlock(bn).catch(() => null);
+      if (blk) btsMap.set(bn, blk.timestamp);
+    }));
+
+    // Find the Invested event for this specific lock (Nth occurrence for this token).
+    let nthForToken = 0;
+    for (let j = 0; j < lockIndex; j++) {
+      if (_invLPLocks[j] && _invLPLocks[j].token.toLowerCase() === key) nthForToken++;
+    }
+    const initEvent = investedEvs[nthForToken] || investedEvs[0];
+    const initTs    = initEvent ? btsMap.get(initEvent.blockNumber) : null;
+
+    // Build restake periods directly from events sorted chronologically.
+    // Each LPRestaked event gives: newUnlockTime (period end) and durationDays (seconds).
+    // Period start = newUnlockTime - durationDays.
+    const restakePeriods = restakedEvs
+      .map(ev => ({
+        start:    Number(ev.args.newUnlockTime) - Number(ev.args.durationDays),
+        end:      Number(ev.args.newUnlockTime),
+        duration: Number(ev.args.durationDays),
+      }))
+      .sort((a, b) => a.start - b.start);
+
+    // Initial period: from investment timestamp to start of first restake
+    // (or to current unlockTime if no restakes).
+    const initStart = initTs || Number(lock.lockedAt) || Number(lock.unlockTime);
+    const initEnd   = restakePeriods.length > 0
+      ? restakePeriods[0].start
+      : Number(lock.unlockTime);
+
+    const periods = [{
+      label:     'Initial',
+      start:     initStart,
+      end:       initEnd,
+      duration:  initEnd - initStart,
+      isCurrent: restakePeriods.length === 0,
+    }];
+    restakePeriods.forEach((p, idx) => {
+      periods.push({
+        label:     `Restake ${idx + 1}`,
+        start:     p.start,
+        end:       p.end,
+        duration:  p.duration,
+        isCurrent: idx === restakePeriods.length - 1,
+      });
+    });
+
+    // Attribute StakingRewardClaimed events to periods by block timestamp.
+    const claims = claimEvs.map(e => ({
+      ts:     btsMap.get(e.blockNumber) || 0,
+      tokens: parseFloat(ethers.utils.formatEther(e.args.tokensAmount || ethers.BigNumber.from(0))),
+    }));
+    for (const p of periods) {
+      p.claimed = claims.filter(c => c.ts >= p.start && c.ts <= p.end).reduce((s, c) => s + c.tokens, 0);
+    }
+
+    // Render table rows.
+    const rows = periods.map(p => {
+      const clTxt = p.claimed > 0.000001
+        ? `<span style="color:#4ade80;">${p.claimed.toFixed(4)} ${td.symbol}</span>`
+        : `<span style="color:var(--muted);">—</span>`;
+      const rowBg  = p.isCurrent ? 'background:rgba(201,168,76,0.05);' : '';
+      const lbClr  = p.isCurrent ? 'var(--gold)' : 'var(--muted)';
+      const dot    = p.isCurrent ? ' <span style="color:var(--gold);font-size:8px;">●</span>' : '';
+      return `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);${rowBg}">
+        <td style="padding:7px 8px;color:${lbClr};white-space:nowrap;">${p.label}${dot}</td>
+        <td style="padding:7px 8px;color:var(--cream);white-space:nowrap;">${fmtTs(p.start)}</td>
+        <td style="padding:7px 8px;color:var(--cream);white-space:nowrap;">${fmtTs(p.end)}</td>
+        <td style="padding:7px 8px;text-align:center;color:var(--cream);">${fmtDur(p.duration)}</td>
+        <td style="padding:7px 8px;text-align:right;">${clTxt}</td>
+      </tr>`;
+    }).join('');
+
+    const totalRow = `<tr style="border-top:1px solid rgba(201,168,76,0.25);background:rgba(201,168,76,0.04);">
+      <td colspan="4" style="padding:7px 8px;font-size:10px;color:var(--muted);letter-spacing:1px;">TOTAL CLAIMED</td>
+      <td style="padding:7px 8px;text-align:right;font-size:12px;color:#4ade80;">${totalClaimed > 0.000001 ? totalClaimed.toFixed(4)+' '+td.symbol : '—'}</td>
+    </tr>`;
+
+    body.innerHTML = `<div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);">
+            <th style="text-align:left;padding:6px 8px;color:var(--muted);font-size:9px;letter-spacing:1.5px;font-weight:400;">PERIOD</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--muted);font-size:9px;letter-spacing:1.5px;font-weight:400;">START</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--muted);font-size:9px;letter-spacing:1.5px;font-weight:400;">END</th>
+            <th style="text-align:center;padding:6px 8px;color:var(--muted);font-size:9px;letter-spacing:1.5px;font-weight:400;">DURATION</th>
+            <th style="text-align:right;padding:6px 8px;color:var(--muted);font-size:9px;letter-spacing:1.5px;font-weight:400;">REWARDS CLAIMED</th>
+          </tr>
+        </thead>
+        <tbody>${rows}${totalRow}</tbody>
+      </table>
+    </div>`;
+
+  } catch(e) {
+    if (body) body.innerHTML = `<div style="color:#f87171;padding:16px 0;">${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+  }
+}
+
 window.claimStakingRewardForLock = claimStakingRewardForLock;
+window.showLockHistory      = showLockHistory;
 window.loadInvestments      = loadInvestments;
 window._invStopPoll         = _invStopPoll;
 window._invStartPoll        = _invStartPoll;

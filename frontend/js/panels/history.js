@@ -1,18 +1,21 @@
-let _activeHistTab = 'invest';
+let _activeHistTab = 'rewards';
 
 function switchHistoryTab(name) {
   _activeHistTab = name;
   document.querySelectorAll('.hist-subtab').forEach(b =>
     b.classList.toggle('active', b.id === 'histTab-' + name));
-  document.getElementById('histPanel-invest').style.display = name === 'invest' ? '' : 'none';
-  document.getElementById('histPanel-pool').style.display   = name === 'pool'   ? '' : 'none';
-  if (name === 'invest') loadHistory();
-  else                   loadPoolHistory();
+  document.getElementById('histPanel-rewards').style.display = name === 'rewards' ? '' : 'none';
+  document.getElementById('histPanel-invest').style.display  = name === 'invest'  ? '' : 'none';
+  document.getElementById('histPanel-pool').style.display    = name === 'pool'    ? '' : 'none';
+  if (name === 'rewards') loadRewardHistory();
+  else if (name === 'invest') loadHistory();
+  else                        loadPoolHistory();
 }
 
 function _refreshHistoryTab() {
-  if (_activeHistTab === 'invest') loadHistory();
-  else                             loadPoolHistory();
+  if (_activeHistTab === 'rewards') loadRewardHistory();
+  else if (_activeHistTab === 'invest') loadHistory();
+  else                                  loadPoolHistory();
 }
 
 async function loadHistory() {
@@ -441,8 +444,137 @@ async function loadPoolHistory() {
   }
 }
 
+async function loadRewardHistory() {
+  if (!requireConnected()) return;
+  _tabLoaded.add('history');
+  const el = document.getElementById('rewardHistoryList');
+  el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+
+  try {
+    const events = await contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress));
+
+    if (!events.length) {
+      el.innerHTML = '<div class="empty-state">No reward claims found.</div>';
+      return;
+    }
+
+    const sorted = [...events].sort((a, b) => b.blockNumber - a.blockNumber);
+
+    // Fetch block timestamps in parallel
+    const blockNums = [...new Set(sorted.map(e => e.blockNumber))];
+    const blockMap  = {};
+    await Promise.all(blockNums.map(async n => {
+      const b = await provider.getBlock(n);
+      blockMap[n] = b.timestamp;
+    }));
+
+    // Fetch all user locks for position details
+    let locks = [];
+    try { locks = await contract.getUserLPLocks(walletAddress); } catch(_) {}
+
+    // Build token symbol cache
+    const symCache = {};
+    for (const lock of locks) {
+      if (!symCache[lock.token]) {
+        try { symCache[lock.token] = (await contract.getToken(lock.token)).symbol; }
+        catch(_) { symCache[lock.token] = lock.token.slice(0, 6) + '…'; }
+      }
+    }
+
+    // Platform token symbol (for the reward token itself)
+    let platformSym = 'TOKEN';
+    try {
+      const erc20 = new ethers.Contract(TOKEN_ADDRESS, ['function symbol() view returns (string)'], provider);
+      platformSym = await erc20.symbol();
+    } catch(_) {}
+
+    // Function selectors used to detect which lock triggered the claim
+    const SEL_CLAIM_ALL  = ethers.utils.id('claimStakingReward()').slice(0, 10);
+    const SEL_CLAIM_LOCK = ethers.utils.id('claimStakingRewardForLock(uint256)').slice(0, 10);
+    const SEL_REMOVE_LP  = ethers.utils.id('removeLP(uint256)').slice(0, 10);
+    const SEL_REMOVE_DIR = ethers.utils.id('removeLPDirect(uint256)').slice(0, 10);
+
+    // Fetch tx input data for each unique tx hash
+    const txDataMap = {};
+    await Promise.all([...new Set(sorted.map(e => e.transactionHash))].map(async hash => {
+      try {
+        const tx = await provider.getTransaction(hash);
+        txDataMap[hash] = tx ? tx.data : null;
+      } catch(_) { txDataMap[hash] = null; }
+    }));
+
+    const fEth = bn => parseFloat(ethers.utils.formatEther(bn));
+
+    el.innerHTML = sorted.map(ev => {
+      const ts      = blockMap[ev.blockNumber];
+      const date    = ts ? new Date(ts * 1000).toLocaleString() : '';
+      const tokens  = fEth(ev.args.tokensAmount);
+      const ethEq   = fEth(ev.args.ethEquivalent);
+      const usdtVal = (ethEq * USDT_PER_ETH).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const tokensFmt = tokens.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      const txHash  = ev.transactionHash;
+      const txShort = txHash.slice(0, 10) + '…';
+
+      // Decode which lock was involved from the triggering function
+      const data = txDataMap[txHash];
+      let claimLabel = 'All locks';
+      let positionDetail = '';
+
+      if (data && data.length >= 10) {
+        const sel = data.slice(0, 10);
+        let lockIdx = null;
+        let trigger = '';
+
+        if (sel === SEL_CLAIM_LOCK) {
+          try { [lockIdx] = ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10)); }
+          catch(_) {}
+          trigger = '';
+        } else if (sel === SEL_REMOVE_LP) {
+          try { [lockIdx] = ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10)); }
+          catch(_) {}
+          trigger = ' · settled on LP removal';
+        } else if (sel === SEL_REMOVE_DIR) {
+          try { [lockIdx] = ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10)); }
+          catch(_) {}
+          trigger = ' · settled on direct removal';
+        }
+        // SEL_CLAIM_ALL falls through with lockIdx = null → "All locks"
+
+        if (lockIdx !== null) {
+          const idx = lockIdx.toNumber();
+          claimLabel = 'Lock #' + idx + trigger;
+          const lock = locks[idx];
+          if (lock) {
+            const sym     = symCache[lock.token] || lock.token.slice(0, 6) + '…';
+            const invested = (fEth(lock.ethInvested) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
+            const lp      = fEth(lock.lpAmount).toFixed(6);
+            positionDetail = `${sym} position · $${invested} invested · ${lp} LP`;
+          }
+        }
+      }
+
+      return `
+        <div class="ph-row">
+          <div class="ph-badge reward-claim">REWARD</div>
+          <div class="ph-main">
+            <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT equivalent</div>
+            <div class="ph-sub">${claimLabel}${positionDetail ? ' — ' + positionDetail : ''}</div>
+          </div>
+          <div class="ph-meta">
+            <div class="ph-date">${date}</div>
+            <div class="ph-tx">${txShort}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+  }
+}
+
 window.switchHistoryTab    = switchHistoryTab;
 window._refreshHistoryTab  = _refreshHistoryTab;
 window.loadHistory         = loadHistory;
 window.toggleHistoryDetail = toggleHistoryDetail;
 window.loadPoolHistory     = loadPoolHistory;
+window.loadRewardHistory   = loadRewardHistory;

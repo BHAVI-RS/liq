@@ -265,6 +265,12 @@ async function connectWallet() {
     toast('Wallet connected: ' + App.walletAddress.slice(0,8) + '...', 'success');
 
     if (contractAddress) await initContract();
+
+    // Derive label encryption key as part of login — blocking so labels are
+    // ready the moment the dashboard renders. sessionStorage caches the
+    // signature so page-refreshes within the same browser session skip the prompt.
+    if (typeof _initLabelKey === 'function') await _initLabelKey().catch(e => { console.warn('[HORDEX] label key init failed:', e); });
+
     await checkRegistration();
 
     registerEthereumListeners(eth);
@@ -296,6 +302,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeMobileNav();
     document.getElementById('walletDropdown').classList.remove('open');
+    if (typeof closeRefPopup === 'function') closeRefPopup();
   }
 });
 
@@ -496,6 +503,11 @@ window.addEventListener('load', async () => {
     updateNetPill(await eth.request({ method: 'eth_chainId' }));
 
     if (contractAddress) await initContract();
+
+    // Same as connectWallet: derive label key before dashboard renders.
+    // On page-refresh this resolves instantly from sessionStorage (no prompt).
+    if (typeof _initLabelKey === 'function') await _initLabelKey().catch(e => { console.warn('[HORDEX] label key init failed (restore):', e); });
+
     await checkRegistration();
 
     registerEthereumListeners(eth);
@@ -1005,6 +1017,8 @@ function _doRefresh(panel) {
     case 'rewards-staking':
       if (window.loadRwStaking)   window.loadRwStaking(true);
       if (window.loadRwLPFees)    window.loadRwLPFees(true);     break;
+    case 'history-rewards':
+      if (_activeHistTab === 'rewards' && window.loadRewardHistory) window.loadRewardHistory(); break;
   }
 }
 
@@ -1034,7 +1048,7 @@ function _startChainListeners() {
       _triggerRefresh(['dashboard', 'investments', 'rewards-staking']));
 
     contract.on(contract.filters.StakingRewardClaimed(addr), () =>
-      _triggerRefresh(['rewards-staking']));
+      _triggerRefresh(['rewards-staking', 'history-rewards']));
 
     // ── Commission received — fires on ANY device when a referral invests ──
     // This is the core cross-device sync event.
