@@ -196,6 +196,20 @@ async function loadInvestments() {
 
       const isInActiveLock  = !isUnlocked && !isClaimed && !isRemoved;
       const showStakingRow  = rewardTotalETH > 0 && (isInActiveLock || canClaimStaking);
+
+      // ── Per-lock referral cap ──
+      const commissionsCapUsed = parseFloat(ethers.utils.formatEther(lock.commissionsCapUsed || ethers.BigNumber.from(0)));
+      const lockCap            = ethInvested * 5;
+      const lockCapRemaining   = Math.max(0, lockCap - commissionsCapUsed);
+      const capPct             = lockCap > 0 ? Math.min(100, commissionsCapUsed / lockCap * 100) : 0;
+      const capIsActive        = !isRemoved && !isClaimed && secsLeft > 0;
+      const capIsFull          = lockCap > 0 && commissionsCapUsed >= lockCap;
+      // Don't show PAUSED tag if cap is fully used and lock is expired
+      const capTagHtml = isRemoved ? '' : capIsFull
+        ? `<span style="font-size:9px;background:rgba(201,168,76,0.15);color:var(--gold);border:1px solid rgba(201,168,76,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">CAP FULL</span>`
+        : capIsActive
+          ? `<span style="font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">ACTIVE</span>`
+          : `<span style="font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">PAUSED</span>`;
       const tokensDeposited = priceEth > 0 ? (ethInvested / 2) / priceEth : myTokensInPool;
       const usdtDeposited   = ethInvested * USDT_PER_ETH / 2;
 
@@ -259,7 +273,7 @@ async function loadInvestments() {
       } else if (isUnlocked) {
         actionColHtml = `<div id="${cdId}" class="dis-col dis-col-action" style="gap:8px;">
           <button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i}, '${lock.token}', '${lpAmountHex}')" class="inv-action-btn inv-btn-remove">REMOVE LP</button>
-          <button onclick="openStakeModal(${i})" class="inv-action-btn inv-btn-stake">STAKE</button>
+          <button onclick="openStakeModal(${i})" class="inv-action-btn inv-btn-stake">${rewardTotalETH === 0 ? 'LOCK-IN' : 'STAKE'}</button>
         </div>`;
       } else {
         const cd = _dashFmtCountdown(secsLeft);
@@ -314,6 +328,22 @@ async function loadInvestments() {
             SHOW MORE <span class="dit-arrow">▾</span>
           </button>
           <div class="dash-inv-details">
+            ${!isRemoved ? `<div class="did-row">
+              <span class="did-label">REF CAP${capTagHtml}</span>
+              <span class="did-val">
+                ${fmtUSDT(commissionsCapUsed)} / ${fmtUSDT(lockCap)}
+                <span style="color:var(--muted);font-size:10px;margin-left:4px;">(${capPct.toFixed(1)}%)</span>
+                <span style="color:${capIsFull ? '#f87171' : capIsActive ? '#4ade80' : '#eab308'};font-size:10px;margin-left:6px;">${fmtUSDT(lockCapRemaining)} remaining</span>
+              </span>
+            </div>
+            <div class="did-row" style="padding-top:2px;padding-bottom:6px;">
+              <span class="did-label"></span>
+              <span class="did-val" style="width:100%;max-width:260px;">
+                <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;">
+                  <div style="height:100%;width:${capPct.toFixed(2)}%;background:${capIsFull ? '#f87171' : capIsActive ? '#4ade80' : '#eab308'};border-radius:2px;transition:width 0.3s;"></div>
+                </div>
+              </span>
+            </div>` : ''}
             <div class="did-row"><span class="did-label">RESTAKE STREAK</span><span class="did-val" style="font-size:11px;">${streakLabel}</span></div>
             <div class="did-row">
               <span class="did-label">DEPOSITED</span>

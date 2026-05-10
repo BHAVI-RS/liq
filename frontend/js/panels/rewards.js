@@ -123,8 +123,8 @@ function _rwRefSorted() {
   return [..._rwRefAllEvents].sort((a, b) => {
     let va, vb;
     if (_rwRefSortKey === 'amount') {
-      va = parseFloat(ethers.utils.formatEther(a.args.amount));
-      vb = parseFloat(ethers.utils.formatEther(b.args.amount));
+      va = parseFloat(ethers.utils.formatEther(a.args.amount)) * (a._missed ? -1 : 1);
+      vb = parseFloat(ethers.utils.formatEther(b.args.amount)) * (b._missed ? -1 : 1);
     } else if (_rwRefSortKey === 'level') {
       va = Number(a.args.level);
       vb = Number(b.args.level);
@@ -132,7 +132,7 @@ function _rwRefSorted() {
       va = a.blockNumber;
       vb = b.blockNumber;
     }
-    return _rwRefSortDir * (vb - va);
+    return _rwRefSortDir * (va - vb);
   });
 }
 
@@ -472,7 +472,7 @@ async function loadRwStaking(silent = false) {
 
     let lockRows = '';
     let totalClaimableTokens = 0;
-    for (let i = 0; i < lpLocks.length; i++) {
+    for (let i = lpLocks.length - 1; i >= 0; i--) {
       const lock        = lpLocks[i];
       const isRemoved   = lock.removed || false;
       const unlockTime  = Number(lock.unlockTime);
@@ -641,7 +641,7 @@ async function loadRwLPFees(silent = false) {
     let activeCnt    = 0;
     let rows         = '';
 
-    for (let i = 0; i < lpLocks.length; i++) {
+    for (let i = lpLocks.length - 1; i >= 0; i--) {
       const lock        = lpLocks[i];
       const key         = lock.token.toLowerCase();
       const pool        = poolCache.get(key);

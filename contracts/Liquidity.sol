@@ -83,6 +83,7 @@ contract Liquidity {
         uint256 rewardRatePPM;         // total reward as PPM of invested ETH, locked in at staking time
         uint256[6] restakeCounts;      // per-duration restake streak; index matches stakingDurations[]
         uint256 streakBaseEth;         // ethInvested when the streak was established; if it diverges, all streaks reset
+        uint256 commissionsCapUsed;    // referral commissions charged against this lock's 5x cap (per-token FIFO)
     }
 
     mapping(address => User) public users;
@@ -368,7 +369,8 @@ contract Liquidity {
             totalTokensClaimed: 0,
             rewardRatePPM: _getRewardRatePPM(T, 90, 0), // 90-day base rate, streak 0
             restakeCounts: [uint256(0), 0, 0, 0, 0, 0],
-            streakBaseEth: T
+            streakBaseEth: T,
+            commissionsCapUsed: 0
         }));
 
         userInvestments[msg.sender].push(Investment({
@@ -381,7 +383,7 @@ contract Liquidity {
         userTotalInvested[msg.sender] += T;
         totalEthInvested += T;
 
-        distributeReferralCommissions(msg.sender, A40);
+        distributeReferralCommissions(msg.sender, A40, _token);
 
         emit Invested(msg.sender, _token, T, lpReceived);
     }
@@ -555,6 +557,37 @@ contract Liquidity {
         minDirectReferralInvestment = _amount;
     }
 
+    // Returns total available cap across all active (currently-locked) locks for _token, oldest first (FIFO).
+    function _getAvailableCapForToken(address _user, address _token) internal view returns (uint256 available) {
+        LPLock[] storage locks = userLPLocks[_user];
+        for (uint256 j = 0; j < locks.length; j++) {
+            LPLock storage l = locks[j];
+            if (l.removed) continue;
+            if (l.token != _token) continue;
+            if (block.timestamp >= l.unlockTime) continue;
+            uint256 cap = l.ethInvested * 5;
+            if (l.commissionsCapUsed < cap) available += cap - l.commissionsCapUsed;
+        }
+    }
+
+    // Charges _amount against active locks for _token, oldest first (FIFO), spilling into next lock on overflow.
+    function _chargeCapForToken(address _user, address _token, uint256 _amount) internal {
+        LPLock[] storage locks = userLPLocks[_user];
+        uint256 remaining = _amount;
+        for (uint256 j = 0; j < locks.length && remaining > 0; j++) {
+            LPLock storage l = locks[j];
+            if (l.removed) continue;
+            if (l.token != _token) continue;
+            if (block.timestamp >= l.unlockTime) continue;
+            uint256 cap = l.ethInvested * 5;
+            if (l.commissionsCapUsed >= cap) continue;
+            uint256 space = cap - l.commissionsCapUsed;
+            uint256 toCharge = remaining < space ? remaining : space;
+            l.commissionsCapUsed += toCharge;
+            remaining -= toCharge;
+        }
+    }
+
     function _payCommission(address recipient, address from, uint256 amount, uint256 level) internal {
         userCommissionsEarned[recipient] += amount;
         (bool success,) = payable(recipient).call{value: amount}("");
@@ -562,7 +595,7 @@ contract Liquidity {
         emit CommissionPaid(recipient, from, amount, level);
     }
 
-    function distributeReferralCommissions(address _from, uint256 _amount) internal {
+    function distributeReferralCommissions(address _from, uint256 _amount, address _token) internal {
         address current = users[_from].referrer;
 
         for (uint256 i = 0; i < 10; i++) {
@@ -572,11 +605,14 @@ contract Liquidity {
             address search = current;
 
             while (toDistribute > 0) {
+                // Walk up the chain to find an eligible referrer for level i:
+                // must have enough active direct referrals AND an active lock for _token with remaining cap.
+                // If no active lock for _token exists (Option A), skip regardless of cap.
                 while (search != address(0) && users[search].isRegistered) {
                     bool enoughReferrals = getActiveDirectReferralCount(search) > i;
-                    bool belowCap        = (search == owner) ||
-                                          (userCommissionsEarned[search] < userTotalInvested[search] * 5);
-                    if (enoughReferrals && belowCap) break;
+                    if (!enoughReferrals) { search = users[search].referrer; continue; }
+                    if (search == owner) break;
+                    if (_getAvailableCapForToken(search, _token) > 0) break;
                     search = users[search].referrer;
                 }
 
@@ -590,8 +626,9 @@ contract Liquidity {
                 if (search == owner) {
                     toPay = toDistribute;
                 } else {
-                    uint256 capRemaining = userTotalInvested[search] * 5 - userCommissionsEarned[search];
-                    toPay = toDistribute < capRemaining ? toDistribute : capRemaining;
+                    uint256 capAvail = _getAvailableCapForToken(search, _token);
+                    toPay = toDistribute < capAvail ? toDistribute : capAvail;
+                    _chargeCapForToken(search, _token, toPay);
                 }
 
                 _payCommission(search, _from, toPay, i + 1);
@@ -765,11 +802,58 @@ contract Liquidity {
         uint256 remainingCap,
         uint256 active
     ) {
-        earned       = userCommissionsEarned[_user];
-        missed       = 0;
-        totalCap     = userTotalInvested[_user] * 5;
-        remainingCap = totalCap > earned ? totalCap - earned : 0;
+        earned = userCommissionsEarned[_user];
+        missed = 0;
+        uint256 activeCap = 0;
+        uint256 pausedCap = 0;
+        LPLock[] storage locks = userLPLocks[_user];
+        for (uint256 i = 0; i < locks.length; i++) {
+            LPLock storage l = locks[i];
+            if (l.removed) continue;
+            uint256 cap     = l.ethInvested * 5;
+            uint256 capLeft = l.commissionsCapUsed < cap ? cap - l.commissionsCapUsed : 0;
+            if (capLeft == 0) continue;
+            if (block.timestamp < l.unlockTime) {
+                activeCap += capLeft;
+            } else {
+                pausedCap += capLeft;
+            }
+        }
+        // totalCap = remaining on active locks + remaining on paused (expired, non-removed) locks
+        // remainingCap = active locks only (commission-eligible right now)
+        totalCap     = activeCap + pausedCap;
+        remainingCap = activeCap;
         active       = userTotalInvested[_user];
+    }
+
+    struct LockCapInfo {
+        address token;
+        uint256 ethInvested;
+        uint256 totalCap;
+        uint256 capUsed;
+        uint256 capRemaining;
+        bool    isActive;
+        bool    isRemoved;
+    }
+
+    function getLockCapInfo(address _user) external view returns (LockCapInfo[] memory) {
+        LPLock[] storage locks = userLPLocks[_user];
+        LockCapInfo[] memory info = new LockCapInfo[](locks.length);
+        for (uint256 i = 0; i < locks.length; i++) {
+            LPLock storage l = locks[i];
+            uint256 cap  = l.ethInvested * 5;
+            uint256 used = l.commissionsCapUsed;
+            info[i] = LockCapInfo({
+                token:        l.token,
+                ethInvested:  l.ethInvested,
+                totalCap:     cap,
+                capUsed:      used,
+                capRemaining: cap > used ? cap - used : 0,
+                isActive:     !l.removed && block.timestamp < l.unlockTime,
+                isRemoved:    l.removed
+            });
+        }
+        return info;
     }
 
     // Raw parameters for client-side wealth computation with live wall-clock elapsed.

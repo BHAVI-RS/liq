@@ -204,11 +204,9 @@ function _dashStartStakingTicker() {
       if (elapsed < dur) { anyStillActive = true; activeLockCount++; }
     }
 
-    // Apply high-water mark so the displayed value never decreases.
-    if (totalETH > _dashStakingHWM) {
-      _dashStakingHWM = totalETH;
-      try { localStorage.setItem('hordex_staking_hwm_' + (walletAddress || '').toLowerCase(), totalETH.toString()); } catch(_) {}
-    }
+    // In-memory HWM only — prevents same-session regression from price dips
+    // without freezing the display across restake periods.
+    if (totalETH > _dashStakingHWM) _dashStakingHWM = totalETH;
     const displayETH = Math.max(totalETH, _dashStakingHWM);
 
     el.innerHTML = displayETH > 0.000001
@@ -798,21 +796,10 @@ async function loadDashboard(silent = false) {
       provider.getBlock('latest').catch(() => null),
     ]);
 
-    const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned))       : 0;
-    const missedETH      = commStats ? parseFloat(ethers.utils.formatEther(commStats.missed))       : 0;
-    const capETH         = commStats ? parseFloat(ethers.utils.formatEther(commStats.totalCap))     : 0;
-    const capRemETH      = commStats ? parseFloat(ethers.utils.formatEther(commStats.remainingCap)) : 0;
-    const isEligible     = commStats ? (commStats.active.gt(0) && commStats.remainingCap.gt(0))     : false;
-
-    const missedBanner = document.getElementById('dashMissedCommBanner');
-    if (missedBanner) {
-      const showBanner = missedETH > 0 && capRemETH <= 0;
-      missedBanner.style.display = showBanner ? 'flex' : 'none';
-      if (showBanner) {
-        const amtEl = document.getElementById('dashMissedAmount');
-        if (amtEl) amtEl.textContent = fmtUSDT(missedETH, { noEth: true });
-      }
-    }
+    const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned)) : 0;
+    const missedETH      = commStats ? parseFloat(ethers.utils.formatEther(commStats.missed)) : 0;
+    // Cap state assigned after _effNow is established below.
+    let capETH = 0, capRemETH = 0, isEligible = false, isPaused = false;
 
     let totalInvestedETH = 0;
     let totalCurrentETH  = 0;
@@ -834,6 +821,39 @@ async function loadDashboard(silent = false) {
         _effNow = Math.max(_blockTs, _sv.effectiveNow + Math.max(0, _wallNow - _sv.wallNow));
       }
     } catch(_) {}
+
+    // Compute referral cap state using _effNow (same clock as investments tab)
+    // so PAUSED/ELIGIBLE badges stay in sync regardless of Hardhat block.timestamp lag.
+    {
+      let _lActiveCap = ethers.BigNumber.from(0);
+      let _lPausedCap = ethers.BigNumber.from(0);
+      for (const _lk of lpLocks) {
+        if (_lk.removed) continue;
+        const _capMax  = _lk.ethInvested.mul(5);
+        const _capUsed = _lk.commissionsCapUsed || ethers.BigNumber.from(0);
+        const _capLeft = _capMax.gt(_capUsed) ? _capMax.sub(_capUsed) : ethers.BigNumber.from(0);
+        if (_capLeft.isZero()) continue;
+        if (_effNow < Number(_lk.unlockTime)) {
+          _lActiveCap = _lActiveCap.add(_capLeft);
+        } else {
+          _lPausedCap = _lPausedCap.add(_capLeft);
+        }
+      }
+      capETH    = parseFloat(ethers.utils.formatEther(_lActiveCap.add(_lPausedCap)));
+      capRemETH = parseFloat(ethers.utils.formatEther(_lActiveCap));
+      isEligible = _lActiveCap.gt(0);
+      isPaused   = !isEligible && _lPausedCap.gt(0);
+    }
+
+    const missedBanner = document.getElementById('dashMissedCommBanner');
+    if (missedBanner) {
+      const showBanner = missedETH > 0 && capRemETH <= 0;
+      missedBanner.style.display = showBanner ? 'flex' : 'none';
+      if (showBanner) {
+        const amtEl = document.getElementById('dashMissedAmount');
+        if (amtEl) amtEl.textContent = fmtUSDT(missedETH, { noEth: true });
+      }
+    }
 
     if (lpLocks.length) {
       const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
@@ -870,9 +890,11 @@ async function loadDashboard(silent = false) {
       try { return s + parseFloat(ethers.utils.formatEther(ev.args.ethEquivalent)); } catch(_) { return s; }
     }, 0);
 
-    // Load per-wallet high-water mark so the display never regresses across page loads.
-    const _hwmKey = 'hordex_staking_hwm_' + walletAddress.toLowerCase();
-    _dashStakingHWM = Math.max(0, parseFloat(localStorage.getItem(_hwmKey) || '0'));
+    // Reset HWM to zero each load so the display starts from the live computed value
+    // and visibly accumulates. The in-memory HWM still prevents same-session regressions
+    // from token price dips, but a stale localStorage HWM from a previous restake period
+    // would freeze the display until the new period surpassed the old peak.
+    _dashStakingHWM = 0;
 
     // Compute initial total: events base + per-lock pending + carry.
     // Do NOT add rewardClaimedETH here — it is already counted in _dashStakingEventsBase.
@@ -892,15 +914,11 @@ async function loadDashboard(silent = false) {
       const _tokensAcc  = parseFloat(ethers.utils.formatEther(_l.tokensAccumulated || ethers.BigNumber.from(0)));
       const _priceEth   = _dashStakingTickPrices[_i] || 0;
       _initTotalETH += Math.max(0, _earnedETH - _claimedETH) + _tokensAcc * _priceEth;
-      if (_effNow < _ut) _initAnyActive = true;
+      if (_effNow < _ut && _ratePPM > 0) _initAnyActive = true;
     }
 
-    // Apply HWM floor and persist if we have a new high.
-    if (_initTotalETH > _dashStakingHWM) {
-      _dashStakingHWM = _initTotalETH;
-      try { localStorage.setItem(_hwmKey, _initTotalETH.toString()); } catch(_) {}
-    }
-    const _initDisplayETH = Math.max(_initTotalETH, _dashStakingHWM);
+    _dashStakingHWM = _initTotalETH;
+    const _initDisplayETH = _initTotalETH;
 
     const totalValueETH = totalCurrentETH + refEarningsETH;
     const pnlETH  = totalValueETH - totalInvestedETH;
@@ -921,12 +939,14 @@ async function loadDashboard(silent = false) {
     document.getElementById('dashRefEarningsUSD').innerHTML    =
       capETH > 0
         ? `<span style="color:var(--muted);">Cap: ${fmtUSDT(capRemETH, {noEth:true})} remaining</span>` +
-          (missedETH > 0 ? ` &nbsp;<span style="color:#f87171;cursor:pointer;" onclick="checkMissedCommissions()" title="Click to view missed commission details">⚠ ${fmtUSDT(missedETH,{noEth:true})} missed</span>` : '')
+          (missedETH > 0 && !isEligible ? ` &nbsp;<span style="color:#f87171;cursor:pointer;" onclick="checkMissedCommissions()" title="Click to view missed commission details">⚠ ${fmtUSDT(missedETH,{noEth:true})} missed</span>` : '')
         : '';
 
     const eligBadge = isEligible
       ? '<span style="font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">ELIGIBLE</span>'
-      : '<span style="font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">INELIGIBLE</span>';
+      : isPaused
+        ? '<span style="font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">PAUSED</span>'
+        : '<span style="font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">INELIGIBLE</span>';
     document.getElementById('dashStakingRewards').innerHTML = _initDisplayETH > 0.000001
       ? `<span style="color:var(--gold);">${fmtUSDT(_initDisplayETH)}</span>` : '<span style="color:var(--muted);">—</span>';
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');

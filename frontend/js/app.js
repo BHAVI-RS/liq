@@ -77,17 +77,33 @@ async function _computeMissedWei() {
 async function checkMissedCommissions() {
   if (!contract || !walletAddress) return;
   try {
-    const { total: missedWei } = await _computeMissedWei();
+    const [lpLocks, latestBlock] = await Promise.all([
+      contract.getUserLPLocks(walletAddress).catch(() => []),
+      provider.getBlock('latest').catch(() => null),
+    ]);
+    const nowSec = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
+    const hasActiveCap = lpLocks.some(l => {
+      if (l.removed) return false;
+      const capMax  = l.ethInvested.mul(5);
+      const capUsed = l.commissionsCapUsed || ethers.BigNumber.from(0);
+      return capMax.gt(capUsed) && nowSec < Number(l.unlockTime);
+    });
+    if (hasActiveCap) return;
+
+    const { total: missedWei, entries } = await _computeMissedWei();
     _missedCommWei = missedWei;
     if (missedWei.isZero()) return;
 
-    const ethMissed  = parseFloat(ethers.utils.formatEther(missedWei));
-    const usdtMissed = ethToUSDT(ethMissed).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const latestEntry  = entries.length > 0
+      ? entries.reduce((best, e) => e.blockNumber > best.blockNumber ? e : best)
+      : null;
+    const latestETH    = latestEntry ? parseFloat(ethers.utils.formatEther(latestEntry.amount)) : 0;
+    const usdtLatest   = ethToUSDT(latestETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
     document.getElementById('missedCommText').innerHTML =
-      `You have <strong style="color:#f87171;">${usdtMissed} USDT</strong> in missed referral commissions.<br><br>` +
-      `This includes commissions that fully bypassed you (inactive LP or cap reached) and commissions where you hit your 5× cap mid-payment — the excess that spilled to the next eligible upline is counted here.<br><br>` +
-      `<strong>To receive future commissions in full:</strong> ensure you have an active LP investment and sufficient cap remaining.`;
+      `You missed a referral commission of <strong style="color:#f87171;">${usdtLatest} USDT</strong>.<br><br>` +
+      `This includes commissions that fully bypassed you because your lock had expired or you had no active lock in the invested token, and commissions where your 5× cap filled mid-payment and the excess spilled to the next eligible upline.<br><br>` +
+      `<strong>To receive future commissions:</strong> ensure you have an active (locked) investment in the same token your referrals are investing in, with remaining cap. Restake before your lock expires to avoid gaps.`;
 
     document.getElementById('missedCommAlert').style.display = 'flex';
   } catch(e) { console.warn('checkMissedCommissions:', e); }
