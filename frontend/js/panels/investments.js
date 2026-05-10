@@ -810,12 +810,20 @@ async function showLockHistory(lockIndex) {
     });
 
     // Attribute StakingRewardClaimed events to periods by block timestamp.
+    // Events aggregate all user locks in one tx, so scale amounts by this lock's
+    // fraction of total claimed (lock.totalTokensClaimed is per-lock accurate).
     const claims = claimEvs.map(e => ({
       ts:     btsMap.get(e.blockNumber) || 0,
       tokens: parseFloat(ethers.utils.formatEther(e.args.tokensAmount || ethers.BigNumber.from(0))),
     }));
-    for (const p of periods) {
-      p.claimed = claims.filter(c => c.ts >= p.start && c.ts <= p.end).reduce((s, c) => s + c.tokens, 0);
+    const eventTotal = claims.reduce((s, c) => s + c.tokens, 0);
+    const scale = (eventTotal > 0 && totalClaimed > 0) ? totalClaimed / eventTotal : 1;
+    for (let pidx = 0; pidx < periods.length; pidx++) {
+      const p = periods[pidx];
+      const isLast = pidx === periods.length - 1;
+      p.claimed = claims
+        .filter(c => c.ts >= p.start && (isLast ? c.ts <= p.end : c.ts < p.end))
+        .reduce((s, c) => s + c.tokens * scale, 0);
     }
 
     // Render table rows.
