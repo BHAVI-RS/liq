@@ -140,6 +140,8 @@ async function loadTokenBalances() {
 
   list.innerHTML = '';
   const decimalAbi = ["function decimals() view returns (uint8)"];
+  let currentFeatured = '';
+  try { currentFeatured = (await contract.featuredToken()).toLowerCase(); } catch(_) {}
 
   for (const addr of addrs) {
     const div = document.createElement('div');
@@ -164,18 +166,56 @@ async function loadTokenBalances() {
         ? formattedNum.toLocaleString(undefined, { maximumFractionDigits: 4 })
         : Number(rawBalance.toString()).toLocaleString();
 
+      const isRemoved        = t.removed;
+      const inProgressLabel  = t.inProgressLabel || '';
+      const isInProgress     = inProgressLabel.length > 0;
+      const isFeatured       = addr.toLowerCase() === currentFeatured;
+      const statusBadge = isRemoved
+        ? `<span style="background:rgba(224,80,80,0.15);color:var(--danger);border:1px solid rgba(224,80,80,0.3);font-size:10px;letter-spacing:1px;padding:2px 8px;border-radius:4px;">DELISTED</span>`
+        : `<span style="background:rgba(62,207,142,0.12);color:var(--success);border:1px solid rgba(62,207,142,0.3);font-size:10px;letter-spacing:1px;padding:2px 8px;border-radius:4px;">ACTIVE</span>`;
+      const inProgressBadge = (!isRemoved && isInProgress)
+        ? `<span style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.35);font-size:10px;letter-spacing:1px;padding:2px 8px;border-radius:4px;">${inProgressLabel}</span>`
+        : '';
+      const featuredBadge = isFeatured
+        ? `<span style="background:var(--success,#26d97f);color:#000;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;">FEATURED</span>`
+        : '';
+      const actionBtns = isRemoved ? '' : `
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          ${!isFeatured ? `<button onclick="setFeaturedToken('${addr}')"
+            style="padding:6px 14px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid rgba(201,168,76,0.4);border-radius:4px;background:rgba(201,168,76,0.08);color:var(--gold);cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.background='rgba(201,168,76,0.18)'" onmouseout="this.style.background='rgba(201,168,76,0.08)'">
+            SET FEATURED
+          </button>` : ''}
+          <button onclick="toggleTokenInProgress('${addr}')"
+            style="padding:6px 14px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid rgba(234,179,8,0.4);border-radius:4px;background:${isInProgress ? 'rgba(234,179,8,0.18)' : 'rgba(234,179,8,0.08)'};color:#eab308;cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.background='rgba(234,179,8,0.22)'" onmouseout="this.style.background='${isInProgress ? 'rgba(234,179,8,0.18)' : 'rgba(234,179,8,0.08)'}'">
+            ${isInProgress ? 'CLEAR TAG' : 'SET TAG'}
+          </button>
+          <button onclick="delistToken('${addr}')"
+            style="padding:6px 14px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid rgba(224,80,80,0.4);border-radius:4px;background:rgba(224,80,80,0.08);color:var(--danger);cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.background='rgba(224,80,80,0.18)'" onmouseout="this.style.background='rgba(224,80,80,0.08)'">
+            DELIST
+          </button>
+        </div>`;
+
       div.innerHTML = `
         <div class="token-info">
-          <div class="token-symbol">${t.symbol}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;flex-wrap:wrap;">
+            <span class="token-symbol">${t.symbol}</span>
+            ${statusBadge}
+            ${inProgressBadge}
+            ${featuredBadge}
+          </div>
           <div class="token-name">${t.name}</div>
           <div class="token-addr">${t.tokenAddress}</div>
+          ${actionBtns}
         </div>
-        <div style="text-align:right;flex-shrink:0;margin-left:16px;">
+        <div style="text-align:right;flex-shrink:0;margin-left:16px;opacity:${isRemoved ? '0.4' : '1'};">
           <div style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:${isEmpty ? 'var(--danger)' : 'var(--success)'};">
             ${isEmpty ? '0' : displayBalance}
           </div>
           <div style="font-size:10px;color:var(--muted);margin-top:2px;letter-spacing:1px;">${t.symbol} IN CONTRACT</div>
-          ${isEmpty ? '<div style="font-size:10px;color:var(--danger);margin-top:6px;">⚠ No balance — users cannot invest</div>' : ''}
+          ${!isRemoved && isEmpty ? '<div style="font-size:10px;color:var(--danger);margin-top:6px;">⚠ No balance — users cannot invest</div>' : ''}
         </div>
       `;
     } catch(e) {
@@ -189,26 +229,68 @@ async function loadTokenBalances() {
   }
 }
 
-async function approveStakingTokens() {
+async function setFeaturedToken(addr) {
   if (!requireConnected()) return;
-  const tokenAddr = document.getElementById('stakingApproveToken').value.trim();
-  const amountRaw = parseFloat(document.getElementById('stakingApproveAmount').value);
-  const statusEl  = document.getElementById('stakingApproveStatus');
-  if (!tokenAddr || isNaN(amountRaw) || amountRaw <= 0) { toast('Enter a valid token address and amount.', 'error'); return; }
   _txBegin();
   try {
-    const amountWei  = ethers.utils.parseEther(amountRaw.toString());
-    statusEl.textContent = 'Approving — confirm in MetaMask…';
-    const tokenERC20 = new ethers.Contract(tokenAddr, ['function approve(address,uint256) returns(bool)'], signer);
-    const approveTx  = await tokenERC20.approve(CONTRACT_ADDRESS, amountWei);
-    await approveTx.wait();
+    toast('Confirm transaction in MetaMask…', 'info');
+    const tx = await contract.setFeaturedToken(addr);
+    await tx.wait();
     _txDone();
-    statusEl.textContent = `✓ Approved ${amountRaw} tokens for staking rewards.`;
-    toast('Staking token approval confirmed!', 'success');
+    toast('Featured token updated on-chain.', 'success');
+    invalidateTabs('invest');
+    loadTokenBalances();
   } catch(e) {
     _txDone();
-    statusEl.textContent = 'Error: ' + (e.errorName || e.reason || e?.error?.message || e.message);
-    toast('Approval failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  }
+}
+
+async function delistToken(addr) {
+  if (!requireConnected()) return;
+  if (!confirm('Delist this token? Users will no longer be able to invest in it. Existing stakers are unaffected.')) return;
+  _txBegin();
+  try {
+    toast('Confirm transaction in MetaMask…', 'info');
+    const tx = await contract.removeToken(addr);
+    await tx.wait();
+    _txDone();
+    toast('Token delisted successfully.', 'success');
+    invalidateTabs('invest');
+    loadTokenBalances();
+  } catch(e) {
+    _txDone();
+    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  }
+}
+
+async function toggleTokenInProgress(addr) {
+  if (!requireConnected()) return;
+  let t;
+  try { t = await contract.getToken(addr); } catch(e) { return; }
+  const current = t.inProgressLabel || '';
+  let label;
+  if (current.length > 0) {
+    if (!confirm(`Clear the tag "${current}" from this token? Users will be able to invest and swap it.`)) return;
+    label = '';
+  } else {
+    const input = prompt('Enter tag text to show on this token (e.g. "Coming Soon"):');
+    if (input === null) return;
+    label = input.trim();
+    if (!label) { toast('Tag text cannot be empty.', 'error'); return; }
+  }
+  _txBegin();
+  try {
+    toast('Confirm transaction in MetaMask…', 'info');
+    const tx = await contract.setTokenInProgress(addr, label);
+    await tx.wait();
+    _txDone();
+    toast(label ? `Tag "${label}" set on token.` : 'Tag cleared.', 'success');
+    invalidateTabs('invest');
+    loadTokenBalances();
+  } catch(e) {
+    _txDone();
+    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
   }
 }
 
@@ -249,8 +331,8 @@ async function loadOwnerStats() {
         poolRows.push({ symbol: t.symbol, addr, poolUSDT, hasPool: !!pool });
         tokenInfos.push({ symbol: t.symbol, addr });
       } catch(_) {
-        poolRows.push({ symbol: addr.slice(0,8)+'…', addr, poolUSDT: 0, hasPool: false });
-        tokenInfos.push({ symbol: addr.slice(0,8)+'…', addr });
+        poolRows.push({ symbol: addr, addr, poolUSDT: 0, hasPool: false });
+        tokenInfos.push({ symbol: addr, addr });
       }
     }));
 
@@ -307,7 +389,7 @@ async function loadOwnerStats() {
             <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg);border-radius:4px;border:1px solid var(--border);">
               <div style="font-size:12px;font-family:var(--font-mono);color:var(--text);">
                 <span style="color:var(--gold);letter-spacing:1px;">${r.symbol}</span>
-                <span style="color:var(--muted);font-size:10px;margin-left:8px;">${r.addr.slice(0,10)}…</span>
+                <span style="color:var(--muted);font-size:10px;margin-left:8px;word-break:break-all;">${r.addr}</span>
               </div>
               <div style="text-align:right;">
                 ${r.hasPool
@@ -360,7 +442,7 @@ async function loadOwnerInfo() {
       <div class="info-grid" style="margin-top:16px;">
         <div class="info-cell">
           <div class="info-cell-label">OWNER ADDRESS</div>
-          <div class="info-cell-value" style="color:${ownerAddr.toLowerCase() === walletAddress.toLowerCase() ? 'var(--success)' : 'var(--text)'}">${ownerAddr.slice(0,14)}... ${ownerAddr.toLowerCase() === walletAddress.toLowerCase() ? '(YOU)' : ''}</div>
+          <div class="info-cell-value" style="color:${ownerAddr.toLowerCase() === walletAddress.toLowerCase() ? 'var(--success)' : 'var(--text)'}; word-break:break-all;">${ownerAddr} ${ownerAddr.toLowerCase() === walletAddress.toLowerCase() ? '(YOU)' : ''}</div>
         </div>
         <div class="info-cell">
           <div class="info-cell-label">YOU ARE OWNER</div>
@@ -640,11 +722,104 @@ async function ownerRemoveLiquidity() {
   }
 }
 
+// ── WITHDRAW FUNDS ──
+
+let _ownerWithdrawTokenDec = 18;
+let _ownerWithdrawTokenSym = '';
+
+async function ownerLoadWithdrawBals() {
+  const el = document.getElementById('ownerETHBal');
+  try {
+    const wei = await provider.getBalance(contract.address);
+    const eth = parseFloat(ethers.utils.formatEther(wei));
+    el.textContent = `Contract ETH balance: ${eth.toFixed(6)} ETH ($${(eth * USDT_PER_ETH).toFixed(2)} USDT)`;
+    el.style.color = eth > 0 ? 'var(--gold)' : 'var(--muted)';
+  } catch(e) {
+    el.textContent = 'Failed to load balance.';
+  }
+}
+
+async function ownerWithdrawTokenAddrChange(addr) {
+  const infoEl  = document.getElementById('ownerWithdrawTokenInfo');
+  const symSpan = document.getElementById('ownerWithdrawTokenSymSpan');
+  _ownerWithdrawTokenSym = 'TOKEN';
+  _ownerWithdrawTokenDec = 18;
+  symSpan.textContent = 'TOKEN';
+  if (!ethers.utils.isAddress(addr)) { infoEl.textContent = ''; return; }
+  infoEl.textContent = 'Loading…';
+  try {
+    const erc20 = new ethers.Contract(addr, [
+      'function symbol() view returns (string)',
+      'function decimals() view returns (uint8)',
+      'function balanceOf(address) view returns (uint256)'
+    ], provider);
+    const [sym, dec, rawBal] = await Promise.all([
+      erc20.symbol().catch(() => 'TOKEN'),
+      erc20.decimals().catch(() => 18),
+      erc20.balanceOf(contract.address).catch(() => ethers.BigNumber.from(0))
+    ]);
+    _ownerWithdrawTokenSym = sym;
+    _ownerWithdrawTokenDec = Number(dec);
+    symSpan.textContent = sym;
+    const bal = parseFloat(ethers.utils.formatUnits(rawBal, _ownerWithdrawTokenDec));
+    infoEl.textContent = `Contract balance: ${bal.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${sym}`;
+    infoEl.style.color = bal > 0 ? 'var(--gold)' : 'var(--muted)';
+  } catch(e) {
+    infoEl.textContent = 'Could not fetch token info.';
+    infoEl.style.color = 'var(--danger)';
+  }
+}
+
+async function ownerWithdrawETH() {
+  if (!requireConnected()) return;
+  const btn = document.getElementById('ownerWithdrawETHBtn');
+  const rawAmt = document.getElementById('ownerWithdrawETHAmt').value.trim();
+  const amtWei = rawAmt ? ethers.utils.parseEther(rawAmt) : ethers.BigNumber.from(0);
+  btn.disabled = true; btn.textContent = 'Processing…';
+  try {
+    toast('Confirm in MetaMask…', 'info');
+    const tx = await contract.withdrawETH(amtWei);
+    await tx.wait();
+    toast('ETH withdrawn successfully.', 'success');
+    document.getElementById('ownerWithdrawETHAmt').value = '';
+    ownerLoadWithdrawBals();
+  } catch(e) {
+    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'WITHDRAW ETH';
+  }
+}
+
+async function ownerWithdrawToken() {
+  if (!requireConnected()) return;
+  const addr = document.getElementById('ownerWithdrawTokenAddr').value.trim();
+  if (!ethers.utils.isAddress(addr)) { toast('Enter a valid token address', 'warn'); return; }
+  const btn = document.getElementById('ownerWithdrawTokenBtn');
+  const rawAmt = document.getElementById('ownerWithdrawTokenAmt').value.trim();
+  const amtWei = rawAmt
+    ? ethers.utils.parseUnits(rawAmt, _ownerWithdrawTokenDec)
+    : ethers.BigNumber.from(0);
+  btn.disabled = true; btn.textContent = 'Processing…';
+  try {
+    toast('Confirm in MetaMask…', 'info');
+    const tx = await contract.withdrawToken(addr, amtWei);
+    await tx.wait();
+    toast(`${_ownerWithdrawTokenSym} withdrawn successfully.`, 'success');
+    document.getElementById('ownerWithdrawTokenAmt').value = '';
+    ownerWithdrawTokenAddrChange(addr);
+  } catch(e) {
+    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'WITHDRAW TOKEN';
+  }
+}
+
+window.setFeaturedToken              = setFeaturedToken;
+window.delistToken                   = delistToken;
 window.onLogoChange                  = onLogoChange;
 window.onTokenAddrInput              = onTokenAddrInput;
 window.addToken                      = addToken;
 window.loadTokenBalances             = loadTokenBalances;
-window.approveStakingTokens          = approveStakingTokens;
 window.loadOwnerStats                = loadOwnerStats;
 window.loadOwnerInfo                 = loadOwnerInfo;
 window.ownerPopulateLiqDropdowns     = ownerPopulateLiqDropdowns;
@@ -655,3 +830,7 @@ window.onOwnerRemoveLiqTokenChange   = onOwnerRemoveLiqTokenChange;
 window.ownerSetMaxLP                 = ownerSetMaxLP;
 window.onOwnerRemoveLPAmtChange      = onOwnerRemoveLPAmtChange;
 window.ownerRemoveLiquidity          = ownerRemoveLiquidity;
+window.ownerLoadWithdrawBals         = ownerLoadWithdrawBals;
+window.ownerWithdrawTokenAddrChange  = ownerWithdrawTokenAddrChange;
+window.ownerWithdrawETH              = ownerWithdrawETH;
+window.ownerWithdrawToken            = ownerWithdrawToken;

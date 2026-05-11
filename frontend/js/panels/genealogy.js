@@ -2,6 +2,7 @@ let _geneView      = 'list';
 let _geneTree      = null;
 let _geneInvestedMap = new Map();
 let _geneStatsMap    = new Map();  // addr.toLowerCase() → { teamCount, teamBusiness }
+let _geneTtHideTimer = null;
 
 function switchGeneView(mode) {
   _geneView = mode;
@@ -54,6 +55,8 @@ function _buildGeneStatsMap(node) {
 // ─── Shared tooltip ───────────────────────────────────────────────────────────
 
 function geneShowTooltip(e, el) {
+  if (_geneTtHideTimer) { clearTimeout(_geneTtHideTimer); _geneTtHideTimer = null; }
+
   let tt = document.getElementById('geneTooltip');
   if (!tt) {
     tt = document.createElement('div');
@@ -62,9 +65,18 @@ function geneShowTooltip(e, el) {
       'position:fixed','z-index:9000','background:#0b1520',
       'border:1px solid rgba(201,168,76,0.35)','border-radius:8px',
       'padding:12px 16px','font-family:var(--font-mono)','font-size:11px',
-      'pointer-events:none','min-width:250px','max-width:320px',
+      'pointer-events:auto','min-width:250px','max-width:320px',
       'box-shadow:0 6px 28px rgba(0,0,0,0.65)','display:none','line-height:1.5'
     ].join(';');
+    tt.addEventListener('mouseenter', () => {
+      if (_geneTtHideTimer) { clearTimeout(_geneTtHideTimer); _geneTtHideTimer = null; }
+    });
+    tt.addEventListener('mouseleave', () => {
+      _geneTtHideTimer = setTimeout(() => {
+        const t = document.getElementById('geneTooltip');
+        if (t) t.style.display = 'none';
+      }, 100);
+    });
     document.body.appendChild(tt);
   }
 
@@ -75,12 +87,16 @@ function geneShowTooltip(e, el) {
 
   const invLabel = inv > 0 ? fmtUSDT(inv, {noEth:true}) : `<span style="color:#f87171;">No active package</span>`;
   const bizLabel = fmtUSDT(teamBiz, {noEth:true});
+  const copyBtn  = `<button onclick="copyAddr('${addr}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(201,168,76,0.3);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>`;
 
   tt.innerHTML = `
     <div style="color:var(--gold);font-size:10px;letter-spacing:1px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(201,168,76,0.2);">USER DETAILS</div>
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:baseline;">
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:center;">
       <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ADDRESS</div>
-      <div style="color:var(--gold);font-size:10px;word-break:break-all;">${addr.slice(0,12)}…${addr.slice(-8)}</div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="color:var(--gold);font-size:10px;word-break:break-all;">${addr}</span>
+        ${copyBtn}
+      </div>
       <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ACTIVE PKG</div>
       <div style="color:var(--cream);">${invLabel}</div>
       <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM VOLUME</div>
@@ -90,17 +106,24 @@ function geneShowTooltip(e, el) {
     </div>`;
 
   tt.style.display = 'block';
-  const margin = 14, tw = tt.offsetWidth || 270, th = tt.offsetHeight || 130;
-  let left = e.clientX + margin, top = e.clientY + margin;
-  if (left + tw > window.innerWidth  - 8) left = e.clientX - tw - margin;
-  if (top  + th > window.innerHeight - 8) top  = e.clientY - th - margin;
-  tt.style.left = left + 'px';
-  tt.style.top  = top  + 'px';
+  const tw   = tt.offsetWidth  || 280;
+  const th   = tt.offsetHeight || 160;
+  const rect = el.getBoundingClientRect();
+  const margin = 10;
+  let left = rect.right + margin;
+  if (left + tw > window.innerWidth - 8) left = window.innerWidth - tw - 8;
+  let top = rect.top + rect.height / 2 - th / 2;
+  top = Math.max(8, Math.min(window.innerHeight - th - 8, top));
+  tt.style.right = 'auto';
+  tt.style.left  = left + 'px';
+  tt.style.top   = top  + 'px';
 }
 
 function geneHideTooltip() {
-  const tt = document.getElementById('geneTooltip');
-  if (tt) tt.style.display = 'none';
+  _geneTtHideTimer = setTimeout(() => {
+    const tt = document.getElementById('geneTooltip');
+    if (tt) tt.style.display = 'none';
+  }, 120);
 }
 
 // ─── List view accordion toggle ───────────────────────────────────────────────
@@ -127,9 +150,10 @@ function _geneBuildNodeHtml(node, depth) {
     ? `<span id="ei-${nid}" style="display:inline-block;width:14px;font-size:9px;color:var(--muted);vertical-align:middle;flex-shrink:0;">▶</span>`
     : `<span style="display:inline-block;width:14px;flex-shrink:0;"></span>`;
 
+  const nodeLabel = (typeof _labelCache !== 'undefined' && _labelCache.get(addr.toLowerCase())) || addr;
   const label = isRoot
-    ? `YOU · ${addr.slice(0, 8)}…${addr.slice(-6)}`
-    : `<span class="gene-node-lvl">L${depth}</span>${addr.slice(0, 10)}…${addr.slice(-6)}`;
+    ? `YOU · ${addr}`
+    : `<span class="gene-node-lvl">L${depth}</span>${nodeLabel}`;
 
   const nodeEl = `<span class="gene-node ${isRoot ? 'gene-node-self' : ''}"
     id="${nid}"
@@ -195,6 +219,11 @@ async function loadGenealogy() {
     _geneStatsMap = new Map();
     _buildGeneStatsMap(treeData);
 
+    // Pre-fetch labels for every visible address so renders below are synchronous
+    if (typeof _batchGetRefLabels === 'function') {
+      await _batchGetRefLabels(allAddrs).catch(() => {});
+    }
+
     // Collect level arrays for list view
     const levels = [];
     function collectLevels(node, depth) {
@@ -239,7 +268,7 @@ async function loadGenealogy() {
     } else {
       listEl.innerHTML = eligBanner;
       listEl.insertAdjacentHTML('beforeend',
-        '<div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:.05em;margin-bottom:12px;">Click a level header to expand · Hover a member for details</div>'
+        '<div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:.05em;margin-bottom:12px;">Click a level header to expand</div>'
       );
 
       levels.forEach((addrs, idx) => {
@@ -256,23 +285,32 @@ async function loadGenealogy() {
         const eligLabel = eligible ? '✓ ELIGIBLE' : `✗ NEED ${level} ACTIVE REFERRAL${level !== 1 ? 'S' : ''}`;
 
         const memberRows = addrs.map(a => {
-          const inv   = _geneInvestedMap.get(a) || 0;
-          const stats = _geneStatsMap.get(a.toLowerCase()) || { teamCount: 0, teamBusiness: 0 };
-          return `<div class="gene-addr-row"
-            data-addr="${a}"
-            data-inv="${inv}"
-            data-team-count="${stats.teamCount}"
-            data-team-business="${stats.teamBusiness}"
-            onmouseenter="geneShowTooltip(event,this)"
-            onmouseleave="geneHideTooltip()"
-            style="justify-content:space-between;cursor:default;">
-            <div style="display:flex;align-items:center;gap:8px;">
+          const inv      = _geneInvestedMap.get(a) || 0;
+          const stats    = _geneStatsMap.get(a.toLowerCase()) || { teamCount: 0, teamBusiness: 0 };
+          const rowLabel = (typeof _labelCache !== 'undefined' && _labelCache.get(a.toLowerCase())) || a;
+          return `<div class="gene-addr-row" data-addr="${a}" style="justify-content:space-between;gap:12px;cursor:default;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
               <div class="gene-addr-dot"></div>
-              <a href="https://sepolia.etherscan.io/address/${a}" target="_blank" rel="noopener" title="${a}"
-                 style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:12px;"
-                 onclick="event.stopPropagation()">${a.slice(0,10)}…${a.slice(-6)}</a>
+              <a href="https://sepolia.etherscan.io/address/${a}" target="_blank" rel="noopener"
+                 style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:12px;word-break:break-all;"
+                 onclick="event.stopPropagation()">${rowLabel}</a>
+              <button onclick="event.stopPropagation();copyAddr('${a}',this)" title="Copy address"
+                style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
             </div>
-            <span style="font-size:11px;font-family:var(--font-mono);color:${inv > 0 ? 'var(--gold)' : 'var(--muted)'};">${inv > 0 ? fmtUSDT(inv,{noEth:true}) : '—'}</span>
+            <div style="display:flex;align-items:center;flex-shrink:0;">
+              <div style="width:120px;text-align:right;padding-right:20px;">
+                <div style="font-size:9px;color:var(--muted);letter-spacing:.07em;margin-bottom:2px;">INVESTED</div>
+                <div style="font-size:11px;font-family:var(--font-mono);color:${inv > 0 ? 'var(--gold)' : 'var(--muted)'};">${inv > 0 ? fmtUSDT(inv,{noEth:true}) : '—'}</div>
+              </div>
+              <div style="width:90px;text-align:right;padding-right:20px;">
+                <div style="font-size:9px;color:var(--muted);letter-spacing:.07em;margin-bottom:2px;">TEAM VOL</div>
+                <div style="font-size:11px;font-family:var(--font-mono);color:var(--cream);">${stats.teamCount} user${stats.teamCount !== 1 ? 's' : ''}</div>
+              </div>
+              <div style="width:120px;text-align:right;">
+                <div style="font-size:9px;color:var(--muted);letter-spacing:.07em;margin-bottom:2px;">TEAM BIZ</div>
+                <div style="font-size:11px;font-family:var(--font-mono);color:${stats.teamBusiness > 0 ? '#4ade80' : 'var(--muted)'};">${stats.teamBusiness > 0 ? fmtUSDT(stats.teamBusiness,{noEth:true}) : '—'}</div>
+              </div>
+            </div>
           </div>`;
         }).join('');
 

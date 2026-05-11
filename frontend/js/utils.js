@@ -1,8 +1,3 @@
-// ── LOADING HELPER ──
-function ld(text = 'Loading') {
-  return `${text}<span class="ld"><span></span><span></span><span></span></span>`;
-}
-
 // ── USDT DISPLAY SYSTEM ──
 // Platform fixed rate: 1,000 USDT = 1 ETH  (testnet only — not market price)
 const USDT_PER_ETH = 1000;
@@ -67,6 +62,19 @@ function invalidateTabs(...names) {
 function _resetTabLoaded() {
   _tabLoaded.clear();
 }
+
+// ── ADDRESS COPY HELPER ──
+const _COPY_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+function copyAddr(addr, btn) {
+  navigator.clipboard.writeText(addr).then(() => {
+    if (!btn) return;
+    const prev = btn.innerHTML;
+    btn.innerHTML = '✓';
+    setTimeout(() => { btn.innerHTML = prev; }, 1200);
+  }).catch(() => {});
+}
+window.copyAddr = copyAddr;
 
 // ── TIMESTAMP FORMATTERS ──
 function _fmtTs(ts) {

@@ -495,19 +495,14 @@
       </div>
     </div>
 
-    <div class="card">
+    <div id="provideLiquidityCard" class="card" style="display:none;">
       <div class="card-title">PROVIDE LIQUIDITY</div>
 
-      <!-- 1. Token selector -->
+      <!-- Selected token display -->
       <div class="field">
-        <label>Select Token</label>
-        <div id="investDropdownWrap" style="position:relative;">
-          <div id="investDropdownTrigger" onclick="toggleInvestDropdown()" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:11px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;min-height:46px;user-select:none;">
-            <div id="investDropdownSelected" style="flex:1;"><span style="color:var(--muted);font-size:13px;">— Select a token —</span></div>
-            <span id="investDropdownArrow" style="color:var(--muted);font-size:11px;margin-left:10px;flex-shrink:0;">▾</span>
-          </div>
-          <div id="investDropdownMenu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:320px;overflow-y:auto;box-shadow:0 8px 28px rgba(0,0,0,0.45);">
-          </div>
+        <label>Selected Token</label>
+        <div id="investSelectedTokenInfo" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:11px 14px;min-height:46px;display:flex;align-items:center;">
+          <span style="color:var(--muted);font-size:13px;">No token selected</span>
         </div>
         <select id="investTokenSelect" style="display:none;">
           <option value="">— Select a token —</option>
@@ -863,6 +858,17 @@
       <button class="btn btn-primary" onclick="addToken()">ADD TOKEN</button>
     </div>
 
+    <!-- ── OWNER: MANAGE TOKENS ── -->
+    <div class="card">
+      <div class="card-title">MANAGE TOKENS</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:14px;line-height:1.6;">
+        Delist a token to prevent new investments. Existing stakers keep their positions and rewards unaffected. Swaps remain available on Uniswap.
+      </div>
+      <div id="tokenBalanceList">
+        <div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>
+      </div>
+    </div>
+
     <!-- ── OWNER: ADD LIQUIDITY ── -->
     <div class="card">
       <div class="card-title">ADD LIQUIDITY TO POOL</div>
@@ -964,19 +970,46 @@
       <button class="btn btn-primary" onclick="ownerRemoveLiquidity()" id="ownerRemoveLiqBtn" style="margin-top:8px;">REMOVE LIQUIDITY</button>
     </div>
 
+    <!-- ── OWNER: WITHDRAW FUNDS ── -->
     <div class="card">
-      <div class="card-title">APPROVE TOKENS</div>
-      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:14px;line-height:1.6;">Approve the platform contract to spend your tokens for staking rewards. Users will be paid directly from your wallet when they claim.</div>
-      <div class="field">
-        <label>Token Address</label>
-        <input id="stakingApproveToken" type="text" placeholder="0x…" />
+      <div class="card-title">WITHDRAW FUNDS</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;line-height:1.6;">
+        Withdraw ETH or any token held by the contract to the owner wallet. Leave amount blank to withdraw the full balance.
       </div>
-      <div class="field">
-        <label>Approve Amount (token units)</label>
-        <input id="stakingApproveAmount" type="number" placeholder="100000" min="0" />
+
+      <!-- ETH -->
+      <div style="margin-bottom:20px;">
+        <div style="font-size:10px;color:var(--gold);letter-spacing:1px;margin-bottom:10px;">ETH</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div style="position:relative;flex:1;min-width:140px;">
+            <input type="number" id="ownerWithdrawETHAmt" placeholder="Leave blank for full balance" min="0" step="any"
+              style="width:100%;padding-right:50px;"/>
+            <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none;">ETH</span>
+          </div>
+          <button class="btn btn-primary" onclick="ownerWithdrawETH()" id="ownerWithdrawETHBtn" style="white-space:nowrap;">WITHDRAW ETH</button>
+        </div>
+        <div id="ownerETHBal" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:6px;">
+          <span style="cursor:pointer;text-decoration:underline;color:var(--muted);" onclick="ownerLoadWithdrawBals()">Load balances</span>
+        </div>
       </div>
-      <button class="btn btn-primary" onclick="approveStakingTokens()" style="width:auto;padding:10px 24px;">APPROVE</button>
-      <div id="stakingApproveStatus" style="margin-top:12px;font-size:12px;font-family:var(--font-mono);color:var(--muted);"></div>
+
+      <!-- Token -->
+      <div>
+        <div style="font-size:10px;color:var(--gold);letter-spacing:1px;margin-bottom:10px;">TOKEN</div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Token Address</label>
+          <input type="text" id="ownerWithdrawTokenAddr" placeholder="0x…" oninput="ownerWithdrawTokenAddrChange(this.value)"
+            style="font-family:var(--font-mono);font-size:12px;"/>
+          <div id="ownerWithdrawTokenInfo" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:5px;"></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div style="position:relative;flex:1;min-width:140px;">
+            <input type="number" id="ownerWithdrawTokenAmt" placeholder="Leave blank for full balance" min="0" step="any" style="width:100%;padding-right:70px;"/>
+            <span id="ownerWithdrawTokenSymSpan" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;pointer-events:none;">TOKEN</span>
+          </div>
+          <button class="btn btn-primary" onclick="ownerWithdrawToken()" id="ownerWithdrawTokenBtn" style="white-space:nowrap;">WITHDRAW TOKEN</button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -1039,11 +1072,11 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:12px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
           <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL SUPPLY</div>
-          <div id="tdSupply" style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--cream);">—</div>
+          <div id="tdSupply" style="font-family:var(--font-mono);font-size:13px;font-weight:400;color:var(--success);">—</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
-          <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">AVAILABLE</div>
-          <div id="tdAvailable" style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--success);">—</div>
+          <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">MARKET VOLUME</div>
+          <div id="tdAvailable" style="font-family:var(--font-mono);font-size:13px;font-weight:400;color:var(--success);">—</div>
         </div>
       </div>
 

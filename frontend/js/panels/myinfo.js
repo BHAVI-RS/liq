@@ -5,6 +5,11 @@ async function loadMyInfo() {
     const user      = await contract.users(walletAddress);
     const referrer  = user.referrer;
     const referrals = await contract.getReferrals(walletAddress);
+
+    if (typeof _batchGetRefLabels === 'function' && referrals.length > 0) {
+      await _batchGetRefLabels(referrals).catch(() => {});
+    }
+
     const el        = document.getElementById('myInfoContent');
     const refLink   = window.location.origin + window.location.pathname + '?ref=' + walletAddress;
     el.innerHTML = `
@@ -23,11 +28,11 @@ async function loadMyInfo() {
         </div>
         <div class="info-cell">
           <div class="info-cell-label">MY ADDRESS</div>
-          <div class="info-cell-value">${walletAddress.slice(0,12) + '...'}</div>
+          <div class="info-cell-value" style="word-break:break-all;">${walletAddress}</div>
         </div>
         <div class="info-cell">
           <div class="info-cell-label">MY REFERRER</div>
-          <div class="info-cell-value">${referrer === ethers.constants.AddressZero ? '— (Root)' : referrer.slice(0,12) + '...'}</div>
+          <div class="info-cell-value" style="word-break:break-all;">${referrer === ethers.constants.AddressZero ? '— (Root)' : referrer}</div>
         </div>
         <div class="info-cell">
           <div class="info-cell-label">DIRECT REFERRALS</div>
@@ -42,12 +47,15 @@ async function loadMyInfo() {
         <div style="margin-top:20px;">
           <div class="section-header">DIRECT REFERRALS</div>
           <div class="referral-chain">
-            ${referrals.map((r,i) => `
+            ${referrals.map((r,i) => {
+              const lbl = (typeof _labelCache !== 'undefined' && _labelCache.get(r.toLowerCase())) || r;
+              return `
               <div class="referral-item">
                 <span class="referral-level">LVL ${i+1}</span>
-                <span>${r}</span>
-              </div>
-            `).join('')}
+                <span title="${r}">${lbl}</span>
+                <button onclick="copyAddr('${r}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;margin-left:6px;line-height:1;">${_COPY_ICON}</button>
+              </div>`;
+            }).join('')}
           </div>
         </div>` : ''}
     `;

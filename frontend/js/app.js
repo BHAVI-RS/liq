@@ -1,9 +1,6 @@
 // ── CONFIG ──
 const contractAddress = CONTRACT_ADDRESS;
 
-// ── MISSED COMMISSION TRACKING ──
-let _missedCommWei = null;
-
 // Returns { total: BigNumber, entries: Array } for the connected wallet.
 // "Missed" covers fully bypassed commissions (user ineligible) and partial-cap
 // spills (user received some, excess went upline).
@@ -63,7 +60,7 @@ async function _computeMissedWei() {
         if (tx.total.gt(tx.received)) {
           const missed = tx.total.sub(tx.received);
           total = total.add(missed);
-          entries.push({ from: member, level: depth, amount: missed, blockNumber: tx.blockNumber, transactionHash: txHash });
+          entries.push({ from: member, level: depth, amount: missed, received: tx.received, blockNumber: tx.blockNumber, transactionHash: txHash });
         }
       }
     }));
@@ -91,7 +88,6 @@ async function checkMissedCommissions() {
     if (hasActiveCap) return;
 
     const { total: missedWei, entries } = await _computeMissedWei();
-    _missedCommWei = missedWei;
     if (missedWei.isZero()) return;
 
     const latestEntry  = entries.length > 0
@@ -141,7 +137,7 @@ function syncInvestDropdownTrigger(addr) {
       ${d.logo ? `<img src="${d.logo}" style="width:28px;height:28px;object-fit:contain;border-radius:6px;border:1px solid var(--border);flex-shrink:0;">` : `<div style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;">⬡</div>`}
       <div>
         <div style="color:var(--cream);font-size:13px;font-family:var(--font-mono);">${d.symbol} — ${d.name}</div>
-        <div style="color:var(--gold);font-size:10px;font-family:var(--font-mono);">${d.addr.slice(0,18)}...${d.addr.slice(-6)}</div>
+        <div style="color:var(--gold);font-size:10px;font-family:var(--font-mono);word-break:break-all;">${d.addr}</div>
       </div>
     </div>`;
   if (arrow) arrow.textContent = '▾';
@@ -363,15 +359,6 @@ function toggleFaq(btn) {
   item.closest('.landing-section')?.querySelectorAll('.lnd-faq-item.open').forEach(el => el.classList.remove('open'));
   if (!isOpen) item.classList.add('open');
 }
-function toggleInvDetails(btn) {
-  const details = btn.nextElementSibling;
-  if (!details) return;
-  const open = details.classList.toggle('open');
-  btn.classList.toggle('open', open);
-  btn.querySelector('.dit-arrow').textContent = open ? '▴' : '▾';
-  btn.childNodes[0].textContent = open ? 'SHOW LESS ' : 'SHOW MORE ';
-}
-
 // Close landing dropdown when clicking outside
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('landingMenuDropdown');
@@ -570,7 +557,7 @@ function openMobileNav() {
   document.body.style.overflow = 'hidden';
   const addrEl = document.getElementById('mobileNavAddr');
   if (App.walletAddress) {
-    addrEl.textContent = App.walletAddress.slice(0,10) + '…' + App.walletAddress.slice(-8);
+    addrEl.textContent = App.walletAddress;
     addrEl.style.display = 'block';
   } else {
     addrEl.style.display = 'none';
@@ -734,14 +721,14 @@ async function checkRegistration() {
           const refUser = await App.contract.users(refParam);
           if (refUser.isRegistered) {
             referrerAddr = refParam;
-            referrerLabel = refParam.slice(0,14) + '...' + refParam.slice(-8);
+            referrerLabel = refParam;
           }
         } catch(_) {}
       }
 
       if (!referrerAddr) {
         referrerAddr = await App.contract.owner();
-        referrerLabel = referrerAddr.slice(0,14) + '...' + referrerAddr.slice(-8) + '  (Platform Admin)';
+        referrerLabel = referrerAddr + '  (Platform Admin)';
         document.getElementById('newUserPromptText').textContent = 'Register under the platform admin, or enter a referrer below.';
         // No referral link — show the manual address entry section
         document.getElementById('customReferrerSection').style.display = 'block';
@@ -838,8 +825,7 @@ async function applyCustomReferrer() {
     }
 
     _pendingReferrer = val;
-    const label = val.slice(0,14) + '...' + val.slice(-8);
-    document.getElementById('newUserReferrerAddr').textContent = label;
+    document.getElementById('newUserReferrerAddr').textContent = val;
     document.getElementById('newUserPromptText').textContent = 'Register under this referrer?';
     statusEl.textContent = 'Referrer set. Click YES, REGISTER ME to continue.';
     statusEl.style.color = '#4ade80';
@@ -861,59 +847,6 @@ function updateNetPill(chainIdHex) {
     pill.className = 'net-pill wrongnet';
   }
   pill.style.display = 'inline-block';
-}
-
-// ── REGISTER ──
-async function register() {
-  if (!requireConnected()) return;
-  const ref = document.getElementById('referrerAddr').value.trim();
-  if (!ethers.utils.isAddress(ref)) { toast('Invalid referrer address', 'error'); return; }
-  _txBegin();
-  try {
-    toast('Sending transaction...', 'info');
-    const tx = await App.contract.register(ref);
-    toast('Transaction sent. Waiting...', 'info');
-    await tx.wait();
-    _txDone();
-    toast('Registered successfully! 🎉', 'success');
-    invalidateTabs('myinfo', 'genealogy');
-  } catch(e) {
-    _txDone();
-    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
-  }
-}
-
-async function checkUser() {
-  if (!requireConnected()) return;
-  const addr = document.getElementById('checkAddr').value.trim();
-  if (!ethers.utils.isAddress(addr)) { toast('Invalid address', 'error'); return; }
-  try {
-    const user = await App.contract.users(addr);
-    const referrer = user.referrer;
-    const referrals = await App.contract.getReferrals(addr);
-    const el = document.getElementById('checkResult');
-    el.style.display = 'grid';
-    el.innerHTML = `
-      <div class="info-cell">
-        <div class="info-cell-label">REGISTERED</div>
-        <div class="info-cell-value" style="color:${user.isRegistered ? 'var(--success)' : 'var(--danger)'}">${user.isRegistered ? 'YES' : 'NO'}</div>
-      </div>
-      <div class="info-cell">
-        <div class="info-cell-label">REFERRER</div>
-        <div class="info-cell-value">${referrer === ethers.constants.AddressZero ? '—' : referrer.slice(0,10) + '...'}</div>
-      </div>
-      <div class="info-cell">
-        <div class="info-cell-label">TOTAL REFERRALS</div>
-        <div class="info-cell-value">${referrals.length}</div>
-      </div>
-      <div class="info-cell">
-        <div class="info-cell-label">REGISTERED AT</div>
-        <div class="info-cell-value">${user.registeredAt.toNumber() > 0 ? new Date(user.registeredAt.toNumber() * 1000).toLocaleString() : '—'}</div>
-      </div>
-    `;
-  } catch(e) {
-    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
-  }
 }
 
 // ── TOKENS ──
@@ -997,7 +930,7 @@ function switchTabByName(name) {
   if (!App.contract || !App.walletAddress) return;
   if (name === 'invest') { loadInvestTokens(); fetchEthPrice(); renderPkgGrid(); if (window._investStartPoll) window._investStartPoll(); }
   if (name === 'pool')   { fetchEthPrice(); loadPoolPanel(); }
-  if (name === 'owner')  { loadOwnerStats(); ownerPopulateLiqDropdowns(); }
+  if (name === 'owner')  { loadOwnerStats(); ownerPopulateLiqDropdowns(); loadTokenBalances(); }
   if (name === 'dashboard')   { _tabLoaded.add('dashboard');   loadDashboard();   if (window._dashStartPoll) window._dashStartPoll(); }
   if (name === 'investments') { _tabLoaded.add('investments'); loadInvestments(); if (window._invStartPoll)  window._invStartPoll();  }
   if (name === 'myinfo'      && !_tabLoaded.has('myinfo'))      { _tabLoaded.add('myinfo');      loadMyInfo(); }
@@ -1128,14 +1061,11 @@ window.mobileNavSwitch     = mobileNavSwitch;
 window.disconnectWallet    = disconnectWallet;
 window.registerNewUser     = registerNewUser;
 window.updateNetPill       = updateNetPill;
-window.register            = register;
-window.checkUser           = checkUser;
 window.loadTokens          = loadTokens;
 window.toggleLandingMenu   = toggleLandingMenu;
 window.closeLandingMenu    = closeLandingMenu;
 window.scrollToLandingSection = scrollToLandingSection;
 window.toggleFaq           = toggleFaq;
-window.toggleInvDetails    = toggleInvDetails;
 window.toggleInvestDropdown = toggleInvestDropdown;
 window.syncInvestDropdownTrigger = syncInvestDropdownTrigger;
 window.switchTab           = switchTab;

@@ -158,26 +158,43 @@ function _rwRefHistHtml() {
 
   let rows = '';
   for (const ev of slice) {
-    const ts      = _rwRefBlockTsMap.get(ev.blockNumber);
-    const date    = ts ? _fmtTsFull(ts) : `Block #${ev.blockNumber}`;
-    const from    = ev.args.from;
+    const ts          = _rwRefBlockTsMap.get(ev.blockNumber);
+    const date        = ts ? _fmtTsFull(ts) : `Block #${ev.blockNumber}`;
+    const from        = ev.args.from;
+    const fromDisplay = (typeof _labelCache !== 'undefined' && _labelCache.get(from.toLowerCase())) || from;
     const amt     = parseFloat(ethers.utils.formatEther(ev.args.amount));
     const level   = Number(ev.args.level);
     const ratePct = (RATES[level - 1] || 0) / 500;
     const txUrl   = `https://sepolia.etherscan.io/tx/${ev.transactionHash}`;
 
     if (ev._missed) {
+      const tipText = ev._missedReason === 'cap' ? 'Referral cap over!' : 'Investment not locked!';
       rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);background:rgba(248,113,113,0.04);">
         <td style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
-        <td style="padding:7px 8px;"><a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" style="color:rgba(248,113,113,0.7);text-decoration:none;">${from.slice(0,6)}…${from.slice(-4)}</a></td>
+        <td style="padding:7px 8px;">
+          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+            <a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
+            <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
+          </div>
+        </td>
         <td style="padding:7px 8px;text-align:center;color:#f87171;">L${level}</td>
         <td style="padding:7px 8px;text-align:center;color:rgba(248,113,113,0.6);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
-        <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;" title="Missed commission">⚠ −${ethToUSDT(amt).toFixed(2)} USDT ↗</a></td>
+        <td style="padding:7px 8px;text-align:right;">
+          <div class="rw-missed-tip">
+            <a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;">⚠ −${ethToUSDT(amt).toFixed(2)} USDT ↗</a>
+            <div class="rw-missed-tip-box">${tipText}</div>
+          </div>
+        </td>
       </tr>`;
     } else {
       rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);">
         <td style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
-        <td style="padding:7px 8px;"><a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${from.slice(0,6)}…${from.slice(-4)}</a></td>
+        <td style="padding:7px 8px;">
+          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+            <a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
+            <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
+          </div>
+        </td>
         <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
         <td style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
         <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${ethToUSDT(amt).toFixed(2)} USDT ↗</a></td>
@@ -295,6 +312,10 @@ async function _rwAppendCommission(ev, from, amount, level) {
     _rwRefAllEvents = [syntheticEv, ..._rwRefAllEvents];
     _rwRefPage = 1;
 
+    if (typeof _batchGetRefLabels === 'function') {
+      await _batchGetRefLabels([from]).catch(() => {});
+    }
+
     // Re-render table
     const container = document.getElementById('rwRefHistContainer');
     if (container) container.innerHTML = _rwRefHistHtml();
@@ -362,6 +383,7 @@ async function loadRwReferral() {
     const receivedEvs = commEvents.map(e => ({ ...e, _missed: false }));
     const missedEvs   = missedResult.entries.map(e => ({
       _missed: true,
+      _missedReason: (e.received && !e.received.isZero()) ? 'cap' : 'no-lock',
       args: { from: e.from, level: e.level, amount: e.amount },
       blockNumber: e.blockNumber,
       transactionHash: e.transactionHash,
@@ -369,6 +391,11 @@ async function loadRwReferral() {
 
     _rwRefAllEvents = [...receivedEvs, ...missedEvs].sort((a, b) => b.blockNumber - a.blockNumber);
     _rwRefPage = 1;
+
+    if (typeof _batchGetRefLabels === 'function') {
+      const fromAddrs = [...new Set(_rwRefAllEvents.map(e => e.args.from))];
+      await _batchGetRefLabels(fromAddrs).catch(() => {});
+    }
 
     const missedWarn = missed > 0.000001
       ? `<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;color:#f87171;">
@@ -645,7 +672,7 @@ async function loadRwLPFees(silent = false) {
       const lock        = lpLocks[i];
       const key         = lock.token.toLowerCase();
       const pool        = poolCache.get(key);
-      const td          = tokenMeta.get(key) || { symbol: lock.token.slice(0,6), meta: {} };
+      const td          = tokenMeta.get(key) || { symbol: lock.token, meta: {} };
       const logoSrc     = td.meta && td.meta.logo ? `<img src="${td.meta.logo}" style="width:100%;height:100%;object-fit:contain;"/>` : '⬡';
       const ethInvested = parseFloat(ethers.utils.formatEther(lock.ethInvested || ethers.BigNumber.from(0)));
       const isClaimed   = lock.claimed;

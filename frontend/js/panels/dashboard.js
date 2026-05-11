@@ -797,7 +797,6 @@ async function loadDashboard(silent = false) {
     ]);
 
     const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned)) : 0;
-    const missedETH      = commStats ? parseFloat(ethers.utils.formatEther(commStats.missed)) : 0;
     // Cap state assigned after _effNow is established below.
     let capETH = 0, capRemETH = 0, isEligible = false, isPaused = false;
 
@@ -843,16 +842,6 @@ async function loadDashboard(silent = false) {
       capRemETH = parseFloat(ethers.utils.formatEther(_lActiveCap));
       isEligible = _lActiveCap.gt(0);
       isPaused   = !isEligible && _lPausedCap.gt(0);
-    }
-
-    const missedBanner = document.getElementById('dashMissedCommBanner');
-    if (missedBanner) {
-      const showBanner = missedETH > 0 && capRemETH <= 0;
-      missedBanner.style.display = showBanner ? 'flex' : 'none';
-      if (showBanner) {
-        const amtEl = document.getElementById('dashMissedAmount');
-        if (amtEl) amtEl.textContent = fmtUSDT(missedETH, { noEth: true });
-      }
     }
 
     if (lpLocks.length) {
@@ -922,7 +911,6 @@ async function loadDashboard(silent = false) {
 
     const totalValueETH = totalCurrentETH + refEarningsETH;
     const pnlETH  = totalValueETH - totalInvestedETH;
-    const pnlPct  = totalInvestedETH > 0 ? (pnlETH / totalInvestedETH) * 100 : 0;
     const pnlCls  = pnlETH > 0.000001 ? '#4ade80' : pnlETH < -0.000001 ? '#f87171' : 'var(--muted)';
 
     document.getElementById('dashTotalInvested').innerHTML     = fmtUSDT(totalInvestedETH);
@@ -938,8 +926,7 @@ async function loadDashboard(silent = false) {
     document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH);
     document.getElementById('dashRefEarningsUSD').innerHTML    =
       capETH > 0
-        ? `<span style="color:var(--muted);">Cap: ${fmtUSDT(capRemETH, {noEth:true})} remaining</span>` +
-          (missedETH > 0 && !isEligible ? ` &nbsp;<span style="color:#f87171;cursor:pointer;" onclick="checkMissedCommissions()" title="Click to view missed commission details">⚠ ${fmtUSDT(missedETH,{noEth:true})} missed</span>` : '')
+        ? `<span style="color:var(--muted);">Cap: ${fmtUSDT(capRemETH, {noEth:true})} remaining</span>`
         : '';
 
     const eligBadge = isEligible
@@ -1128,7 +1115,7 @@ async function saveRefLabel(addr) {
     const card = document.getElementById('drefCard_' + addr.toLowerCase());
     if (card) {
       const nameEl = card.querySelector('.dash-dref-name');
-      if (nameEl) nameEl.textContent = val || (addr.slice(0,8) + '…' + addr.slice(-6));
+      if (nameEl) nameEl.textContent = val || addr;
     }
     toast('Label saved on-chain.', 'success');
   } catch(e) {
@@ -1163,7 +1150,7 @@ async function _loadDashDirectRefs(force = false) {
       const invested = parseFloat(ethers.utils.formatEther(investedAmts[i]));
       const dirCount = refCounts[i];
       const label    = _labelCache.get(addr.toLowerCase()) || '';
-      const display  = label || (addr.slice(0, 8) + '…' + addr.slice(-6));
+      const display  = label || addr;
       const initial  = addr.slice(2, 4).toUpperCase();
       return `
         <div class="dash-dref-card" id="drefCard_${addr.toLowerCase()}" onclick="openRefPopup('${addr}')">
@@ -1374,6 +1361,7 @@ async function openRefPopup(addr) {
         <div id="refLabelDisplay" style="font-family:var(--font-mono);font-size:13px;color:var(--cream);word-break:break-all;">${existingLabel || addr}</div>
         ${addrSubtext}
       </div>
+      <button onclick="copyAddr('${addr}',this)" title="Copy address" style="padding:4px 6px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;margin-top:2px;line-height:1;">${_COPY_ICON}</button>
       <button id="refLabelViewBtn" onclick="showRefLabelEdit()" class="dash-refpop-label-btn" style="flex-shrink:0;margin-top:2px;">${existingLabel ? 'RENAME' : 'FIX LABEL'}</button>
     </div>
     <div id="refLabelEditForm" style="display:none;margin-bottom:20px;">

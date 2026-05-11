@@ -8,7 +8,7 @@ const PKG_CATS = ['basic', 'elite', 'institutional'];
 let _ethPriceUSD      = null;
 let _activePkgCat     = 'basic';
 let _selectedPkgUSD   = null;
-let _userSelectedToken = false;
+let _selectedInvestAddr = null;
 let _ethPricePollInterval = null;
 
 async function fetchEthPrice() {
@@ -313,6 +313,9 @@ async function loadInvestTokens() {
   while (select.options.length > 1) select.remove(1);
   if (menu) menu.innerHTML = '';
   investTokenData.clear();
+  _selectedInvestAddr = null;
+  const provCard = document.getElementById('provideLiquidityCard');
+  if (provCard) provCard.style.display = 'none';
   try {
     const addrs = await contract.getRegisteredTokens();
     if (addrs.length === 0) {
@@ -321,80 +324,86 @@ async function loadInvestTokens() {
     }
     list.innerHTML = '';
     const sortedAddrs = [...addrs].reverse();
-    for (let i = 0; i < sortedAddrs.length; i++) {
-      const addr       = sortedAddrs[i];
-      const isFeatured = i === 0;
-      const t    = await contract.getToken(addr);
-      const meta = getMeta(addr);
+    const activeAddrs = [];
+    for (const addr of sortedAddrs) {
+      const t = await contract.getToken(addr);
+      if (!t.removed) activeAddrs.push(addr);
+    }
+    if (activeAddrs.length === 0) {
+      list.innerHTML = '<div class="empty-state">No tokens available for investment.</div>';
+      return;
+    }
+    let featuredAddr = '';
+    try { featuredAddr = (await contract.featuredToken()).toLowerCase(); } catch(_) {}
+    const featuredIdx = activeAddrs.findIndex(a => a.toLowerCase() === featuredAddr);
+    if (featuredIdx > 0) activeAddrs.unshift(activeAddrs.splice(featuredIdx, 1)[0]);
 
-      investTokenData.set(addr.toLowerCase(), { symbol: t.symbol, name: t.name, logo: meta.logo || '', addr: t.tokenAddress });
+    // fetch inProgress flags once, then sink those tokens to the bottom
+    const inProgressLabels = new Map();
+    for (const addr of activeAddrs) {
+      const t = await contract.getToken(addr);
+      inProgressLabels.set(addr.toLowerCase(), t.inProgressLabel || '');
+    }
+    activeAddrs.sort((a, b) => {
+      const aIP = inProgressLabels.get(a.toLowerCase()) ? 1 : 0;
+      const bIP = inProgressLabels.get(b.toLowerCase()) ? 1 : 0;
+      return aIP - bIP;
+    });
+    for (let i = 0; i < activeAddrs.length; i++) {
+      const addr         = activeAddrs[i];
+      const isFeatured   = featuredAddr !== '' ? addr.toLowerCase() === featuredAddr : i === 0;
+      const t            = await contract.getToken(addr);
+      const inProgressLabel = inProgressLabels.get(addr.toLowerCase()) || '';
+      const isInProgress    = inProgressLabel.length > 0;
+      const meta         = getMeta(addr);
 
-      const opt = document.createElement('option');
-      opt.value = t.tokenAddress;
-      opt.textContent = `${t.symbol} — ${t.name}`;
-      select.appendChild(opt);
+      if (!isInProgress) {
+        investTokenData.set(addr.toLowerCase(), { symbol: t.symbol, name: t.name, logo: meta.logo || '', addr: t.tokenAddress });
 
-      if (menu) {
-        const item = document.createElement('div');
-        item.style.cssText = `display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s;${isFeatured ? 'border-left:3px solid var(--success,#26d97f);' : ''}`;
-        item.onmouseenter = () => item.style.background = 'var(--bg)';
-        item.onmouseleave = () => item.style.background = '';
-        item.innerHTML = `
-          ${meta.logo ? `<img src="${meta.logo}" style="width:38px;height:38px;object-fit:contain;border-radius:8px;border:1px solid var(--border);background:var(--bg);padding:3px;flex-shrink:0;">` : `<div style="width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">⬡</div>`}
-          <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px;">
-              <span style="color:var(--cream);font-family:var(--font-mono);font-size:13px;font-weight:400;">${t.symbol} — ${t.name}</span>
-              ${isFeatured ? `<span style="background:var(--success,#26d97f);color:#000;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;text-transform:uppercase;white-space:nowrap;">Featured</span>` : ''}
-            </div>
-            <div style="color:var(--gold);font-size:10px;font-family:var(--font-mono);word-break:break-all;">${t.tokenAddress}</div>
-          </div>
-        `;
-        item.onclick = () => {
-          _userSelectedToken = true;
-          select.value = t.tokenAddress;
-          syncInvestDropdownTrigger(t.tokenAddress);
-          document.getElementById('investDropdownMenu').style.display = 'none';
-          document.getElementById('investDropdownArrow').textContent = '▾';
-          select.dispatchEvent(new Event('change'));
-        };
-        menu.appendChild(item);
+        const opt = document.createElement('option');
+        opt.value = t.tokenAddress;
+        opt.textContent = `${t.symbol} — ${t.name}`;
+        select.appendChild(opt);
       }
 
       const div = document.createElement('div');
       div.className = 'token-item';
-      div.style.cursor = 'pointer';
-      if (isFeatured) {
+      div.setAttribute('data-token-addr', addr);
+      div.setAttribute('data-is-featured', isFeatured ? 'true' : 'false');
+      if (isFeatured && !isInProgress) {
         div.style.border = '1.5px solid var(--success, #26d97f)';
         div.style.boxShadow = '0 0 0 2px rgba(38,217,127,0.12)';
       }
+      if (isInProgress) {
+        div.style.border = '1.5px solid rgba(234,179,8,0.35)';
+        div.style.opacity = '0.85';
+      }
+      div.style.cursor = isInProgress ? 'default' : 'pointer';
       div.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;flex:1;">
           ${meta.logo ? `<img src="${meta.logo}" style="width:36px;height:36px;object-fit:contain;border-radius:8px;border:1px solid var(--border);background:var(--bg);padding:3px;flex-shrink:0;"/>` : `<div style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">⬡</div>`}
           <div class="token-info">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="token-symbol" style="cursor:pointer;text-decoration:underline;text-underline-offset:3px;" onclick="event.stopPropagation();openTokenDetail('${addr}')">${t.symbol} — ${t.name}</span>
-              ${isFeatured ? `<span style="background:var(--success,#26d97f);color:#000;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;text-transform:uppercase;">Featured</span>` : ''}
+              <span class="token-symbol">${t.symbol} — ${t.name}</span>
+              ${isFeatured && !isInProgress ? `<span style="background:var(--success,#26d97f);color:#000;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;text-transform:uppercase;">Featured</span>` : ''}
+              ${isInProgress ? `<span style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.45);font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;">${inProgressLabel}</span>` : ''}
             </div>
             <div class="token-addr">${t.tokenAddress}</div>
           </div>
         </div>
-        <div class="token-badge">SELECT</div>
+        <div class="token-badge" style="border-color:var(--gold);color:var(--gold);" onclick="event.stopPropagation();openTokenDetail('${addr}')">SHOW DETAILS</div>
       `;
-      div.onclick = () => {
-        _userSelectedToken = true;
-        select.value = t.tokenAddress;
-        syncInvestDropdownTrigger(t.tokenAddress);
-        select.dispatchEvent(new Event('change'));
-        document.getElementById('investDropdownWrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
-      };
+      if (!isInProgress) {
+        div.onclick = () => {
+          _setSelectedInvestToken(addr);
+          const card = document.getElementById('provideLiquidityCard');
+          if (card) {
+            card.style.display = '';
+            setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+          }
+        };
+      }
       list.appendChild(div);
-    }
-
-    if (!_userSelectedToken && sortedAddrs.length > 0) {
-      const featuredAddr = sortedAddrs[0];
-      select.value = featuredAddr;
-      syncInvestDropdownTrigger(featuredAddr);
-      select.dispatchEvent(new Event('change'));
     }
 
   } catch(e) {
@@ -441,14 +450,17 @@ async function openTokenDetail(addr) {
       tokenContract.decimals().catch(() => 18)
     ]);
     const dec = Number(decimals);
-    const supplyFormatted = parseFloat(ethers.utils.formatUnits(totalSupply, dec)).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const supplyFloat = parseFloat(ethers.utils.formatUnits(totalSupply, dec));
+    const supplyFormatted = supplyFloat.toLocaleString(undefined, { maximumFractionDigits: 4 });
     document.getElementById('tdSupply').textContent = `${supplyFormatted} ${t.symbol}`;
 
-    const rawBal = await contract.getContractTokenBalance(addr);
-    const balFormatted = parseFloat(ethers.utils.formatUnits(rawBal, dec));
-    document.getElementById('tdAvailable').textContent = balFormatted >= 0.0001
-      ? `${balFormatted.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${t.symbol}`
-      : `${Number(rawBal.toString()).toLocaleString()} ${t.symbol}`;
+    const price = await _getTokenPoolPrice(addr);
+    if (price !== null) {
+      const marketVol = supplyFloat * price;
+      document.getElementById('tdAvailable').textContent = '$' + marketVol.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    } else {
+      document.getElementById('tdAvailable').textContent = '—';
+    }
   } catch(_) {
     document.getElementById('tdSupply').textContent    = '—';
     document.getElementById('tdAvailable').textContent = '—';
@@ -475,16 +487,60 @@ function closeTokenDetail() {
   _detailTokenAddr = null;
 }
 
+function _setSelectedInvestToken(addr) {
+  _selectedInvestAddr = addr;
+  const select = document.getElementById('investTokenSelect');
+  if (select) select.value = addr;
+  _resetInvestBtn();
+
+  const infoEl = document.getElementById('investSelectedTokenInfo');
+  if (infoEl) {
+    const d = investTokenData.get(addr.toLowerCase());
+    if (d) {
+      infoEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${d.logo ? `<img src="${d.logo}" style="width:28px;height:28px;object-fit:contain;border-radius:6px;border:1px solid var(--border);flex-shrink:0;">` : `<div style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;">⬡</div>`}
+          <div>
+            <div style="color:var(--cream);font-size:13px;font-family:var(--font-mono);">${d.symbol} — ${d.name}</div>
+            <div style="color:var(--gold);font-size:10px;font-family:var(--font-mono);word-break:break-all;">${d.addr}</div>
+          </div>
+        </div>`;
+    }
+  }
+
+  _updateTokenListBorders(addr);
+  if (select) select.dispatchEvent(new Event('change'));
+}
+
+function _updateTokenListBorders(selectedAddr) {
+  const list = document.getElementById('investTokenList');
+  if (!list) return;
+  list.querySelectorAll('[data-token-addr]').forEach(item => {
+    const addr = item.getAttribute('data-token-addr');
+    const isFeatured = item.getAttribute('data-is-featured') === 'true';
+    if (isFeatured) {
+      item.style.border = '1.5px solid var(--success, #26d97f)';
+      item.style.boxShadow = '0 0 0 2px rgba(38,217,127,0.12)';
+    } else if (selectedAddr && addr.toLowerCase() === selectedAddr.toLowerCase()) {
+      item.style.border = '1.5px solid var(--gold, #c9a84c)';
+      item.style.boxShadow = '0 0 0 2px rgba(201,168,76,0.12)';
+    } else {
+      item.style.border = '';
+      item.style.boxShadow = '';
+    }
+  });
+}
+
 function selectTokenFromDetail() {
   if (!_detailTokenAddr) return;
-  _userSelectedToken = true;
-  const select = document.getElementById('investTokenSelect');
-  select.value = _detailTokenAddr;
-  syncInvestDropdownTrigger(_detailTokenAddr);
-  select.dispatchEvent(new Event('change'));
+  _setSelectedInvestToken(_detailTokenAddr);
   closeTokenDetail();
-  document.getElementById('investDropdownWrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  toast('Token selected. Enter ETH amount to invest.', 'info');
+  const card = document.getElementById('provideLiquidityCard');
+  if (card) {
+    card.style.display = '';
+    setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+  toast('Token selected. Choose an investment package.', 'info');
 }
 
 document.getElementById('tokenDetailOverlay').addEventListener('click', (e) => {

@@ -128,7 +128,7 @@ async function loadInvestments() {
       const lock = lpLocks[i];
       const key  = lock.token.toLowerCase();
       const pool = poolCache.get(key);
-      const td   = tokenMeta.get(key) || { symbol: lock.token.slice(0,6), name: '', meta: {} };
+      const td   = tokenMeta.get(key) || { symbol: lock.token, name: '', meta: {} };
 
       const ethInvested     = parseFloat(ethers.utils.formatEther(lock.ethInvested));
       const restakeCounts   = lock.restakeCounts
@@ -313,8 +313,8 @@ async function loadInvestments() {
               <div class="dis-val dis-val-package">${fmtUSDT(ethInvested)}</div>
             </div>
             <div class="dis-col">
-              <div class="dis-label">LP TOKENS</div>
-              <div class="dis-val">${lpFmt}</div>
+              <div class="dis-label">LP VALUE</div>
+              <div class="dis-val">${pool && currentETH > 0 ? fmtUSDT(currentETH) : '—'}</div>
               <div class="dis-sub">position #${i+1}</div>
             </div>
             <div class="dis-col">
@@ -350,10 +350,14 @@ async function loadInvestments() {
               <span class="did-val">${tokensDeposited > 0 ? tokensDeposited.toFixed(4)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+usdtDeposited.toFixed(2)+' USDT' : '—'}</span>
             </div>
             <div class="did-row">
+              <span class="did-label">LP TOKENS</span>
+              <span class="did-val">${lpFmt}</span>
+            </div>
+            <div class="did-row">
               <span class="did-label">AVAILABLE</span>
               <span class="did-val">${myTokensInPool > 0 ? myTokensInPool.toLocaleString(undefined,{maximumFractionDigits:4})+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+(myETHInPool*USDT_PER_ETH).toFixed(2)+' USDT' : '—'}</span>
             </div>
-            ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val"><a href="https://sepolia.etherscan.io/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr.slice(0,10)}…${pool.pairAddr.slice(-6)} ↗</a></span></div>` : ''}
+            ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val" style="word-break:break-all;"><a href="https://sepolia.etherscan.io/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr} ↗</a></span></div>` : ''}
             ${removeLPBtn ? `<div class="did-actions">${removeLPBtn}</div>` : ''}
           </div>
         </div>`);
@@ -435,7 +439,7 @@ async function _computeRemoveLPPreview(tokenAddr, lpAmountHex) {
   const tokensOut = share * parseFloat(ethers.utils.formatUnits(resToken, dec));
   const usdtOut   = share * parseFloat(ethers.utils.formatEther(resETH)) * USDT_PER_ETH;
 
-  let sym = tokenAddr.slice(0, 6) + '…';
+  let sym = tokenAddr;
   try { const t = await contract.getToken(tokenAddr); sym = t.symbol; } catch(_) {}
 
   return { tokensOut, usdtOut, sym };
@@ -706,7 +710,7 @@ async function showLockHistory(lockIndex) {
   if (!lock) return;
 
   const key          = lock.token.toLowerCase();
-  const td           = _invTokenMetaMap.get(key) || { symbol: lock.token.slice(0, 6), name: '' };
+  const td           = _invTokenMetaMap.get(key) || { symbol: lock.token, name: '' };
   const ethInvested  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
   const totalClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
 

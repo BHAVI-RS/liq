@@ -46,7 +46,7 @@ async function _buildHistoryItem(ev) {
   const blockNum  = ev.blockNumber;
   const txHash    = ev.transactionHash;
 
-  let tokenSymbol = tokenAddr.slice(0,6) + '…';
+  let tokenSymbol = tokenAddr;
   try { tokenSymbol = (await contract.getToken(tokenAddr)).symbol; } catch(_) {}
 
   const block = await provider.getBlock(blockNum);
@@ -279,7 +279,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
         ${refEvents.length === 0
           ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">No commission events found in this transaction.</div>`
           : refEvents.map(ev => {
-              const short = ev.recipient.slice(0,8) + '…' + ev.recipient.slice(-6);
+              const short = ev.recipient;
               const poolFloat = parseFloat(ethers.utils.formatEther(A40));
               const amtFloat  = parseFloat(ethers.utils.formatEther(ev.amount));
               const pctOfPool = poolFloat > 0 ? amtFloat / poolFloat * 100 : 0;
@@ -344,7 +344,7 @@ async function loadPoolHistory() {
       const tok0   = (await pairCt.token0()).toLowerCase();
       const tokenIsToken0 = tok0 === tokenAddr.toLowerCase();
 
-      let tokenSymbol = tokenAddr.slice(0,6) + '…';
+      let tokenSymbol = tokenAddr;
       let tokenDecimals = 18;
       try {
         const t = await contract.getToken(tokenAddr);
@@ -400,7 +400,7 @@ async function loadPoolHistory() {
     for (const e of all) {
       if (!e.tokenSymbol) {
         try { e.tokenSymbol = (await contract.getToken(e.tokenAddr)).symbol; }
-        catch(_) { e.tokenSymbol = e.tokenAddr.slice(0,6) + '…'; }
+        catch(_) { e.tokenSymbol = e.tokenAddr; }
       }
     }
 
@@ -477,7 +477,7 @@ async function loadRewardHistory() {
     for (const lock of locks) {
       if (!symCache[lock.token]) {
         try { symCache[lock.token] = (await contract.getToken(lock.token)).symbol; }
-        catch(_) { symCache[lock.token] = lock.token.slice(0, 6) + '…'; }
+        catch(_) { symCache[lock.token] = lock.token; }
       }
     }
 
@@ -545,7 +545,7 @@ async function loadRewardHistory() {
           claimLabel = 'Lock #' + idx + trigger;
           const lock = locks[idx];
           if (lock) {
-            const sym     = symCache[lock.token] || lock.token.slice(0, 6) + '…';
+            const sym     = symCache[lock.token] || lock.token;
             const invested = (fEth(lock.ethInvested) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
             const lp      = fEth(lock.lpAmount).toFixed(6);
             positionDetail = `${sym} position · $${invested} invested · ${lp} LP`;

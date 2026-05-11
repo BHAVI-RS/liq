@@ -126,8 +126,8 @@ input[type="email"]::placeholder { color: var(--muted); }
 .token-info { display: flex; flex-direction: column; gap: 4px; }
 
 .token-symbol {
-  font-family: var(--font-display);
-  font-size: 15px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   font-weight: 400;
   color: #fff;
 }
@@ -607,6 +607,30 @@ input[type="email"]::placeholder { color: var(--muted); }
   font-weight: 700;
   transition: color 0.4s;
 }
+.rw-missed-tip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+}
+.rw-missed-tip-box {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid rgba(201,168,76,0.45);
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 10px;
+  color: var(--gold);
+  white-space: nowrap;
+  z-index: 200;
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+.rw-missed-tip:hover .rw-missed-tip-box {
+  display: block;
+}
 .pool-chart-tooltip {
   position: absolute;
   pointer-events: none;
@@ -866,7 +890,7 @@ input[type="email"]::placeholder { color: var(--muted); }
 
   /* Token list */
   .token-item { padding: 14px 12px; gap: 12px; flex-wrap: wrap; }
-  .token-symbol { font-size: 15px; }
+  .token-symbol { font-size: 13px; }
   .token-addr   { font-size: 11px; }
   .token-badge  { font-size: 11px; padding: 5px 10px; }
 

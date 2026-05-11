@@ -14,10 +14,10 @@ const FACTORY_ABI = [
   "function getPair(address tokenA, address tokenB) view returns (address)"
 ];
 const PAIR_ABI = [
-  "event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)",
   "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
   "function token0() view returns (address)",
-  "function totalSupply() view returns (uint256)"
+  "function totalSupply() view returns (uint256)",
+  "event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)"
 ];
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -227,6 +227,7 @@ async function loadPoolPanel() {
     for (let i = 0; i < reversed.length; i++) {
       const addr  = reversed[i];
       const t     = tokens[i];
+      if (t.inProgress) continue;
       const price = prices[i];
       const meta  = getMeta(addr);
 
@@ -250,7 +251,7 @@ async function loadPoolPanel() {
             : `<div style="width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">⬡</div>`}
           <div class="token-info" style="min-width:0;">
             <div class="token-symbol">${t.symbol} / USDT</div>
-            <div class="token-addr" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.tokenAddress}">${t.tokenAddress.slice(0,10)}…${t.tokenAddress.slice(-6)}</div>
+            <div class="token-addr" style="word-break:break-all;">${t.tokenAddress}</div>
           </div>
         </div>
         ${price !== null
@@ -304,7 +305,7 @@ async function loadPoolInfo(tokenAddr) {
     else iconEl.innerHTML = '⬡';
     document.getElementById('poolTokenLabel').textContent = `${t.symbol} / USDT`;
     const addrEl = document.getElementById('poolTokenAddr');
-    addrEl.textContent  = tokenAddr.slice(0,10) + '…' + tokenAddr.slice(-8);
+    addrEl.textContent  = tokenAddr;
     addrEl.dataset.full = tokenAddr;
     addrEl.title        = tokenAddr + ' (click to copy)';
     window._poolTokenSymbol = t.symbol;
@@ -349,7 +350,7 @@ async function loadPoolInfo(tokenAddr) {
       { id: 'poolStat-tokenres', label: 'TOKEN RESERVE', value: resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + t.symbol },
       { id: 'poolStat-usdtres',  label: 'USDT RESERVE',  value: (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
       { id: 'poolStat-lpsupply', label: 'LP SUPPLY',     value: supplyF.toFixed(6) + ' HDEX-LP' },
-      { id: 'poolStat-pairaddr', label: 'PAIR ADDRESS',  value: pairAddr.slice(0,10) + '…' + pairAddr.slice(-8), full: pairAddr },
+      { id: 'poolStat-pairaddr', label: 'PAIR ADDRESS',  value: pairAddr, full: pairAddr },
     ];
 
     document.getElementById('poolStats').innerHTML = statItems.map(s => `
@@ -528,12 +529,6 @@ function switchPoolMode(mode) {
   }
 }
 
-function _setBuyHint(out) {
-  const hintEl = document.getElementById('poolBuyHint');
-  if (!hintEl) return;
-  hintEl.textContent = '';
-}
-
 async function onBuyUsdtInput() {
   const usdt = parseFloat(document.getElementById('poolBuyUSDT').value);
   const hintEl = document.getElementById('poolBuyHint');
@@ -550,7 +545,6 @@ async function onBuyUsdtInput() {
     );
     const out = parseFloat(ethers.utils.formatUnits(amounts[1], window._poolTokenDecimals));
     document.getElementById('poolBuyToken').value = out.toLocaleString(undefined, {maximumFractionDigits:6, useGrouping:false});
-    _setBuyHint(out);
   } catch(_) { document.getElementById('poolBuyToken').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
@@ -570,7 +564,6 @@ async function onBuyTokenInput() {
     );
     const usdtNeeded = parseFloat(ethers.utils.formatEther(amounts[0])) * USDT_PER_ETH;
     document.getElementById('poolBuyUSDT').value = usdtNeeded.toFixed(2);
-    _setBuyHint(tokVal);
   } catch(_) { document.getElementById('poolBuyUSDT').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
