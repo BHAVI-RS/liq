@@ -65,9 +65,9 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; flex-shrink: 0; overflow: hidden;
 }
-.dash-inv-title { flex: 1; min-width: 0; }
+.dash-inv-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dash-inv-title .sym { font-family: var(--font-display); font-size: 18px; color: var(--gold); letter-spacing: 1px; }
-.dash-inv-title .nm  { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.dash-inv-title .nm  { font-size: 11px; color: var(--muted); }
 
 .dash-inv-badge {
   font-size: 10px; letter-spacing: 1px; padding: 3px 10px;
@@ -82,8 +82,8 @@
   transition: background 0.15s, border-color 0.15s;
 }
 .lock-hist-btn:hover { background: rgba(201,168,76,0.14); border-color: var(--gold); }
-.dash-inv-badge.locked   { border-color: var(--gold);  color: var(--gold); }
-.dash-inv-badge.unlocked { border-color: #4ade80;       color: #4ade80; }
+.dash-inv-badge.locked   { border-color: #4ade80;  color: #4ade80; }
+.dash-inv-badge.unlocked { border-color: #f87171;  color: #f87171; }
 .dash-inv-badge.claimed  { border-color: var(--muted);  color: var(--muted); }
 .dash-inv-badge.removed  { background: rgba(107,114,128,0.15); color: #6b7280; border-color: rgba(107,114,128,0.3); }
 
@@ -166,6 +166,10 @@
 .did-row:last-child { border-bottom: none; }
 .did-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .8px; color: var(--muted); flex-shrink: 0; }
 .did-val   { font-family: var(--font-mono); font-size: 11px; color: var(--cream); text-align: right; }
+.inv-streak-wrap { display: flex; align-items: center; justify-content: flex-end; gap: 12px; font-size: 11px; }
+@media (max-width: 640px) {
+  .inv-streak-wrap { flex-direction: column; align-items: flex-end; gap: 4px; }
+}
 .did-hr    { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 6px 0; }
 .did-actions { display: flex; gap: 10px; flex-wrap: wrap; padding-top: 10px; }
 
@@ -244,7 +248,7 @@
 }
 
 /* ── STAKE DURATION MODAL ── */
-.stake-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 9000; }
+.stake-modal-overlay { position: fixed; inset: 0; background: rgba(4,8,15,0.82); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 9999; pointer-events: all; }
 .stake-modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 32px 28px; width: min(420px,90vw); }
 .stake-modal-title { font-family: var(--font-display); font-size: 22px; letter-spacing: 2px; color: var(--cream); margin-bottom: 4px; }
 .stake-modal-sub { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 24px; }
@@ -271,8 +275,26 @@
 
 /* ── RESPONSIVE — tablet + phone (≤ 768px) ── */
 @media (max-width: 768px) {
-  .dash-stat-card { padding: 14px 16px; }
-  .dash-stat-val  { font-size: 17px; }
+    /* 2-col grid; referral + staking span full width on mobile */
+  #dashStatsRow { grid-template-columns: 1fr 1fr; }
+  #dashCard-referral,
+  #dashCard-staking { grid-column: 1 / -1; }
+
+  /* Stat card: label full-width, then val + sub inline */
+  .dash-stat-card {
+    padding: 14px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 10px;
+  }
+  .dash-stat-label {
+    flex: 0 0 100%;
+    margin-bottom: 6px;
+  }
+  .dash-stat-val  { font-size: 21px; line-height: 1; }
+  .dash-stat-sub  { font-size: 11px; margin-top: 0; }
+
   .dash-inv-card  { padding: 18px 16px; }
   .dash-inv-title .sym { font-size: 17px; }
   .dash-inv-stat-label { font-size: 11px; }
@@ -280,18 +302,66 @@
   .dash-countdown { padding: 12px 14px; }
   .dash-countdown .cd-num { font-size: 17px; }
   .dash-countdown .cd-unit { font-size: 10px; }
+
+  /* Direct referral cards — prevent address overflow */
+  .dash-dref-addr {
+    font-size: 6px;
+    font-weight: 400;
+    letter-spacing: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .dash-dref-card { gap: 10px; padding: 12px 14px; }
+  .dash-dref-avatar { width: 30px; height: 30px; font-size: 10px; flex-shrink: 0; }
+  .dash-dref-invested { font-size: 10px; }
+
+  /* ── Investment summary: hide LP Value, grid layout ── */
+  .dash-inv-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Hide LP Value column (grid skips it automatically) */
+  .dash-inv-summary .dis-col:nth-child(2) { display: none; }
+
+  /* Package (col 1) + Rewards Claimed (col 3) — row 1, add bottom border */
+  .dash-inv-summary .dis-col:nth-child(1),
+  .dash-inv-summary .dis-col:nth-child(3) {
+    border-bottom: 1px solid var(--border);
+  }
+  .dash-inv-summary .dis-col:nth-child(3) { border-right: none; }
+
+  /* Unlocks In / action row — spans both columns, label + timer inline */
+  .dis-col-action {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    min-width: unset;
+    gap: 10px;
+    padding: 10px 15px;
+  }
+  .dis-col-action .dis-label { margin-bottom: 0; white-space: nowrap; }
+  .dis-timer-val { font-size: 15px; }
+
+  /* Staking section: hide label text and reward amount above button */
+  .dis-sl-label, .dis-sl-reward { display: none; }
+
+  /* Ref cap: hide used/total detail, show only remaining */
+  .refcap-detail { display: none; }
+
+  /* Dashboard stat cards: hide sub-text except referral and staking */
+  .dash-stat-card:not(#dashCard-referral):not(#dashCard-staking) .dash-stat-sub { display: none; }
 }
 
 /* ── RESPONSIVE — phone (≤ 480px) ── */
 @media (max-width: 480px) {
-  .dash-stat-val   { font-size: 17px; }
   .dash-inv-card   { padding: 14px 12px; }
   .dash-inv-grid   { gap: 10px 12px; }
   .dash-countdown .cd-num { font-size: 15px; }
-  .dash-inv-summary { flex-direction: column; }
-  .dis-col { border-right: none; border-bottom: 1px solid var(--border); }
-  .dis-col:last-child { border-bottom: none; }
-  .dis-col-action { align-items: flex-start; min-width: unset; }
 }
 
 /* ── DIRECT REFERRAL PERFORMANCE ── */
@@ -312,11 +382,30 @@
   padding: 14px 18px;
   margin-bottom: 10px;
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 .dash-dref-card:hover {
   border-color: rgba(201,168,76,0.5);
   background: #132038;
+}
+.dash-dref-card.cap-paused,
+.dash-dref-card.cap-paused:hover {
+  border-color: #eab308;
+  box-shadow: 0 0 0 1px rgba(234,179,8,0.12), 0 0 10px rgba(234,179,8,0.18), inset 0 0 8px rgba(234,179,8,0.04);
+}
+.dash-dref-card.cap-ineligible,
+.dash-dref-card.cap-ineligible:hover {
+  border-color: #f87171;
+  box-shadow: 0 0 0 1px rgba(248,113,113,0.1), 0 0 10px rgba(248,113,113,0.16), inset 0 0 8px rgba(248,113,113,0.03);
+}
+.dash-dref-card.dref-no-invest,
+.dash-dref-card.dref-no-invest:hover {
+  border-color: rgba(120,120,140,0.5);
+  background: rgba(80,80,100,0.18);
+  box-shadow: none;
+  cursor: default;
+  opacity: 0.45;
+  filter: grayscale(0.6);
 }
 .dash-dref-avatar {
   width: 36px; height: 36px; border-radius: 50%;

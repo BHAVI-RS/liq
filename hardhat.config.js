@@ -2,8 +2,10 @@ require("@nomicfoundation/hardhat-ethers");
 require("dotenv").config();
 
 const MAINNET_RPC = process.env.MAINNET_RPC_URL
+  || (process.env.ALCHEMY_KEY && `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_KEY}`)
   || (process.env.INFURA_KEY  && `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`)
-  || (process.env.ALCHEMY_KEY && `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_KEY}`);
+  // publicnode.com is not an archive node — set ALCHEMY_KEY or MAINNET_RPC_URL in .env
+  || "https://ethereum.publicnode.com";
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -18,9 +20,10 @@ module.exports = {
     hardhat: {
       chainId: 31337,
       initialBaseFeePerGas: 0,
+      allowUnlimitedContractSize: true,
       forking: {
         url: MAINNET_RPC,
-        // blockNumber: 21000000,
+        blockNumber: 21000000,
       },
       accounts: {
         mnemonic: "test test test test test test test test test test test junk",

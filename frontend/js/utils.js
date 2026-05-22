@@ -6,11 +6,18 @@ function ethToUSDT(ethFloat) {
   return ethFloat * USDT_PER_ETH;
 }
 
+// Format a number with max 5 decimal places, stripping trailing zeros
+function fmtNum(n, maxDp = 5) {
+  if (!Number.isFinite(n)) return String(n);
+  return n.toLocaleString(undefined, { maximumFractionDigits: Math.min(maxDp, 5) });
+}
+
 // opts.sign = true → prepend + or - sign
 function fmtUSDT(ethFloat, opts = {}) {
   const usdt = ethToUSDT(ethFloat);
   const sign = opts.sign ? (ethFloat >= 0 ? '+' : '') : '';
-  const usdtStr = sign + usdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const maxDp = opts.decimals !== undefined ? Math.min(opts.decimals, 5) : 5;
+  const usdtStr = sign + usdt.toLocaleString(undefined, { maximumFractionDigits: maxDp });
   return `${usdtStr} USDT`;
 }
 
@@ -108,3 +115,37 @@ function toast(msg, type='info') {
   log.appendChild(div);
   setTimeout(() => { div.style.opacity='0'; div.style.transition='opacity 0.5s'; setTimeout(()=>div.remove(), 500); }, 4000);
 }
+
+function getFromBlock(latestBlock) {
+  return (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0)
+    ? DEPLOY_BLOCK
+    : Math.max(0, latestBlock - 300);
+}
+
+// ── GLOBAL MODAL BODY LOCK ──
+// Locks body scroll whenever any overlay is open, without touching individual open/close fns.
+(function() {
+  const MODAL_IDS = [
+    'missedCommAlert', 'dashRefPopupOverlay', 'dashEligPopupOverlay',
+    'tokenDetailOverlay', 'investConfirmModal', 'removeLPModal',
+    'stakeModal', 'shortagePopup',
+  ];
+
+  function _syncBodyLock() {
+    const staticOpen = MODAL_IDS.some(id => {
+      const el = document.getElementById(id);
+      return el && (el.style.display === 'flex' || el.style.display === 'block');
+    });
+    const anyOpen = staticOpen;
+    document.body.style.overflow      = anyOpen ? 'hidden' : '';
+    document.body.style.pointerEvents = anyOpen ? 'none'   : '';
+    document.body.classList.toggle('modal-open', anyOpen);
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    MODAL_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) new MutationObserver(_syncBodyLock).observe(el, { attributes: true, attributeFilter: ['style'] });
+    });
+  });
+})();

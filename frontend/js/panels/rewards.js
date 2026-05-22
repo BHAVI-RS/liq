@@ -78,8 +78,8 @@ function _rwStartTicker() {
     if (!accrEl) { _rwStopTicker(); return; }
     const now = _rwStakingBaseTime + (Math.floor(Date.now() / 1000) - _rwStakingWallBase);
     const { live, pending, perLock, anyActive, totalClaimableTokens } = _rwComputeLiveUsdt(now);
-    accrEl.textContent  = '$' + live.toFixed(6);
-    if (claimEl) claimEl.textContent = '$' + pending.toFixed(6);
+    accrEl.textContent  = '$' + fmtNum(live);
+    if (claimEl) claimEl.textContent = '$' + fmtNum(pending);
     if (liveEl) {
       liveEl.innerHTML = anyActive
         ? '30% of investment · live <span style="color:#4ade80;font-size:9px;">●</span>'
@@ -88,7 +88,7 @@ function _rwStartTicker() {
     const btn = document.getElementById('claimStakingBtn');
     if (btn && btn.textContent !== 'CLAIMING…') {
       const canClaim = totalClaimableTokens > 0.000001;
-      btn.textContent = canClaim ? 'CLAIM ALL · ' + totalClaimableTokens.toFixed(4) + ' ' + _rwStakingFirstSym : 'NOTHING TO CLAIM';
+      btn.textContent = canClaim ? 'CLAIM ALL · ' + fmtNum(totalClaimableTokens) + ' ' + _rwStakingFirstSym : 'NOTHING TO CLAIM';
       btn.disabled = !canClaim;
       btn.style.background  = canClaim ? 'var(--gold)' : 'rgba(255,255,255,0.06)';
       btn.style.borderColor = canClaim ? 'var(--gold)' : 'var(--border)';
@@ -100,7 +100,7 @@ function _rwStartTicker() {
       const bar       = document.getElementById('rwLockBar-' + i);
       const pct       = document.getElementById('rwLockPct-' + i);
       const claimable = document.getElementById('rwLockClaimable-' + i);
-      if (accrued) accrued.textContent = '$' + perLock[i].live.toFixed(6) + ' USDT';
+      if (accrued) accrued.textContent = '$' + fmtNum(perLock[i].live) + ' USDT';
       if (bar)     bar.style.width     = perLock[i].pendingPct.toFixed(3) + '%';
       if (pct) {
         pct.textContent = perLock[i].isActive
@@ -110,7 +110,7 @@ function _rwStartTicker() {
       if (claimable) {
         const ct  = perLock[i].claimableTokens;
         const sym = _rwStakingTokenSyms[i] || _rwStakingFirstSym;
-        claimable.textContent = ct > 0.000001 ? ct.toFixed(4) + ' ' + sym : '—';
+        claimable.textContent = ct > 0.000001 ? fmtNum(ct) + ' ' + sym : '—';
         claimable.style.color = ct > 0.000001 ? 'var(--gold)' : 'var(--muted)';
       }
     }
@@ -181,7 +181,7 @@ function _rwRefHistHtml() {
         <td style="padding:7px 8px;text-align:center;color:rgba(248,113,113,0.6);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
         <td style="padding:7px 8px;text-align:right;">
           <div class="rw-missed-tip">
-            <a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;">⚠ −${ethToUSDT(amt).toFixed(2)} USDT ↗</a>
+            <a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;">⚠ −${fmtNum(ethToUSDT(amt))} USDT ↗</a>
             <div class="rw-missed-tip-box">${tipText}</div>
           </div>
         </td>
@@ -197,7 +197,7 @@ function _rwRefHistHtml() {
         </td>
         <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
         <td style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
-        <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${ethToUSDT(amt).toFixed(2)} USDT ↗</a></td>
+        <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${fmtNum(ethToUSDT(amt))} USDT ↗</a></td>
       </tr>`;
     }
   }
@@ -325,7 +325,7 @@ async function _rwAppendCommission(ev, from, amount, level) {
     if (stats) {
       const earnedEl     = document.querySelector('#rwRefContent [data-field="earned"]');
       const remainingEl  = document.querySelector('#rwRefContent [data-field="remaining"]');
-      if (earnedEl)    earnedEl.textContent    = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.earned)));
+      if (earnedEl)    earnedEl.textContent    = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.earned)), {decimals: 3});
       if (remainingEl) remainingEl.textContent = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.remainingCap)));
     }
   } catch(_) {}
@@ -353,12 +353,14 @@ async function loadRwReferral() {
   const el = document.getElementById('rwRefContent');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock   = getFromBlock(latestBlock);
     const [commStats, commEvents, activeCountRaw, minInvRaw, missedResult] = await Promise.all([
       contract.getUserCommissionStats(walletAddress),
-      contract.queryFilter(contract.filters.CommissionPaid(walletAddress)).catch(() => []),
+      contract.queryFilter(contract.filters.CommissionPaid(walletAddress), fromBlock, 'latest').catch(() => []),
       contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
-      _computeMissedWei().catch(() => ({ total: ethers.BigNumber.from(0), entries: [] })),
+      _computeMissedWei(fromBlock).catch(() => ({ total: ethers.BigNumber.from(0), entries: [] })),
     ]);
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
@@ -404,31 +406,13 @@ async function loadRwReferral() {
          </div>` : '';
 
     const maxEligibleLevel = Math.min(activeCount, 10);
-    const eligColor  = maxEligibleLevel > 0 ? '#4ade80' : '#f87171';
-    const eligBg     = maxEligibleLevel > 0 ? 'rgba(74,222,128,0.07)' : 'rgba(248,113,113,0.07)';
-    const eligBorder = maxEligibleLevel > 0 ? 'rgba(74,222,128,0.22)' : 'rgba(248,113,113,0.22)';
-    const nextLevel  = maxEligibleLevel + 1;
-    const nextHint   = maxEligibleLevel < 10
-      ? `<div style="margin-top:4px;font-size:10px;color:var(--muted);">Invite <span style="color:var(--cream);">${nextLevel} active referral${nextLevel !== 1 ? 's' : ''} (${minInvLabel})</span> to unlock Level ${nextLevel}.</div>`
-      : `<div style="margin-top:4px;font-size:10px;color:var(--gold);">All 10 levels unlocked — maximum commission reach.</div>`;
-
-    const eligBanner = `
-      <div style="background:${eligBg};border:1px solid ${eligBorder};border-radius:6px;padding:11px 14px;margin-bottom:14px;font-size:11px;font-family:var(--font-mono);">
-        <div style="color:${eligColor};letter-spacing:1px;font-size:10px;margin-bottom:4px;">REFERRAL ELIGIBILITY</div>
-        <div style="color:var(--cream);">
-          <span style="color:${eligColor};font-weight:700;">${activeCount}</span> active direct referral${activeCount !== 1 ? 's' : ''} → commissions up to
-          <span style="color:${eligColor};font-weight:700;">Level ${maxEligibleLevel}</span>
-          ${maxEligibleLevel === 10 ? '<span style="color:var(--gold);"> · MAX</span>' : ''}
-        </div>
-        ${nextHint}
-      </div>`;
+    const eligColor = maxEligibleLevel > 0 ? '#4ade80' : '#f87171';
 
     el.innerHTML = `
-      ${eligBanner}
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:4px;">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL EARNED</div>
-          <div data-field="earned" style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned)}</div>
+          <div data-field="earned" style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned, {decimals: 3})}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CAP REMAINING</div>
@@ -437,6 +421,10 @@ async function loadRwReferral() {
         <div style="background:${missed > 0.000001 ? 'rgba(248,113,113,0.07)' : 'var(--bg)'};border:1px solid ${missed > 0.000001 ? 'rgba(248,113,113,0.35)' : 'var(--border)'};border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:${missed > 0.000001 ? '#f87171' : 'var(--muted)'};margin-bottom:6px;">MISSED</div>
           <div style="font-size:18px;font-family:var(--font-display);color:${missed > 0.000001 ? '#f87171' : 'var(--muted)'};">${missed > 0.000001 ? fmtUSDT(missed) : '—'}</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">ELIGIBLE UP TO</div>
+          <div style="font-size:18px;font-family:var(--font-display);color:${maxEligibleLevel === 10 ? '#4ade80' : maxEligibleLevel > 0 ? 'var(--cream)' : 'var(--muted)'};">${maxEligibleLevel > 0 ? 'Level ' + maxEligibleLevel : '—'}${maxEligibleLevel === 10 ? ' · MAX' : ''}</div>
         </div>
       </div>
       ${missedWarn}
@@ -534,16 +522,16 @@ async function loadRwStaking(silent = false) {
         ? `full period earned`
         : isPeriodComplete
           ? `<span id="rwLockPct-${i}" style="color:var(--gold);">100% · period complete</span>`
-          : `<span id="rwLockPct-${i}">${(elapsed / lockDurSecs * 100).toFixed(1)}% of period</span>`;
-      const claimedCell   = totalClaimed > 0 ? `<span style="color:#4ade80;">✓ ${totalClaimed.toFixed(4)} ${tokenSym} claimed</span>` : '';
+          : `<span id="rwLockPct-${i}">${fmtNum(elapsed / lockDurSecs * 100, 1)}% of period</span>`;
+      const claimedCell   = totalClaimed > 0 ? `<span style="color:#4ade80;">✓ ${fmtNum(totalClaimed)} ${tokenSym} claimed</span>` : '';
       const statusCell    = isRemoved
         ? `<span style="color:var(--muted);">LP REMOVED</span>`
-        : `<span id="rwLockClaimable-${i}" style="color:${claimableTokens > 0.000001 ? 'var(--gold)' : 'var(--muted)'};">${claimableTokens > 0.000001 ? claimableTokens.toFixed(4) + ' ' + tokenSym : '—'}</span>`;
+        : `<span id="rwLockClaimable-${i}" style="color:${claimableTokens > 0.000001 ? 'var(--gold)' : 'var(--muted)'};">${claimableTokens > 0.000001 ? fmtNum(claimableTokens) + ' ' + tokenSym : '—'}</span>`;
 
       lockRows += `
         <tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
           <td style="padding:8px 8px;color:var(--muted);font-size:10px;">#${i+1}</td>
-          <td style="padding:8px 8px;color:var(--cream);">${fmtUSDT(ethInvested,{noEth:true})}<div style="font-size:9px;color:var(--muted);">accrued: <span id="rwLockAccrued-${i}" style="color:var(--gold);">$${liveUSDT_lock.toFixed(6)} USDT</span></div></td>
+          <td style="padding:8px 8px;color:var(--cream);">${fmtUSDT(ethInvested,{noEth:true})}<div style="font-size:9px;color:var(--muted);">accrued: <span id="rwLockAccrued-${i}" style="color:var(--gold);">$${fmtNum(liveUSDT_lock)} USDT</span></div></td>
           <td style="padding:8px 8px;">
             ${progressBar}
             <div style="font-size:9px;color:var(--muted);margin-top:3px;">${progressLabel} · ${claimedCell}</div>
@@ -555,26 +543,18 @@ async function loadRwStaking(silent = false) {
     const canClaim = totalClaimableTokens > 0.000001;
 
     el.innerHTML = `
-      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
-        <div style="color:var(--gold);letter-spacing:1px;font-size:10px;margin-bottom:5px;">HOW STAKING REWARDS WORK</div>
-        <div style="color:var(--muted);line-height:1.75;">Rewards accrue at <span style="color:var(--cream);">30% of your invested amount per lock period</span>, every second, capped at the lock period end. Restake to start a new period. When you claim, the accrued USDT value is <span style="color:var(--gold);">converted to ${firstTokenSym} tokens at the current market price</span> and sent to your wallet.</div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px;">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">ACCRUED (USDT)</div>
-          <div id="rwStakingAccrued" style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${totalLiveUSDT > 0 ? '$' + totalLiveUSDT.toFixed(6) : '$0.000000'}</div>
-          <div id="rwStakingLiveLabel" style="font-size:10px;color:var(--muted);margin-top:2px;">${initAnyActive ? '30% of investment · live <span style="color:#4ade80;font-size:9px;">●</span>' : 'period complete · <span style="color:var(--gold);">claim to restake</span>'}</div>
+          <div id="rwStakingAccrued" style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${totalLiveUSDT > 0 ? '$' + fmtNum(totalLiveUSDT) : '$0'}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE (USDT)</div>
-          <div id="rwStakingClaimable" style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${totalClaimableUSDT > 0 ? '$' + totalClaimableUSDT.toFixed(6) : '$0.000000'}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px;">unclaimed · converts to tokens at claim</div>
+          <div id="rwStakingClaimable" style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${totalClaimableUSDT > 0 ? '$' + fmtNum(totalClaimableUSDT) : '$0'}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">LIFETIME CLAIMED</div>
-          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">${lifetimeClaimed > 0 ? lifetimeClaimed.toFixed(4) : '0'}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px;">${firstTokenSym} tokens total</div>
+          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">${lifetimeClaimed > 0 ? fmtNum(lifetimeClaimed) : '0'}</div>
         </div>
       </div>
 
@@ -587,7 +567,7 @@ async function loadRwStaking(silent = false) {
                  font-size:11px;font-weight:700;letter-spacing:1px;
                  cursor:${canClaim ? 'pointer' : 'not-allowed'};transition:opacity 0.15s;"
           ${canClaim ? '' : 'disabled'}>
-          ${canClaim ? 'CLAIM ALL · ' + totalClaimableTokens.toFixed(4) + ' ' + firstTokenSym : 'NOTHING TO CLAIM'}
+          ${canClaim ? 'CLAIM ALL · ' + fmtNum(totalClaimableTokens) + ' ' + firstTokenSym : 'NOTHING TO CLAIM'}
         </button>
         <div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">No cooldown · tokens sent at current market price</div>
       </div>
@@ -699,7 +679,7 @@ async function loadRwLPFees(silent = false) {
         <td style="padding:9px 8px;text-align:right;color:var(--cream);">${currentETH > 0 ? fmtUSDT(currentETH,{noEth:true}) : '—'}</td>
         <td style="padding:9px 8px;text-align:right;">
           <span style="color:${gainClr};">${currentETH > 0 ? (gainETH >= 0 ? '+' : '') + fmtUSDT(gainETH,{noEth:true}) : '—'}</span>
-          ${currentETH > 0 ? `<div style="font-size:9px;color:${gainClr};opacity:0.75;">${(gainETH >= 0 ? '+' : '') + gainPct.toFixed(2)}%</div>` : ''}
+          ${currentETH > 0 ? `<div style="font-size:9px;color:${gainClr};opacity:0.75;">${(gainETH >= 0 ? '+' : '') + fmtNum(gainPct, 2)}%</div>` : ''}
         </td>
         <td style="padding:9px 8px;text-align:right;font-size:10px;color:${statusClr};">${statusTxt}</td>
       </tr>`;
@@ -710,7 +690,7 @@ async function loadRwLPFees(silent = false) {
     el.innerHTML = `
       <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
         <div style="color:var(--gold);letter-spacing:1px;font-size:10px;margin-bottom:5px;">HOW UNISWAP V2 POOL FEES WORK</div>
-        <div style="color:var(--muted);line-height:1.75;">Every swap charges a <span style="color:var(--cream);">0.3% fee</span> that flows to LP providers. In V2, fees <span style="color:var(--cream);">compound automatically</span> — your LP tokens grow in value with every swap. <span style="color:var(--gold);">No separate fee claim needed.</span> Earnings are included when you claim or remove LP tokens.</div>
+        <div style="color:var(--muted);line-height:1.75;">Every swap charges a <span style="color:var(--cream);">0.3% fee</span> that flows to LP providers. Fees <span style="color:var(--cream);">compound automatically</span> — your LP tokens grow in value with every swap. <span style="color:var(--cream);">No separate fee claim needed.</span> Earnings are included when you claim or remove LP tokens.</div>
       </div>
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;display:inline-block;min-width:200px;">
         <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:5px;">ESTIMATED POOL EARNINGS</div>

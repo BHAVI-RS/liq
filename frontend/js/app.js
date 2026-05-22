@@ -5,7 +5,7 @@ const contractAddress = CONTRACT_ADDRESS;
 // "Missed" covers fully bypassed commissions (user ineligible) and partial-cap
 // spills (user received some, excess went upline).
 // entries: [{ from, level, amount: BigNumber, blockNumber, transactionHash }]
-async function _computeMissedWei() {
+async function _computeMissedWei(fromBlock = 0) {
   const ownerAddr = (await contract.owner()).toLowerCase();
   const zero = ethers.BigNumber.from(0);
   if (walletAddress.toLowerCase() === ownerAddr) return { total: zero, entries: [] };
@@ -40,7 +40,7 @@ async function _computeMissedWei() {
       const logs = await provider.getLogs({
         address: contract.address,
         topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
-        fromBlock: 0,
+        fromBlock,
         toBlock: 'latest',
       });
 
@@ -87,7 +87,8 @@ async function checkMissedCommissions() {
     });
     if (hasActiveCap) return;
 
-    const { total: missedWei, entries } = await _computeMissedWei();
+    const fromBlock = latestBlock ? getFromBlock(latestBlock.number) : 0;
+    const { total: missedWei, entries } = await _computeMissedWei(fromBlock);
     if (missedWei.isZero()) return;
 
     const latestEntry  = entries.length > 0
@@ -393,10 +394,11 @@ async function loadLandingStats(eth) {
     const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
 
     // ── Single view call for 3 of 4 stats — near-instant, no event scanning ──
+    const fromBlock = (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0) ? DEPLOY_BLOCK : 0;
     const [platformStats, investEvents, removeEvents] = await Promise.all([
       readContract.getPlatformStats().catch(() => null),
-      readContract.queryFilter(readContract.filters.Invested()),
-      readContract.queryFilter(readContract.filters.LPRemoved()),
+      readContract.queryFilter(readContract.filters.Invested(), fromBlock, 'latest'),
+      readContract.queryFilter(readContract.filters.LPRemoved(), fromBlock, 'latest'),
     ]);
 
     // Active investors: count users who have more invests than removes
@@ -915,6 +917,13 @@ function switchTabByName(name) {
   if (name !== 'investments' && window._invStopPoll)     window._invStopPoll();
   if (name !== 'rewards'     && window._rwStopPoll)      window._rwStopPoll();
   if (name !== 'invest'      && window._investStopPoll)  window._investStopPoll();
+
+  // Close any open overlays/popups on tab switch
+  if (typeof closeRefPopup      === 'function') closeRefPopup();
+  if (typeof closeDashEligPopup === 'function') closeDashEligPopup();
+  if (typeof closeTokenDetail   === 'function') closeTokenDetail();
+  if (typeof closeStakeModal    === 'function') closeStakeModal();
+  if (typeof closeRemoveLPModal === 'function') closeRemoveLPModal();
 
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));

@@ -1,0 +1,1315 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>HORDEX — Platform Brochure</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#04080f;--surface:#080f1a;--panel:#0b1520;--border:#141e2a;
+  --gold:#c9a84c;--gold2:#f0d080;--success:#3ecf8e;--warn:#ffb800;
+  --danger:#e05050;--cream:#ede8dc;--text:#cdd9e5;--muted:#4a6a7a;
+  --fd:'Bebas Neue',sans-serif;--fm:'DM Mono',monospace;--fb:'DM Sans',sans-serif;
+}
+body{background:#1a1a1a;font-family:var(--fm);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+@media print{
+  body{background:var(--bg)}
+  @page{size:256mm 144mm;margin:0}
+  .page{margin:0}
+}
+/* 16:9 — 256mm × 144mm */
+.page{
+  width:256mm;min-height:144mm;max-height:144mm;overflow:hidden;
+  background:var(--bg);position:relative;page-break-after:always;
+  display:flex;flex-direction:column;margin:0 auto 18px;
+}
+.page::before{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(rgba(201,168,76,0.04) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(201,168,76,0.04) 1px,transparent 1px);
+  background-size:44px 44px;
+}
+.gt{position:absolute;top:-40px;left:50%;transform:translateX(-50%);width:600px;height:240px;
+  background:radial-gradient(ellipse,rgba(201,168,76,0.1) 0%,transparent 65%);pointer-events:none;z-index:0}
+.gb{position:absolute;bottom:-50px;right:-50px;width:300px;height:300px;
+  background:radial-gradient(circle,rgba(201,168,76,0.05) 0%,transparent 70%);pointer-events:none;z-index:0}
+/* header / content / footer */
+.ph{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;
+  padding:3mm 12mm 2.5mm;border-bottom:1px solid rgba(201,168,76,0.12);flex-shrink:0}
+.ph-logo{font-family:var(--fd);font-size:15px;letter-spacing:4px;color:var(--gold)}
+.ph-pg{font-family:var(--fm);font-size:6.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+.pf{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;
+  padding:1.5mm 12mm;border-top:1px solid rgba(201,168,76,0.08);flex-shrink:0}
+.pfl{font-family:var(--fm);font-size:5.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+.pfr{font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:rgba(201,168,76,0.3)}
+.pc{position:relative;z-index:1;flex:1;padding:4mm 12mm 3mm;overflow:hidden;display:flex;flex-direction:column}
+/* type */
+.stitle{font-family:var(--fd);font-size:20px;letter-spacing:2px;color:var(--gold);line-height:1;margin-bottom:5px}
+.bt{font-family:var(--fb);font-size:7.5px;color:rgba(237,232,220,0.65);line-height:1.7}
+/* cards */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 8px}
+.cg{background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.15);border-radius:4px;padding:6px 8px}
+/* grids */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+.g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px}
+.g6{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.gr{height:1px;background:linear-gradient(90deg,var(--gold),transparent);opacity:0.3;margin:5px 0}
+/* tags */
+.tag{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-family:var(--fm);font-size:6px;letter-spacing:0.5px;gap:4px}
+.tag-eli{background:rgba(62,207,142,0.1);color:var(--success);border:1px solid rgba(62,207,142,0.35)}
+.tag-ine{background:rgba(224,80,80,0.1);color:var(--danger);border:1px solid rgba(224,80,80,0.35)}
+.tag-pau{background:rgba(255,184,0,0.1);color:var(--warn);border:1px solid rgba(255,184,0,0.35)}
+.tag-s{background:rgba(62,207,142,0.1);color:var(--success);border:1px solid rgba(62,207,142,0.3)}
+.tag-r{background:rgba(224,80,80,0.1);color:var(--danger);border:1px solid rgba(224,80,80,0.3)}
+/* staking rate colors */
+.r1{color:#7ec8e3}.r2{color:#a8d8a8}.r3{color:var(--success)}.r4{color:var(--gold2)}.r5{color:#ffaa44}
+/* reward tables (page 8) */
+table.rt{width:100%;border-collapse:collapse;font-family:var(--fm)}
+table.rt th{background:rgba(201,168,76,0.1);color:var(--gold);text-align:center;
+  padding:3px 5px;border:1px solid var(--border);font-weight:400;font-size:7px;letter-spacing:0.3px}
+table.rt th.la{text-align:left;padding-left:7px}
+table.rt td{text-align:right;padding:3px 5px;border:1px solid var(--border);color:var(--text);font-size:8.5px;background:var(--panel)}
+table.rt tr:nth-child(even) td{background:var(--surface)}
+table.rt td.la{text-align:left;color:var(--cream);padding-left:7px;background:rgba(201,168,76,0.06);font-family:var(--fb);font-weight:500;border-left:2px solid rgba(201,168,76,0.25)}
+table.rt td.ra{color:rgba(201,168,76,0.82)}
+/* referral bars */
+.rrow{display:flex;align-items:center;gap:4px;margin-bottom:2.5px}
+.rlbl{font-family:var(--fm);font-size:5.5px;color:var(--muted);width:30px;flex-shrink:0;text-align:right}
+.rbw{flex:1;height:5px;background:rgba(255,255,255,0.04);border-radius:2px;overflow:hidden}
+.rb{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--gold),var(--gold2))}
+.rv{font-family:var(--fm);font-size:5.5px;color:var(--cream);width:88px;flex-shrink:0}
+/* flow nodes */
+.fn-gold{background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.4);color:var(--gold2)}
+.fn-blue{background:rgba(30,80,140,0.15);border:1px solid rgba(60,130,200,0.3);color:#7ab8e0}
+.fn-green{background:rgba(62,207,142,0.07);border:1px solid rgba(62,207,142,0.3);color:var(--success)}
+.fn-panel{background:var(--panel);border:1px solid var(--border);color:var(--text)}
+.fn-uni{background:rgba(255,0,122,0.05);border:1px solid rgba(255,0,122,0.25);color:#FF007A}
+.fnode{border-radius:4px;text-align:center;font-family:var(--fm);padding:4px 6px}
+.arr{text-align:center;color:rgba(201,168,76,0.35);font-size:7px;line-height:1;padding:1.5px 0}
+/* cover corners */
+.cc{position:absolute;width:11px;height:11px;opacity:0.4}
+.c-tl{top:8mm;left:8mm;border-top:1px solid var(--gold);border-left:1px solid var(--gold)}
+.c-tr{top:8mm;right:8mm;border-top:1px solid var(--gold);border-right:1px solid var(--gold)}
+.c-bl{bottom:8mm;left:8mm;border-bottom:1px solid var(--gold);border-left:1px solid var(--gold)}
+.c-br{bottom:8mm;right:8mm;border-bottom:1px solid var(--gold);border-right:1px solid var(--gold)}
+/* streak dots */
+.do{display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(74,106,122,0.3);border:1px solid rgba(74,106,122,0.4)}
+.don{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 4px rgba(201,168,76,0.4)}
+.dom{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gold2);box-shadow:0 0 5px rgba(240,208,128,0.5)}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════ PAGE 1 — COVER -->
+<div class="page">
+  <div class="gt"></div><div class="gb"></div>
+  <div class="cc c-tl"></div><div class="cc c-tr"></div>
+  <div class="cc c-bl"></div><div class="cc c-br"></div>
+<div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;text-align:center;padding:0 20mm">
+  <div style="font-family:var(--fm);font-size:8px;letter-spacing:5px;color:rgba(201,168,76,0.45);text-transform:uppercase;margin-bottom:18px">DECENTRALIZED LIQUIDITY PROTOCOL</div>
+  <div style="font-family:var(--fd);font-size:138px;letter-spacing:22px;color:var(--gold);line-height:0.92;text-shadow:0 0 90px rgba(201,168,76,0.35)">HORDEX</div>
+  <div style="width:95mm;height:1.2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:20px auto"></div>
+  <div style="font-family:var(--fm);font-size:14px;letter-spacing:8px;color:rgba(201,168,76,0.6);text-transform:uppercase;margin-bottom:18px">Funding the Future</div>
+  <div style="font-family:var(--fm);font-size:6px;letter-spacing:5px;color:rgba(201,168,76,0.45);text-transform:uppercase;margin-bottom:18px">▶ Brochure Edition - May 2026</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════ PAGE 1.5 — WHAT IS HORDEX -->
+<div class="page">
+  <div class="gt"></div><div class="gb"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">What is Hordex</span></div>
+
+  <div class="pc" style="display:flex;flex-direction:column;gap:10px;padding-bottom:5px">
+
+    <!-- BAND 1: Heading + two points (left) · Goal box (right) -->
+    <div style="display:flex;gap:14px;align-items:stretch">
+      <div style="flex:0 0 52%;display:flex;flex-direction:column;justify-content:center;gap:9px">
+        <div style="font-family:var(--fm);font-size:7px;letter-spacing:4px;color:rgba(201,168,76,0.45);text-transform:uppercase">THE PLATFORM</div>
+        <div style="font-family:var(--fd);font-size:44px;letter-spacing:2px;color:var(--gold);line-height:1">WHAT IS HORDEX</div>
+        <div style="width:40mm;height:1px;background:linear-gradient(90deg,var(--gold),transparent);opacity:0.45"></div>
+        <div style="display:flex;gap:7px;align-items:flex-start">
+          <span style="color:var(--gold);font-size:9px;flex-shrink:0;margin-top:2px">◆</span>
+          <span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.72);line-height:1.75">Hordex is a <span style="color:var(--gold2)">decentralized liquidity protocol</span> that enables users to earn passive DeFi yield through automated Uniswap V2 liquidity provision — fully on-chain, non-custodial, and permissionless.</span>
+        </div>
+        <div style="display:flex;gap:7px;align-items:flex-start">
+          <span style="color:var(--gold);font-size:9px;flex-shrink:0;margin-top:2px">◆</span>
+          <span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.72);line-height:1.75">Purchasing a package automatically splits funds, acquires selected token, and funds the corresponding liquidity pool — generating <span style="color:var(--gold2)">three simultaneous reward streams</span> from a single atomic transaction.</span>
+        </div>
+      </div>
+      <div style="flex:1;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-left:3px solid var(--gold);border-radius:4px;padding:14px 16px;display:flex;flex-direction:column;justify-content:center;gap:10px">
+        <div style="font-family:var(--fd);font-size:13px;letter-spacing:2.5px;color:var(--gold)">THE GOAL</div>
+        <div style="font-family:var(--fb);font-size:8.5px;color:rgba(237,232,220,0.72);line-height:1.9">
+          To democratise access to institutional-grade DeFi yield — making passive liquidity provision available to everyone, regardless of experience or capital size, while keeping every investment transparent and verifiable on-chain.
+        </div>
+        <div style="display:flex;align-items:center">
+          <div style="flex:1;text-align:center">
+            <div style="font-family:var(--fd);font-size:22px;color:var(--gold2);line-height:1">1 TXN</div>
+            <div style="font-size:7px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:3px">atomic deposit</div>
+          </div>
+          <div style="width:1px;align-self:stretch;background:rgba(201,168,76,0.15)"></div>
+          <div style="flex:1;text-align:center">
+            <div style="font-family:var(--fd);font-size:22px;color:var(--gold2);line-height:1">3-IN-1</div>
+            <div style="font-size:7px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:3px">reward streams</div>
+          </div>
+          <div style="width:1px;align-self:stretch;background:rgba(201,168,76,0.15)"></div>
+          <div style="flex:1;text-align:center">
+            <div style="font-family:var(--fd);font-size:22px;color:var(--gold2);line-height:1">100%</div>
+            <div style="font-size:7px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:3px">non-custodial</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BAND 2: 4 main elements — pointwise cards -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+
+      <div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.18);border-radius:4px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:17px;line-height:1;color:var(--gold)">⬡</div>
+        <div style="font-family:var(--fd);font-size:13px;letter-spacing:1px;color:var(--gold2)">DEFI PROTOCOL</div>
+        <div style="height:1px;background:rgba(201,168,76,0.15)"></div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">Permissionless, audited smart contracts — non-custodial, on-chain transparent, and open to all for verification and state check.</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">Hordex uses Uniswap V2 infrastructure; LP tokens are issued to investors and redeemable from the smart contract at any time.</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.18);border-radius:4px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:17px;line-height:1;color:var(--gold)">◈</div>
+        <div style="font-family:var(--fd);font-size:13px;letter-spacing:1px;color:var(--gold2)">10-LEVEL REFERRAL</div>
+        <div style="height:1px;background:rgba(201,168,76,0.15)"></div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">20% of every deposit is distributed across 10 upline levels — paid instantly on-chain within the same transaction.</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">The platform supplies tokens from its reserve to pair with 50% of each investor's deposit, compensating referral commission as USDT.</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.18);border-radius:4px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:17px;line-height:1;color:var(--gold)">◎</div>
+        <div style="font-family:var(--fd);font-size:13px;letter-spacing:1px;color:var(--gold2)">24/7 REWARD CLAIM</div>
+        <div style="height:1px;background:rgba(201,168,76,0.15)"></div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">LP trading fees, HDX staking rewards, and referral commissions accrue continuously — claim anytime, with no waiting period.</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">Funds are secured by audited smart contracts; withdrawals require no manual approval and complete in a single transaction.</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.18);border-radius:4px;padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:17px;line-height:1;color:var(--gold)">⟁</div>
+        <div style="font-family:var(--fd);font-size:13px;letter-spacing:1px;color:var(--gold2)">AMM · UNISWAP V2</div>
+        <div style="height:1px;background:rgba(201,168,76,0.15)"></div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">Earns a 0.3% fee on every swap, distributed proportionally to liquidity providers with automatic compounding.</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:flex-start">
+            <span style="color:var(--gold);font-size:8px;flex-shrink:0;line-height:1.6">◆</span>
+            <span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.6">The Uniswap V2 AMM formula ensures predictable price impact and stable slippage across all trades.</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- BAND 3: How it works — 4 steps -->
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:5px">
+      <div style="font-family:var(--fm);font-size:6.5px;letter-spacing:3px;color:var(--muted);text-transform:uppercase">HOW IT WORKS — AT A GLANCE</div>
+      <div style="display:flex;align-items:stretch;gap:0">
+        <div style="flex:1;background:rgba(11,21,32,0.8);border:1px solid var(--border);border-radius:3px 0 0 3px;padding:9px 11px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:19px;height:19px;border-radius:50%;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.4);display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:9px;color:var(--gold);flex-shrink:0">1</div>
+            <div style="font-family:var(--fd);font-size:10px;letter-spacing:1px;color:var(--cream)">INVEST USDT</div>
+          </div>
+          <div style="font-size:7.5px;color:var(--muted);line-height:1.65">Choose a package. Funds go directly to the smart contract — never to Hordex.</div>
+        </div>
+        <div style="display:flex;align-items:center;padding:0 4px;color:rgba(201,168,76,0.3);font-size:10px;flex-shrink:0">▶</div>
+        <div style="flex:1;background:rgba(11,21,32,0.8);border:1px solid var(--border);border-left:none;padding:9px 11px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:19px;height:19px;border-radius:50%;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.4);display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:9px;color:var(--gold);flex-shrink:0">2</div>
+            <div style="font-family:var(--fd);font-size:10px;letter-spacing:1px;color:var(--cream)">AUTO-SPLIT & POOL</div>
+          </div>
+          <div style="font-size:7.5px;color:var(--muted);line-height:1.65">50% acquires tokens · 50% stays USDT — both paired atomically into a Uniswap V3 pool.</div>
+        </div>
+        <div style="display:flex;align-items:center;padding:0 4px;color:rgba(201,168,76,0.3);font-size:10px;flex-shrink:0">▶</div>
+        <div style="flex:1;background:rgba(11,21,32,0.8);border:1px solid var(--border);border-left:none;padding:9px 11px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:19px;height:19px;border-radius:50%;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.4);display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:9px;color:var(--gold);flex-shrink:0">3</div>
+            <div style="font-family:var(--fd);font-size:10px;letter-spacing:1px;color:var(--cream)">EARN PASSIVELY</div>
+          </div>
+          <div style="font-size:7.5px;color:var(--muted);line-height:1.65">LP fees, staking rewards, and referral commissions accrue automatically — no action needed.</div>
+        </div>
+        <div style="display:flex;align-items:center;padding:0 4px;color:rgba(201,168,76,0.3);font-size:10px;flex-shrink:0">▶</div>
+        <div style="flex:1;background:rgba(11,21,32,0.8);border:1px solid rgba(62,207,142,0.2);border-left:none;border-radius:0 3px 3px 0;padding:9px 11px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:19px;height:19px;border-radius:50%;background:rgba(62,207,142,0.1);border:1px solid rgba(62,207,142,0.4);display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:9px;color:var(--success);flex-shrink:0">4</div>
+            <div style="font-family:var(--fd);font-size:10px;letter-spacing:1px;color:var(--success)">WITHDRAW & GROW</div>
+          </div>
+          <div style="font-size:7.5px;color:var(--muted);line-height:1.65">On maturiity, funds complete the locking period. Reinvest to earn further rewards or remove investment.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">01</span></div>
+</div>
+
+<!-- ══════════════════════════════════════ PAGE 2 — INVESTMENT AT WORK -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Investment at Work</span></div>
+  <div class="pc" style="display:flex;flex-direction:column">
+    <div class="stitle" style="font-size:44px;margin-bottom:25px">Where Your Investment Goes</div>
+    <div style="display:flex;gap:10px;flex:1;align-items:stretch">
+
+      <!-- Left: flow -->
+      <div style="flex:0 0 56%;display:flex;flex-direction:column">
+        <div class="bt" style="margin-bottom:7px;font-size:10px"><span style="color:var(--gold);font-size:11px;flex-shrink:0;margin-top:4px">◆</span> Every step — splitting, token acquisition, pool deposit and locking — completes atomically in one blockchain transaction. LP positions are held by audited contracts which ensures security.</div>
+
+        <!-- Flow nodes -->
+        <div style="display:flex;flex-direction:column;flex:1;">
+          <div class="fnode fn-gold" style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+            <div style="font-family:var(--fd);font-size:15px;letter-spacing:2px">USER INVESTMENT (USDT)</div>
+            <div style="font-size:8px;color:rgba(240,208,128,0.6)">Single package amount · split automatically by smart contract</div>
+          </div>
+          <div class="arr">▼</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:1;">
+            <div class="fnode fn-blue" style="text-align:center;display:flex;flex-direction:column;justify-content:center;">
+              <div style="font-family:var(--fd);font-size:15px;letter-spacing:1px;color:#b8d4f0">TOKEN ACQUISITION</div>
+              <div style="font-size:8px;color:rgba(122,184,224,0.7)">50% · via market + platform reserve</div>
+            </div>
+            <div class="fnode fn-blue" style="text-align:center;display:flex;flex-direction:column;justify-content:center;">
+              <div style="font-family:var(--fd);font-size:15px;letter-spacing:1px;color:#b8d4f0">USDT PAIRING</div>
+              <div style="font-size:8px;color:rgba(122,184,224,0.7)">50% · paired alongside the tokens</div>
+            </div>
+          </div>
+          <div class="arr">▼</div>
+          <div class="fnode fn-uni" style="padding:5px 8px;flex:1;display:flex;flex-direction:column;justify-content:center;">
+            <div style="display:flex;align-items:center;justify-content:center;gap:5px">
+              <svg width="9" height="9" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="50" fill="#FF007A"/><polygon points="50,8 46,32 54,32" fill="white" opacity="0.9"/><ellipse cx="50" cy="55" rx="22" ry="20" fill="white" opacity="0.95"/><ellipse cx="50" cy="42" rx="14" ry="13" fill="white"/></svg>
+              <span style="font-family:var(--fd);font-size:15px;letter-spacing:2px">UNISWAP V2 POOL</span>
+            </div>
+            <div style="font-size:8px;color:rgba(255,0,122,0.5);text-align:center">Tokens + USDT deposited · LP tokens minted · 0.3% fee on every swap</div>
+          </div>
+          <div class="arr">▼</div>
+          <div class="fnode fn-green" style="padding:5px 8px;flex:1;display:flex;flex-direction:column;justify-content:center;">
+            <div style="font-family:var(--fd);font-size:15px;letter-spacing:2px;color:var(--success)">LP TOKENS LOCKED IN SMART CONTRACT</div>
+            <div style="font-size:8px;color:rgba(62,207,142,0.55);text-align:center">Default 90-day lock · held on-chain · no custody · restakeable after expiry</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.1);flex-shrink:0"></div>
+
+      <!-- Right: earnings -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="font-family:var(--fd);font-size:15px;letter-spacing:2px;color:var(--gold)">What You Earn</div>
+        <div class="card" style="border-color:rgba(201,168,76,0.35);flex:1;display:flex;flex-direction:column;padding:7px 10px;background:rgba(201,168,76,0.04)">
+          <div style="font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">▶ REFERRAL COMMISSIONS</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-family:var(--fd);font-size:20px;color:var(--gold2);letter-spacing:1px;line-height:1;flex-shrink:0">20%</span>
+            <span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.4);line-height:1.35">of every downline investment, distributed across 10 upline levels</span>
+          </div>
+          <div style="height:1px;background:rgba(201,168,76,0.18);margin-bottom:5px"></div>
+          <div style="display:flex;flex-direction:column;gap:3px;flex:1;justify-content:center">
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Level 1 earns 10% · Level 2 earns 5% — highest earners in the upline</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Paid instantly in the same blockchain transaction as the investment</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Referral cap of 5× package value per LP position as long as locked in the contract.</span></div>
+          </div>
+        </div>
+        <div class="card" style="border-color:rgba(62,207,142,0.35);flex:1;display:flex;flex-direction:column;padding:7px 10px;background:rgba(62,207,142,0.03)">
+          <div style="font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--success);margin-bottom:5px">▶ LP TRADING FEES</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-family:var(--fd);font-size:20px;color:var(--success);letter-spacing:1px;line-height:1;flex-shrink:0">0.3%</span>
+            <span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.4);line-height:1.35">per swap, shared proportionally among all pool liquidity providers</span>
+          </div>
+          <div style="height:1px;background:rgba(62,207,142,0.18);margin-bottom:5px"></div>
+          <div style="display:flex;flex-direction:column;gap:3px;flex:1;justify-content:center">
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--success);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Earned on every trade in the pool — 24/7, fully passive</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--success);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Auto-accrues inside pool reserves — no claiming needed</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--success);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Proportional to your LP token share in the Uniswap V2 pool</span></div>
+          </div>
+        </div>
+        <div class="card" style="border-color:rgba(255,184,0,0.35);flex:1;display:flex;flex-direction:column;padding:7px 10px;background:rgba(255,184,0,0.03)">
+          <div style="font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--warn);margin-bottom:5px">▶ STAKING REWARDS</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-family:var(--fd);font-size:20px;color:var(--warn);letter-spacing:1px;line-height:1;flex-shrink:0">214%</span>
+            <span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.4);line-height:1.35">max total return over 360-day lock at streak level 3</span>
+          </div>
+          <div style="height:1px;background:rgba(255,184,0,0.18);margin-bottom:5px"></div>
+          <div style="display:flex;flex-direction:column;gap:3px;flex:1;justify-content:center">
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--warn);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Platform tokens accumulate every second during your active lock</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--warn);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Rate set by package tier, lock duration, and streak level (0–3)</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--warn);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.6);line-height:1.4">Claim anytime without ending or resetting your lock position</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">02</span></div>
+</div>
+
+<!-- ══════════════════════════════════════ PAGE 3 — HOW LIQUIDITY WORKS -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">How Liquidity Works</span></div>
+  <div class="pc" style="display:flex;flex-direction:column">
+    <div class="stitle" style="font-size:44px;margin-bottom:25px">Uniswap V2 AMM Pools</div>
+    <div style="display:flex;gap:10px;flex:1;align-items:stretch">
+
+      <!-- Left: AMM visuals -->
+      <div style="flex:0 0 50%;display:flex;flex-direction:column;gap:5px">
+
+        <!-- x·y=k formula -->
+        <div class="cg" style="text-align:center;padding:7px 10px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:3px">CONSTANT PRODUCT FORMULA</div>
+          <div style="display:flex;gap:6px;justify-content:center;align-items:center;margin-bottom:2px">
+            <div style="background:rgba(255,0,122,0.08);border:1px solid rgba(255,0,122,0.2);border-radius:3px;padding:3px 8px">
+              <div style="font-family:var(--fd);font-size:17px;color:#FF007A">TOKEN</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(255,0,122,0.45)">Reserve X</div>
+            </div>
+            <span style="font-family:var(--fd);font-size:15px;color:var(--muted)">×</span>
+            <div style="background:rgba(240,185,11,0.08);border:1px solid rgba(240,185,11,0.2);border-radius:3px;padding:3px 8px">
+              <div style="font-family:var(--fd);font-size:17px;color:#F0B90B">USDT</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(240,185,11,0.45)">Reserve Y</div>
+            </div>
+            <span style="font-family:var(--fd);font-size:15px;color:var(--muted)">=</span>
+            <div style="background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.25);border-radius:3px;padding:3px 8px">
+              <div style="font-family:var(--fd);font-size:17px;color:var(--gold2)">K</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(201,168,76,0.45)">Always Fixed</div>
+            </div>
+          </div>
+          <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.35)">Price self-adjusts with every swap · no order books · no middlemen</div>
+        </div>
+
+        <!-- Trade simulation -->
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:7px 10px;flex:1;display:flex;flex-direction:column">
+          <div style="font-family:var(--fm);font-size:6px;letter-spacing:2px;color:var(--gold);margin-bottom:4px">LIVE TRADE — HOW PRICE MOVES AUTOMATICALLY</div>
+          <div style="display:flex;gap:4px;align-items:center;flex:1">
+            <div style="flex:1;text-align:center;background:rgba(255,0,122,0.06);border:1px solid rgba(255,0,122,0.15);border-radius:3px;padding:3px 4px">
+              <div style="font-family:var(--fd);font-size:11px;color:#FF007A;margin-bottom:1px">TOKEN X</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(255,0,122,0.4);margin-bottom:2px">Reserve</div>
+              <div style="font-family:var(--fd);font-size:10px;color:rgba(255,0,122,0.5);text-decoration:line-through">1,000</div>
+              <div style="font-family:var(--fd);font-size:13px;color:#FF007A">900</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(224,80,80,0.8);margin-top:1px">↓ Bought out</div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 2px">
+              <div style="font-family:var(--fd);font-size:8px;color:var(--muted)">BUY</div>
+              <div style="font-family:var(--fd);font-size:8px;color:var(--muted)">→</div>
+            </div>
+            <div style="flex:1;text-align:center;background:rgba(240,185,11,0.06);border:1px solid rgba(240,185,11,0.15);border-radius:3px;padding:3px 4px">
+              <div style="font-family:var(--fd);font-size:11px;color:#F0B90B;margin-bottom:1px">USDT</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(240,185,11,0.4);margin-bottom:2px">Reserve</div>
+              <div style="font-family:var(--fd);font-size:10px;color:rgba(240,185,11,0.5);text-decoration:line-through">1,000</div>
+              <div style="font-family:var(--fd);font-size:13px;color:#F0B90B">1,111</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(62,207,142,0.8);margin-top:1px">↑ Flows in</div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 2px">
+              <div style="font-family:var(--fd);font-size:8px;color:var(--muted)">→</div>
+            </div>
+            <div style="flex:1;text-align:center;background:rgba(62,207,142,0.06);border:1px solid rgba(62,207,142,0.18);border-radius:3px;padding:3px 4px">
+              <div style="font-family:var(--fd);font-size:11px;color:var(--success);margin-bottom:1px">PRICE</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(62,207,142,0.4);margin-bottom:2px">Token / USDT</div>
+              <div style="font-family:var(--fd);font-size:10px;color:rgba(62,207,142,0.5);text-decoration:line-through">1.000</div>
+              <div style="font-family:var(--fd);font-size:13px;color:var(--success)">1.235</div>
+              <div style="font-family:var(--fm);font-size:6px;color:rgba(62,207,142,0.8);margin-top:1px">↑ +23.5%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LP token quantity calculation -->
+        <div style="background:rgba(62,207,142,0.03);border:1px solid rgba(62,207,142,0.2);border-radius:4px;padding:7px 10px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--success);margin-bottom:6px">LP TOKEN QUANTITY</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="background:rgba(62,207,142,0.08);border:1px solid rgba(62,207,142,0.2);border-radius:3px;padding:4px 8px;text-align:center;flex-shrink:0">
+              <div style="font-family:var(--fd);font-size:14px;color:var(--success)">LP</div>
+              <div style="font-family:var(--fm);font-size:5.5px;color:rgba(62,207,142,0.5)">Received</div>
+            </div>
+            <span style="font-family:var(--fd);font-size:12px;color:var(--muted);flex-shrink:0">=</span>
+            <div style="background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.2);border-radius:3px;padding:4px 8px;text-align:center;flex-shrink:0">
+              <div style="font-family:var(--fd);font-size:14px;color:var(--gold2)">SUPPLY</div>
+              <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5)">Total LP tokens</div>
+            </div>
+            <span style="font-family:var(--fd);font-size:12px;color:var(--muted);flex-shrink:0">×</span>
+            <div style="text-align:center;flex:1">
+              <div style="font-family:var(--fm);font-size:7px;color:var(--cream);border-bottom:1px solid rgba(237,232,220,0.2);padding-bottom:3px;margin-bottom:3px">Your Deposit</div>
+              <div style="font-family:var(--fm);font-size:7px;color:var(--muted)">Pool Reserve</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 stat cards -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;flex:1">
+          <div class="cg" style="display:flex;flex-direction:column;justify-content:center;padding:7px 10px">
+            <div style="font-family:var(--fd);font-size:18px;color:var(--gold2);margin-bottom:2px">0.3%</div>
+            <div style="font-family:var(--fm);font-size:7px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;margin-bottom:3px">Per-Swap Fee</div>
+            <div style="font-family:var(--fb);font-size:7.5px;color:rgba(237,232,220,0.5);line-height:1.5">Every trade pays 0.3% — split proportionally among all LPs in real time.</div>
+          </div>
+          <div class="card" style="display:flex;flex-direction:column;justify-content:center;padding:7px 10px">
+            <div style="font-family:var(--fd);font-size:18px;color:var(--gold2);margin-bottom:2px">LP Token</div>
+            <div style="font-family:var(--fm);font-size:7px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;margin-bottom:3px">Your Proof of Share</div>
+            <div style="font-family:var(--fb);font-size:7.5px;color:rgba(237,232,220,0.5);line-height:1.5">Represents your exact pool fraction — redeemable at the live reserve ratio.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.1);flex-shrink:0"></div>
+
+      <!-- Right: Hordex integration lifecycle -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="font-family:var(--fd);font-size:15px;letter-spacing:2px;color:var(--gold)">How Hordex Creates Wealth</div>
+
+        <div style="padding:5px 10px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.2);border-radius:4px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--gold);margin-bottom:3px">① INVEST</div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Your USDT is split — 50% buys the token, 50% stays as USDT pairing</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Both halves are deposited into the Uniswap V2 pool in a single transaction</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">LP tokens minted and locked in the Hordex contract — no third-party custody</span></div>
+          </div>
+        </div>
+
+        <div style="padding:5px 10px;background:rgba(62,207,142,0.04);border:1px solid rgba(62,207,142,0.15);border-radius:4px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--success);margin-bottom:3px">② LOCKED &amp; EARNING</div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--success);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">0.3% swap fee accrues every time anyone trades in the pool — 24/7</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--success);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Platform staking rewards accumulate every second — claimable anytime</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--success);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Referral commissions from your downline flow in during the lock period</span></div>
+          </div>
+        </div>
+
+        <div style="padding:5px 10px;background:var(--panel);border:1px solid var(--border);border-radius:4px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <div style="font-family:var(--fm);font-size:8px;letter-spacing:2px;color:var(--gold);margin-bottom:3px">③ RESTAKE OR EXIT</div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Restake the same duration consecutively to build streak — unlock bonus rates</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Choose from 7 / 30 / 60 / 90 / 180 / 360 day durations on every restake</span></div>
+            <div style="display:flex;gap:4px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:9px;color:rgba(237,232,220,0.6);line-height:1.4">Exit anytime after expiry — reclaim tokens + USDT at current pool ratio</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">03</span></div>
+</div>
+
+<!-- ══════════════════════════════════════════ PAGE 4 — LOCK DURATIONS -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Investment Packages &amp; Lock Durations</span></div>
+  <div class="pc" style="display:flex;flex-direction:column">
+
+    <!-- Heading -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+      <div class="stitle" style="font-size:44px">Packages &amp; Durations</div>
+      <div class="bt" style="max-width:260px;font-size:7px;text-align:right;line-height:1.6;margin-top:4px">Select investment package to set staking rate tier, then choose a lock duration. <br>Larger package × Longer lock × Higher streak = Maximum returns.</div>
+    </div>
+
+    <!-- Investment packages -->
+    <div style="font-family:var(--fm);font-size:6px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:5px">Investment Packages</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px">
+
+      <!-- BASIC -->
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 9px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:2px;color:var(--muted);margin-bottom:2px">‎ </div>
+        <div style="font-family:var(--fd);font-size:20px;color:var(--text);letter-spacing:1px;line-height:1;margin-bottom:2px">BASIC</div>
+        <div style="font-family:var(--fm);font-size:8px;color:var(--gold);margin-bottom:3px">$25 – $1000</div>
+        <div style="font-family:var(--fm);font-size:5px;color:rgba(224,80,80,0.65);margin-bottom:4px">✕ $25 &amp; $50 — LP fees + referrals only, no staking</div>
+        <div class="gr" style="margin:0 0 5px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px;justify-content:flex-start">
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--muted);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.45);line-height:1.45">Entry-level LP position — lowest pool exposure</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--muted);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.45);line-height:1.45">Staking rate: entry tier — lower end of each duration range</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--muted);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.45);line-height:1.45">Referral commission cap: up to <span style="color:var(--gold2)">$125 – $10,000</span> per position</span></div>
+          
+        </div>
+      </div>
+
+      <!-- ELITE -->
+      <div style="background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.3);border-radius:4px;padding:6px 9px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:2px;color:var(--gold);margin-bottom:2px">‎ </div>
+        <div style="font-family:var(--fd);font-size:20px;color:var(--gold);letter-spacing:1px;line-height:1;margin-bottom:2px">ELITE</div>
+        <div style="font-family:var(--fm);font-size:8px;color:var(--gold2);margin-bottom:4px">$2,500 – $25,000</div>
+        <div class="gr" style="margin:0 0 5px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px;justify-content:flex-start">
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.6);line-height:1.45">Mid-range LP position — meaningful pool share and fee income</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.6);line-height:1.45">Staking rate: standard tier — mid-range of each duration</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.6);line-height:1.45">Referral commission cap: up to <span style="color:var(--gold2)">$12,500 – $125,000</span> per position</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.6);line-height:1.45">Access to all 6 lock durations and streak levels</span></div>
+        </div>
+      </div>
+
+      <!-- INSTITUTIONAL -->
+      <div style="background:rgba(240,208,128,0.05);border:1px solid rgba(240,208,128,0.3);border-radius:4px;padding:6px 9px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:2px;color:var(--gold2);margin-bottom:2px">‎ </div>
+        <div style="font-family:var(--fd);font-size:18px;color:var(--gold2);letter-spacing:1px;line-height:1;margin-bottom:2px">INSTITUTIONAL</div>
+        <div style="font-family:var(--fm);font-size:8px;color:var(--gold2);margin-bottom:4px">$50,000 – $500,000</div>
+        <div class="gr" style="margin:0 0 5px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px;justify-content:flex-start">
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold2);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.7);line-height:1.45">Maximum LP position — highest pool share and swap fee income</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold2);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.7);line-height:1.45">Staking rate: premium tier — highest rate of each duration range</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold2);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.7);line-height:1.45">Referral commission cap: up to <span style="color:var(--gold2)">$250,000 – $2,500,000</span> per position</span></div>
+          <div style="display:flex;gap:3px;align-items:flex-start"><span style="color:var(--gold2);font-size:6px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:6px;color:rgba(237,232,220,0.7);line-height:1.45">Access to all 6 lock durations and streak levels</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lock durations -->
+    <div style="font-family:var(--fm);font-size:6px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:5px">Lock Durations</div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:9px;flex:1">
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fd);font-size:22px;color:var(--gold);letter-spacing:1px;line-height:1">7</div>
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:var(--muted)">DAYS</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5);margin-bottom:2px;letter-spacing:1px">STREAK BONUS</div>
+        <div style="font-family:var(--fd);font-size:11px;color:var(--muted)">None</div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:1px">flat rate only</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.4);line-height:1.5">Short-term or entry. Rate: 1.0%–1.5%.</div>
+        <div style="font-family:var(--fb);font-size:5px;color:rgba(237,232,220,0.28);line-height:1.55;margin-top:auto;padding-top:4px">Best for testing the platform or parking funds briefly. Maximum flexibility — no streak to maintain, and your capital is never locked beyond a week.</div>
+      </div>
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fd);font-size:22px;color:var(--gold);letter-spacing:1px;line-height:1">30</div>
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:var(--muted)">DAYS</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5);margin-bottom:2px;letter-spacing:1px">STREAK BONUS</div>
+        <div style="font-family:var(--fd);font-size:11px;color:var(--gold)">+0.5%</div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:1px">per streak level</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.4);line-height:1.5">Monthly. Up to +1.5%. Base: 6.0%–7.5%.</div>
+        <div style="font-family:var(--fb);font-size:5px;color:rgba(237,232,220,0.28);line-height:1.55;margin-top:auto;padding-top:4px">Ideal entry into the streak system. A single restake moves you to Streak 1. Reinvest monthly to climb bonus tiers without lengthy exposure.</div>
+      </div>
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fd);font-size:22px;color:var(--gold);letter-spacing:1px;line-height:1">60</div>
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:var(--muted)">DAYS</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5);margin-bottom:2px;letter-spacing:1px">STREAK BONUS</div>
+        <div style="font-family:var(--fd);font-size:11px;color:var(--gold)">+2.6%</div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:1px">per streak level</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.4);line-height:1.5">Two-month. Up to +7.8%. Base: 14%–18%.</div>
+        <div style="font-family:var(--fb);font-size:5px;color:rgba(237,232,220,0.28);line-height:1.55;margin-top:auto;padding-top:4px">Strong streak multiplier — two restakes reach Streak 2, almost tripling the bonus yield on an already solid base rate.</div>
+      </div>
+
+      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.3);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fd);font-size:22px;color:var(--gold2);letter-spacing:1px;line-height:1">90</div>
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:var(--gold)">DAYS ★</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.6);margin-bottom:2px;letter-spacing:1px">STREAK BONUS</div>
+        <div style="font-family:var(--fd);font-size:11px;color:var(--gold2)">+3.0%</div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5);margin-top:1px">per streak level</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(201,168,76,0.5);line-height:1.5">★ Default lock. Up to +9.0%. Base: 25%–30%.</div>
+        <div style="font-family:var(--fb);font-size:5px;color:rgba(201,168,76,0.35);line-height:1.55;margin-top:auto;padding-top:4px">Best return-to-locktime ratio on the platform. Streak 3 reachable in under a year, delivering peak rate efficiency across every package tier.</div>
+      </div>
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fd);font-size:22px;color:var(--gold);letter-spacing:1px;line-height:1">180</div>
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:var(--muted)">DAYS</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5);margin-bottom:2px;letter-spacing:1px">STREAK BONUS</div>
+        <div style="font-family:var(--fd);font-size:11px;color:var(--gold2)">+5.0%</div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:1px">per streak level</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.4);line-height:1.5">Six months. Up to +15%. Base: 68%–77%.</div>
+        <div style="font-family:var(--fb);font-size:5px;color:rgba(237,232,220,0.28);line-height:1.55;margin-top:auto;padding-top:4px">Suited for capital you can commit through multiple cycles. Steep streak multipliers compound hard — Streak 3 adds a full +15% on an already high base.</div>
+      </div>
+
+      <div style="background:var(--panel);border:1px solid rgba(240,208,128,0.2);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column">
+        <div style="font-family:var(--fd);font-size:22px;color:var(--gold2);letter-spacing:1px;line-height:1">360</div>
+        <div style="font-family:var(--fm);font-size:5.5px;letter-spacing:1px;color:var(--gold2)">DAYS — MAX</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:rgba(201,168,76,0.5);margin-bottom:2px;letter-spacing:1px">STREAK BONUS</div>
+        <div style="font-family:var(--fd);font-size:11px;color:var(--gold2)">+10.0%</div>
+        <div style="font-family:var(--fm);font-size:5.5px;color:var(--gold2);opacity:0.6;margin-top:1px">per streak level</div>
+        <div class="gr" style="margin:5px 0"></div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.4);line-height:1.5">Full year. Up to +30%. Base: 168%–184%.</div>
+        <div style="font-family:var(--fb);font-size:5px;color:rgba(237,232,220,0.28);line-height:1.55;margin-top:auto;padding-top:4px">Maximum yield path. One full year at Streak 3 reaches 214% total return. For capital committed to long-term growth at the platform ceiling.</div>
+      </div>
+    </div>
+
+    <!-- Streak Levels -->
+    <div style="font-family:var(--fm);font-size:6px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:5px">Streak Levels</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:5px 7px;display:flex;flex-direction:column">
+        <div style="display:flex;gap:3px;align-items:center;margin-bottom:3px"><span class="do"></span><span class="do"></span><span class="do"></span></div>
+        <div style="font-family:var(--fd);font-size:10px;color:var(--muted);letter-spacing:1px;line-height:1;margin-bottom:2px">STREAK 0</div>
+        <div style="font-family:var(--fm);font-size:5px;color:var(--muted);margin-bottom:2px">Base rate — no bonus</div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.35);line-height:1.45">First investment or after a break in reinvestment cycles.</div>
+      </div>
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:5px 7px;display:flex;flex-direction:column">
+        <div style="display:flex;gap:3px;align-items:center;margin-bottom:3px"><span class="don"></span><span class="do"></span><span class="do"></span></div>
+        <div style="font-family:var(--fd);font-size:10px;color:var(--gold);letter-spacing:1px;line-height:1;margin-bottom:2px">STREAK 1</div>
+        <div style="font-family:var(--fm);font-size:5px;color:var(--muted);margin-bottom:2px">+bonus per duration</div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.35);line-height:1.45">Completed 1 consecutive reinvestment in the same duration.</div>
+      </div>
+
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:5px 7px;display:flex;flex-direction:column">
+        <div style="display:flex;gap:3px;align-items:center;margin-bottom:3px"><span class="don"></span><span class="don"></span><span class="do"></span></div>
+        <div style="font-family:var(--fd);font-size:10px;color:var(--gold);letter-spacing:1px;line-height:1;margin-bottom:2px">STREAK 2</div>
+        <div style="font-family:var(--fm);font-size:5px;color:var(--muted);margin-bottom:2px">+bonus × 2 per duration</div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.35);line-height:1.45">Completed 2 consecutive reinvestments in the same duration.</div>
+      </div>
+
+      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.3);border-radius:4px;padding:5px 7px;display:flex;flex-direction:column">
+        <div style="display:flex;gap:3px;align-items:center;margin-bottom:3px"><span class="dom"></span><span class="dom"></span><span class="dom"></span></div>
+        <div style="font-family:var(--fd);font-size:10px;color:var(--gold2);letter-spacing:1px;line-height:1;margin-bottom:2px">STREAK 3</div>
+        <div style="font-family:var(--fm);font-size:5px;color:var(--gold);margin-bottom:2px">MAX — highest rate tier</div>
+        <div style="font-family:var(--fb);font-size:5.5px;color:rgba(237,232,220,0.5);line-height:1.45">3+ consecutive reinvestments. Maximum bonus for any duration.</div>
+      </div>
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">04</span></div>
+</div>
+
+<!-- ════════════════════════════════════════ PAGE 5 — REFERRAL INCOME -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Referral Income Split</span></div>
+  <div class="pc" style="display:flex;flex-direction:column">
+
+    <!-- Heading row -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:25px">
+      <div class="stitle" style="font-size:44px">Earn From Your Network</div>
+      <div class="bt" style="max-width:310px;text-align:right;font-size:7px;line-height:1.7">When anyone in your downline invests, <strong style="color:var(--cream)">20% of their investment</strong> (which is compensated with tokens for investors) is distributed instantly across up to 10 upline levels as referral commission — paid in the same transaction, right after LP lock.</div>
+    </div>
+
+    <!-- Two columns -->
+    <div style="display:flex;gap:12px;flex:1;min-height:0">
+
+      <!-- Left: bar chart -->
+      <div style="flex:0 0 46%;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:6px;text-transform:uppercase">Commission per downline investment</div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between">
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 1</div><div class="rbw"><div class="rb" style="width:100%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--gold2);font-weight:500">10%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 2</div><div class="rbw"><div class="rb" style="width:50%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--gold2)">5%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 3</div><div class="rbw"><div class="rb" style="width:20%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">2%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 4</div><div class="rbw"><div class="rb" style="width:6%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.6%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 5</div><div class="rbw"><div class="rb" style="width:5%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.5%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 6</div><div class="rbw"><div class="rb" style="width:4.5%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.45%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 7</div><div class="rbw"><div class="rb" style="width:4%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.4%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 8</div><div class="rbw"><div class="rb" style="width:4%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.4%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 9</div><div class="rbw"><div class="rb" style="width:3.5%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.35%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+          <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 10</div><div class="rbw"><div class="rb" style="width:3%"></div></div><div class="rv" style="font-size:7px;width:100px"><span style="color:var(--text)">0.3%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
+        </div>
+        <div style="margin-top:6px;padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.12);border-radius:3px;font-family:var(--fm);font-size:7px;color:var(--muted);line-height:1.6">
+          The amounts are distributed after deducting the platform fee of 5% from the commissions. Ineligible levels are skipped — commission passes upward to the next eligible upline.
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.1);flex-shrink:0"></div>
+
+      <!-- Right: eligibility + cap + status -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:7px">
+
+        <!-- Eligibility rules -->
+        <div class="cg">
+          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">ELIGIBILITY RULES</div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Must hold an active LP position to receive commissions at any level.</span></div>
+            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Level N requires <strong style="color:var(--cream)">at least N active direct referrals</strong>, each holding their own investment.</span></div>
+            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">If no eligible person exists at a level, the share climbs upline until claimed or falls to the platform.</span></div>
+          </div>
+        </div>
+
+        <!-- Commission cap -->
+        <div class="card" style="flex:1;display:flex;flex-direction:column">
+          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">COMMISSION CAP — 5× PACKAGE VALUE PER POSITION</div>
+          <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.6;margin-bottom:9px">Each LP position can earn referral commissions totalling up to <strong style="color:var(--cream)">5× its original package value</strong>. Once the cap is hit, that position is <span class="tag tag-ine" style="font-size:7px;padding:1px 5px">✕ INELIGIBLE</span> and skipped for commissions until new investment of any amount is done.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px"><span style="color:var(--muted)">$1,000</span><span style="color:var(--gold2)">→ $5,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px"><span style="color:var(--muted)">$2,500</span><span style="color:var(--gold2)">→ $12,500</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px"><span style="color:var(--muted)">$5,000</span><span style="color:var(--gold2)">→ $25,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--muted)">$10,000</span><span style="color:var(--gold2)">→ $50,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--muted)">$25,000</span><span style="color:var(--gold2)">→ $125,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--muted)">$50,000</span><span style="color:var(--gold2)">→ $250,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.02);border:1px solid rgba(201,168,76,0.06);border-radius:3px"><span style="color:var(--muted)">$100,000</span><span style="color:var(--gold2)">→ $500,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.02);border:1px solid rgba(201,168,76,0.06);border-radius:3px"><span style="color:var(--muted)">$250,000</span><span style="color:var(--gold2)">→ $1,250,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:4px 7px;background:rgba(201,168,76,0.02);border:1px solid rgba(201,168,76,0.06);border-radius:3px"><span style="color:var(--muted)">$500,000</span><span style="color:var(--gold2)">→ $2,500,000</span></div>
+          </div>
+          <div style="margin-top:8px;padding:4px 8px;background:rgba(201,168,76,0.04);border-radius:3px;border:1px solid rgba(201,168,76,0.1)">
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.45);line-height:1.6">Restaking does not reset the commission cap counter for that position. Newer investment is required after completing 5x cap for previous positions. Larger packages therefore unlock much higher total earning potential from the same network.</div>
+          </div>
+        </div>
+
+        <!-- Commission Status -->
+        <div>
+          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:5px">Commission Status</div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;background:rgba(62,207,142,0.05);border:1px solid rgba(62,207,142,0.15);border-radius:4px">
+              <span class="tag tag-eli" style="flex-shrink:0;margin-top:1px">● ELIGIBLE</span>
+              <span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Has atleast one active LP position locked, referral cap not reached and meets the minimum direct referral count for that level. Commission is paid immediately on each downline investment.</span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;background:rgba(224,80,80,0.05);border:1px solid rgba(224,80,80,0.12);border-radius:4px">
+              <span class="tag tag-ine" style="flex-shrink:0;margin-top:1px">✕ INELIGIBLE</span>
+              <span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">No active LP position, or the 5× commission cap for that position has been reached. Commissions are skipped and passed to the next eligible upline. To become eligible, an active investment is to be locked.</span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;background:rgba(255,184,0,0.05);border:1px solid rgba(255,184,0,0.12);border-radius:4px">
+              <span class="tag tag-pau" style="flex-shrink:0;margin-top:1px">⏸ PAUSED</span>
+              <span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Active LP position exists, referral cap not reached, but investment is not locked. Commissions resume only after restaking that position.</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">05</span></div>
+</div>
+
+<!-- ══════════════════════════════════════════ PAGE 6 — STAKING REWARDS -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Staking Rewards</span></div>
+  <div class="pc" style="display:flex;flex-direction:column">
+
+    <!-- Title row -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;flex-shrink:0">
+      <div class="stitle" style="font-size:44px">How Staking Works</div>
+      <div style="max-width:380px;text-align:right;font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.65">Platform tokens accumulate <strong style="color:var(--cream)">every second</strong> during your active lock. Your rate is fixed at lock time based on package tier, duration, and streak level. Claim at any point — your lock and streak are never affected.</div>
+    </div>
+
+    <!-- Visual: General accumulation concept -->
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:8px 12px;margin-bottom:8px;flex-shrink:0">
+      <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:8px">REWARD ACCUMULATION — HOW STREAK LEVEL AFFECTS TOTAL RETURN</div>
+
+      <!-- Lock timeline -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="font-family:var(--fm);font-size:7px;color:var(--muted);white-space:nowrap">Lock Start</div>
+        <div style="flex:1;position:relative;height:10px">
+          <div style="height:100%;background:rgba(255,255,255,0.04);border-radius:5px;border:1px solid rgba(201,168,76,0.1)"></div>
+          <div style="position:absolute;top:0;left:0;width:62%;height:100%;background:linear-gradient(90deg,rgba(201,168,76,0.35),rgba(201,168,76,0.08));border-radius:5px"></div>
+          <div style="position:absolute;top:-14px;left:62%;transform:translateX(-50%);font-family:var(--fm);font-size:7px;color:var(--gold);white-space:nowrap">↓ Claim anytime</div>
+          <div style="position:absolute;top:0;left:62%;width:1px;height:100%;background:var(--gold);opacity:0.5"></div>
+        </div>
+        <div style="font-family:var(--fm);font-size:7px;color:var(--muted);white-space:nowrap">Lock Expiry</div>
+      </div>
+      <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.35);margin-bottom:8px;text-align:center;line-height:1.5">Rewards accrue every second from lock start to expiry · claiming at any point resets only the claimed portion · lock, remaining time, and streak are fully preserved</div>
+
+      <!-- Streak comparison bars -->
+      <div style="font-family:var(--fm);font-size:7px;color:rgba(201,168,76,0.5);letter-spacing:1px;margin-bottom:5px">STREAK LEVEL — ILLUSTRATIVE IMPACT ON TOTAL REWARD AT EXPIRY</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:58px;flex-shrink:0;text-align:right;font-family:var(--fm);font-size:7px;color:var(--muted)">STREAK 0</div>
+          <div style="flex:1;height:16px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(126,200,227,0.15);overflow:hidden;position:relative">
+            <div style="position:absolute;top:0;left:0;width:70%;height:100%;background:linear-gradient(90deg,rgba(126,200,227,0.25),rgba(126,200,227,0.05))"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 8px"><span style="font-family:var(--fm);font-size:7px;color:rgba(126,200,227,0.7)">Base rate only — no streak bonus</span></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:58px;flex-shrink:0;text-align:right;font-family:var(--fm);font-size:7px;color:var(--gold)">STREAK 1</div>
+          <div style="flex:1;height:16px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(168,216,168,0.2);overflow:hidden;position:relative">
+            <div style="position:absolute;top:0;left:0;width:80%;height:100%;background:linear-gradient(90deg,rgba(168,216,168,0.28),rgba(168,216,168,0.05))"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 8px"><span style="font-family:var(--fm);font-size:7px;color:rgba(168,216,168,0.75)">Base rate + 1× streak bonus — one consecutive restake</span></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:58px;flex-shrink:0;text-align:right;font-family:var(--fm);font-size:7px;color:var(--gold)">STREAK 2</div>
+          <div style="flex:1;height:16px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(62,207,142,0.2);overflow:hidden;position:relative">
+            <div style="position:absolute;top:0;left:0;width:90%;height:100%;background:linear-gradient(90deg,rgba(62,207,142,0.28),rgba(62,207,142,0.05))"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 8px"><span style="font-family:var(--fm);font-size:7px;color:rgba(62,207,142,0.75)">Base rate + 2× streak bonus — two consecutive restakes</span></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:58px;flex-shrink:0;text-align:right;font-family:var(--fm);font-size:7px;color:var(--gold2)">STREAK 3</div>
+          <div style="flex:1;height:16px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(201,168,76,0.35);overflow:hidden;position:relative">
+            <div style="position:absolute;top:0;left:0;width:100%;height:100%;background:linear-gradient(90deg,rgba(201,168,76,0.35),rgba(201,168,76,0.08))"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 8px"><span style="font-family:var(--fm);font-size:7px;color:rgba(240,208,128,0.85)">Base rate + 3× streak bonus — maximum tier · 3+ consecutive restakes</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom: 2 columns -->
+    <div style="display:flex;gap:10px;flex:1;min-height:0">
+
+      <!-- Left: Lifecycle steps -->
+      <div style="flex:1;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">STAKING LIFECYCLE</div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1">
+          <div style="display:flex;gap:7px;align-items:flex-start;padding:5px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;flex:1">
+            <div style="font-family:var(--fd);font-size:14px;color:var(--gold);flex-shrink:0;line-height:1;margin-top:1px">①</div>
+            <div><div style="font-family:var(--fm);font-size:7px;color:var(--cream);margin-bottom:2px">LOCK INVESTMENT</div><div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);line-height:1.55">Choose a package and lock duration (default - 90 days). Your staking rate is set at this moment and remains fixed for the entire lock period — regardless of market or platform changes.</div></div>
+          </div>
+          <div style="text-align:center;font-size:8px;color:rgba(201,168,76,0.25);line-height:1">↓</div>
+          <div style="display:flex;gap:7px;align-items:flex-start;padding:5px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;flex:1">
+            <div style="font-family:var(--fd);font-size:14px;color:var(--gold);flex-shrink:0;line-height:1;margin-top:1px">②</div>
+            <div><div style="font-family:var(--fm);font-size:7px;color:var(--cream);margin-bottom:2px">REWARDS ACCUMULATE</div><div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);line-height:1.55">Tokens accrue every second from lock start to expiry. <br>At any moment, earned reward = Rate × (Time Elapsed ÷ Lock Duration) × Amount Invested.</div></div>
+          </div>
+          <div style="text-align:center;font-size:8px;color:rgba(201,168,76,0.25);line-height:1">↓</div>
+          <div style="display:flex;gap:7px;align-items:flex-start;padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.18);border-radius:4px;flex:1">
+            <div style="font-family:var(--fd);font-size:14px;color:var(--gold2);flex-shrink:0;line-height:1;margin-top:1px">③</div>
+            <div><div style="font-family:var(--fm);font-size:7px;color:var(--cream);margin-bottom:2px">CLAIM AT ANY TIME</div><div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);line-height:1.55">Withdraw accumulated tokens at the live market price. Claiming does not end or reset your lock. <br>Remaining rewards continue accumulating from where they left off.</div></div>
+          </div>
+          <div style="text-align:center;font-size:8px;color:rgba(201,168,76,0.25);line-height:1">↓</div>
+          <div style="display:flex;gap:7px;align-items:flex-start;padding:5px 8px;background:var(--panel);border:1px solid var(--border);border-radius:4px;flex:1">
+            <div style="font-family:var(--fd);font-size:14px;color:var(--gold);flex-shrink:0;line-height:1;margin-top:1px">④</div>
+            <div><div style="font-family:var(--fm);font-size:7px;color:var(--cream);margin-bottom:2px">RESTAKE &amp; BUILD STREAK</div><div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);line-height:1.55">Restaking the same duration after expiry increments your streak level (up to 3), unlocking progressively higher bonus rates on every future cycle.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.1);flex-shrink:0"></div>
+
+      <!-- Right: Eligibility + Key facts -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+
+        <div style="flex:1;display:flex;flex-direction:column;gap:0">
+          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:6px;text-transform:uppercase">Staking Eligibility</div>
+          <div style="flex:1;padding:7px 10px;background:rgba(62,207,142,0.05);border:1px solid rgba(62,207,142,0.18);border-left:3px solid var(--success);border-radius:4px 4px 0 0;display:flex;flex-direction:column;justify-content:center;gap:4px">
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="font-size:13px;color:var(--success);line-height:1;flex-shrink:0">✓</span>
+              <span style="font-family:var(--fm);font-size:7px;color:rgba(237,232,220,0.6)">$100 and above</span>
+            </div>
+            <div style="font-family:var(--fm);font-size:7px;color:var(--muted);line-height:1.6;padding-left:20px">$100 · $250 · $500 · $1k · $2.5k · $5k · $10k · $25k · $50k · $100k · $250k · $500k</div>
+          </div>
+          <div style="height:1px;background:linear-gradient(90deg,var(--gold),transparent);opacity:0.45;flex-shrink:0"></div>
+          <div style="flex:1;padding:7px 10px;background:rgba(224,80,80,0.05);border:1px solid rgba(224,80,80,0.18);border-left:3px solid var(--danger);border-top:none;border-radius:0 0 4px 4px;display:flex;flex-direction:column;justify-content:center;gap:4px">
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="font-size:13px;color:var(--danger);line-height:1;flex-shrink:0">✕</span>
+              <span style="font-family:var(--fm);font-size:7px;color:rgba(237,232,220,0.6)">$25 and $50 packages</span>
+            </div>
+            <div style="font-family:var(--fm);font-size:7px;color:var(--muted);line-height:1.6;padding-left:20px">LP fees + referral commissions only — no staking rewards issued</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+          <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.12);border-radius:3px">
+            <div style="font-family:var(--fm);font-size:7px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">RATE LOCKED AT ENTRY</div>
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.45);line-height:1.55">Fixed at lock time. Does not change with market or platform updates during the active period.</div>
+          </div>
+          <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.12);border-radius:3px">
+            <div style="font-family:var(--fm);font-size:7px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">STREAK RESETS</div>
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.45);line-height:1.55">Switching to a different lock duration or missing a restake cycle resets your streak back to 0.</div>
+          </div>
+          <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.12);border-radius:3px">
+            <div style="font-family:var(--fm);font-size:7px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">MULTIPLE CLAIMS</div>
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.45);line-height:1.55">You can claim as many times as you like during a lock. Each claim only resets the portion claimed.</div>
+          </div>
+          <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.12);border-radius:3px">
+            <div style="font-family:var(--fm);font-size:7px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">TOKEN CONVERSION</div>
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.45);line-height:1.55">Rewards are denominated in USDT and converted to platform tokens at the live price at the moment of claim.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">06</span></div>
+</div>
+
+<!-- ══════════════════════════════════════════ PAGE 7 — REWARD TABLES (7 & 30 DAYS) -->
+
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Reward Tables · 7 &amp; 30 Days</span></div>
+  <div class="pc" style="display:flex;flex-direction:column;gap:5px">
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+      <div>
+        <div class="stitle" style="font-size:28px;line-height:1">Staking Reward Tables</div>
+        <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);margin-top:2px">7 &amp; 30 Day Lock Durations &nbsp;·&nbsp; Investment (USDT) · Rate · Reward at each Streak Level</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+        <span class="tag tag-ine" style="font-size:6px">✕ $25 &amp; $50 — No Staking Rewards</span>
+        <span style="font-family:var(--fm);font-size:6px;color:var(--muted)">S0 = Base · S1 · S2 · S3 = Max Streak</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0;flex:1;min-height:0">
+
+      <!-- 7 Days -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="padding:5px 10px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:4px;display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:var(--fd);font-size:18px;color:var(--gold);letter-spacing:2px;line-height:1">7 DAYS</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--muted)">Flat rate · no streak bonus</div>
+        </div>
+        <table class="rt" style="flex:1">
+          <tr><th class="la">Package</th><th>Rate</th><th>Reward</th></tr>
+          <tr><td class="la">$100</td><td class="ra">1.0%</td><td>$1.00</td></tr>
+          <tr><td class="la">$250</td><td class="ra">1.0%</td><td>$2.50</td></tr>
+          <tr><td class="la">$500</td><td class="ra">1.1%</td><td>$5.50</td></tr>
+          <tr><td class="la">$1,000</td><td class="ra">1.1%</td><td>$11</td></tr>
+          <tr><td class="la">$2,500</td><td class="ra">1.2%</td><td>$30</td></tr>
+          <tr><td class="la">$5,000</td><td class="ra">1.2%</td><td>$60</td></tr>
+          <tr><td class="la">$10,000</td><td class="ra">1.3%</td><td>$130</td></tr>
+          <tr><td class="la">$25,000</td><td class="ra">1.3%</td><td>$325</td></tr>
+          <tr><td class="la">$50,000</td><td class="ra">1.4%</td><td>$700</td></tr>
+          <tr><td class="la">$100,000</td><td class="ra">1.4%</td><td>$1,400</td></tr>
+          <tr><td class="la">$250,000</td><td class="ra">1.5%</td><td>$3,750</td></tr>
+          <tr><td class="la">$500,000</td><td class="ra">1.5%</td><td>$7,500</td></tr>
+        </table>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.15);margin:0 14px;flex-shrink:0"></div>
+
+      <!-- 30 Days -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="padding:5px 10px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:4px;display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:var(--fd);font-size:18px;color:var(--gold);letter-spacing:2px;line-height:1">30 DAYS</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--muted)">+0.5% per streak level · max +1.5%</div>
+        </div>
+        <table class="rt" style="flex:1">
+          <tr><th class="la">Package</th><th>Rate</th><th>S0</th><th>S1</th><th>S2</th><th>S3</th></tr>
+          <tr><td class="la">$100</td><td class="ra">6.0%</td><td>$6</td><td>$6.50</td><td>$7</td><td>$7.50</td></tr>
+          <tr><td class="la">$250</td><td class="ra">6.0%</td><td>$15</td><td>$16.25</td><td>$17.50</td><td>$18.75</td></tr>
+          <tr><td class="la">$500</td><td class="ra">6.25%</td><td>$31.25</td><td>$33.75</td><td>$36.25</td><td>$38.75</td></tr>
+          <tr><td class="la">$1,000</td><td class="ra">6.25%</td><td>$62.50</td><td>$67.50</td><td>$72.50</td><td>$77.50</td></tr>
+          <tr><td class="la">$2,500</td><td class="ra">6.5%</td><td>$163</td><td>$175</td><td>$188</td><td>$200</td></tr>
+          <tr><td class="la">$5,000</td><td class="ra">6.5%</td><td>$325</td><td>$350</td><td>$375</td><td>$400</td></tr>
+          <tr><td class="la">$10,000</td><td class="ra">6.75%</td><td>$675</td><td>$725</td><td>$775</td><td>$825</td></tr>
+          <tr><td class="la">$25,000</td><td class="ra">6.75%</td><td>$1,700</td><td>$1,800</td><td>$1,900</td><td>$2,100</td></tr>
+          <tr><td class="la">$50,000</td><td class="ra">7.0%</td><td>$3,500</td><td>$3,750</td><td>$4,000</td><td>$4,250</td></tr>
+          <tr><td class="la">$100,000</td><td class="ra">7.0%</td><td>$7,000</td><td>$7,500</td><td>$8,000</td><td>$8,500</td></tr>
+          <tr><td class="la">$250,000</td><td class="ra">7.25%</td><td>$18,100</td><td>$19,400</td><td>$20,600</td><td>$21,900</td></tr>
+          <tr><td class="la">$500,000</td><td class="ra">7.5%</td><td>$37,500</td><td>$40,000</td><td>$42,500</td><td>$45,000</td></tr>
+        </table>
+      </div>
+
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">07</span></div>
+</div>
+
+<!-- ══════════════════════════════════════════ PAGE 8 — REWARD TABLES (60 & 90 DAYS) -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Reward Tables · 60 &amp; 90 Days</span></div>
+  <div class="pc" style="display:flex;flex-direction:column;gap:5px">
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+      <div>
+        <div class="stitle" style="font-size:28px;line-height:1">Staking Reward Tables</div>
+        <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);margin-top:2px">60 &amp; 90 Day Lock Durations &nbsp;·&nbsp; Investment (USDT) · Rate · Reward at each Streak Level</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+        <span class="tag tag-ine" style="font-size:6px">✕ $25 &amp; $50 — No Staking Rewards</span>
+        <span style="font-family:var(--fm);font-size:6px;color:var(--muted)">S0 = Base · S1 · S2 · S3 = Max Streak &nbsp;·&nbsp; ★ Default lock</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0;flex:1;min-height:0">
+
+      <!-- 60 Days -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="padding:5px 10px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:4px;display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:var(--fd);font-size:18px;color:var(--gold);letter-spacing:2px;line-height:1">60 DAYS</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--muted)">+2.6% per streak level · max +7.8%</div>
+        </div>
+        <table class="rt" style="flex:1">
+          <tr><th class="la">Package</th><th>Rate</th><th>S0</th><th>S1</th><th>S2</th><th>S3</th></tr>
+          <tr><td class="la">$100</td><td class="ra">14.0%</td><td>$14</td><td>$16.60</td><td>$19.20</td><td>$21.80</td></tr>
+          <tr><td class="la">$250</td><td class="ra">14.5%</td><td>$36.25</td><td>$42.75</td><td>$49.25</td><td>$55.75</td></tr>
+          <tr><td class="la">$500</td><td class="ra">15.0%</td><td>$75</td><td>$88</td><td>$101</td><td>$114</td></tr>
+          <tr><td class="la">$1,000</td><td class="ra">15.0%</td><td>$150</td><td>$176</td><td>$202</td><td>$228</td></tr>
+          <tr><td class="la">$2,500</td><td class="ra">15.5%</td><td>$388</td><td>$453</td><td>$518</td><td>$583</td></tr>
+          <tr><td class="la">$5,000</td><td class="ra">16.0%</td><td>$800</td><td>$930</td><td>$1,100</td><td>$1,190</td></tr>
+          <tr><td class="la">$10,000</td><td class="ra">16.5%</td><td>$1,650</td><td>$1,910</td><td>$2,170</td><td>$2,430</td></tr>
+          <tr><td class="la">$25,000</td><td class="ra">17.0%</td><td>$4,250</td><td>$4,900</td><td>$5,550</td><td>$6,200</td></tr>
+          <tr><td class="la">$50,000</td><td class="ra">17.0%</td><td>$8,500</td><td>$9,800</td><td>$11,100</td><td>$12,400</td></tr>
+          <tr><td class="la">$100,000</td><td class="ra">17.5%</td><td>$17,500</td><td>$20,100</td><td>$22,700</td><td>$25,300</td></tr>
+          <tr><td class="la">$250,000</td><td class="ra">18.0%</td><td>$45,000</td><td>$51,500</td><td>$58,000</td><td>$64,500</td></tr>
+          <tr><td class="la">$500,000</td><td class="ra">18.0%</td><td>$90,000</td><td>$103,000</td><td>$116,000</td><td>$129,000</td></tr>
+        </table>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.15);margin:0 14px;flex-shrink:0"></div>
+
+      <!-- 90 Days -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="padding:5px 10px;background:rgba(240,208,128,0.08);border:1px solid rgba(240,208,128,0.3);border-radius:4px;display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:var(--fd);font-size:18px;color:var(--gold2);letter-spacing:2px;line-height:1">90 DAYS ★</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--gold);opacity:0.75">+3.0% per streak level · max +9.0% · default lock</div>
+        </div>
+        <table class="rt" style="flex:1">
+          <tr><th class="la">Package</th><th>Rate</th><th>S0</th><th>S1</th><th>S2</th><th>S3</th></tr>
+          <tr><td class="la">$100</td><td class="ra">25.0%</td><td>$25</td><td>$28</td><td>$31</td><td>$34</td></tr>
+          <tr><td class="la">$250</td><td class="ra">25.5%</td><td>$63.75</td><td>$71.25</td><td>$78.75</td><td>$86.25</td></tr>
+          <tr><td class="la">$500</td><td class="ra">26.0%</td><td>$130</td><td>$145</td><td>$160</td><td>$175</td></tr>
+          <tr><td class="la">$1,000</td><td class="ra">26.0%</td><td>$260</td><td>$290</td><td>$320</td><td>$350</td></tr>
+          <tr><td class="la">$2,500</td><td class="ra">26.5%</td><td>$663</td><td>$738</td><td>$813</td><td>$888</td></tr>
+          <tr><td class="la">$5,000</td><td class="ra">27.0%</td><td>$1,350</td><td>$1,500</td><td>$1,650</td><td>$1,800</td></tr>
+          <tr><td class="la">$10,000</td><td class="ra">27.5%</td><td>$2,750</td><td>$3,050</td><td>$3,350</td><td>$3,650</td></tr>
+          <tr><td class="la">$25,000</td><td class="ra">28.0%</td><td>$7,000</td><td>$7,750</td><td>$8,500</td><td>$9,250</td></tr>
+          <tr><td class="la">$50,000</td><td class="ra">28.5%</td><td>$14,250</td><td>$15,750</td><td>$17,250</td><td>$18,750</td></tr>
+          <tr><td class="la">$100,000</td><td class="ra">29.0%</td><td>$29,000</td><td>$32,000</td><td>$35,000</td><td>$38,000</td></tr>
+          <tr><td class="la">$250,000</td><td class="ra">29.5%</td><td>$73,750</td><td>$81,250</td><td>$88,750</td><td>$96,250</td></tr>
+          <tr><td class="la">$500,000</td><td class="ra">30.0%</td><td>$150,000</td><td>$165,000</td><td>$180,000</td><td>$195,000</td></tr>
+        </table>
+      </div>
+
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">08</span></div>
+</div>
+
+<!-- ══════════════════════════════════════════ PAGE 9 — REWARD TABLES (180 & 360 DAYS) -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Reward Tables · 180 &amp; 360 Days</span></div>
+  <div class="pc" style="display:flex;flex-direction:column;gap:5px">
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+      <div>
+        <div class="stitle" style="font-size:28px;line-height:1">Staking Reward Tables</div>
+        <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.5);margin-top:2px">180 &amp; 360 Day Lock Durations &nbsp;·&nbsp; Investment (USDT) · Rate · Reward at each Streak Level</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+        <span class="tag tag-ine" style="font-size:6px">✕ $25 &amp; $50 — No Staking Rewards</span>
+        <span style="font-family:var(--fm);font-size:6px;color:var(--muted)">S0 = Base · S1 · S2 · S3 = Max Streak</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0;flex:1;min-height:0">
+
+      <!-- 180 Days -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="padding:5px 10px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:4px;display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:var(--fd);font-size:18px;color:var(--gold);letter-spacing:2px;line-height:1">180 DAYS</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--muted)">+5.0% per streak level · max +15.0%</div>
+        </div>
+        <table class="rt" style="flex:1">
+          <tr><th class="la">Package</th><th>Rate</th><th>S0</th><th>S1</th><th>S2</th><th>S3</th></tr>
+          <tr><td class="la">$100</td><td class="ra">68%</td><td>$68</td><td>$73</td><td>$78</td><td>$83</td></tr>
+          <tr><td class="la">$250</td><td class="ra">69%</td><td>$173</td><td>$185</td><td>$198</td><td>$210</td></tr>
+          <tr><td class="la">$500</td><td class="ra">70%</td><td>$350</td><td>$375</td><td>$400</td><td>$425</td></tr>
+          <tr><td class="la">$1,000</td><td class="ra">70%</td><td>$700</td><td>$750</td><td>$800</td><td>$850</td></tr>
+          <tr><td class="la">$2,500</td><td class="ra">71%</td><td>$1,780</td><td>$1,900</td><td>$2,030</td><td>$2,150</td></tr>
+          <tr><td class="la">$5,000</td><td class="ra">72%</td><td>$3,600</td><td>$3,850</td><td>$4,100</td><td>$4,350</td></tr>
+          <tr><td class="la">$10,000</td><td class="ra">73%</td><td>$7,300</td><td>$7,800</td><td>$8,300</td><td>$8,800</td></tr>
+          <tr><td class="la">$25,000</td><td class="ra">74%</td><td>$18,500</td><td>$19,750</td><td>$21,000</td><td>$22,250</td></tr>
+          <tr><td class="la">$50,000</td><td class="ra">75%</td><td>$37,500</td><td>$40,000</td><td>$42,500</td><td>$45,000</td></tr>
+          <tr><td class="la">$100,000</td><td class="ra">75%</td><td>$75,000</td><td>$80,000</td><td>$85,000</td><td>$90,000</td></tr>
+          <tr><td class="la">$250,000</td><td class="ra">76%</td><td>$190,000</td><td>$202,500</td><td>$215,000</td><td>$227,500</td></tr>
+          <tr><td class="la">$500,000</td><td class="ra">77%</td><td>$385,000</td><td>$410,000</td><td>$435,000</td><td>$460,000</td></tr>
+        </table>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.15);margin:0 14px;flex-shrink:0"></div>
+
+      <!-- 360 Days -->
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <div style="padding:5px 10px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:4px;display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:var(--fd);font-size:18px;color:var(--gold2);letter-spacing:2px;line-height:1">360 DAYS</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--muted)">+10.0% per streak level · max +30.0%</div>
+        </div>
+        <table class="rt" style="flex:1">
+          <tr><th class="la">Package</th><th>Rate</th><th>S0</th><th>S1</th><th>S2</th><th>S3</th></tr>
+          <tr><td class="la">$100</td><td class="ra">168%</td><td>$168</td><td>$178</td><td>$188</td><td>$198</td></tr>
+          <tr><td class="la">$250</td><td class="ra">169%</td><td>$423</td><td>$448</td><td>$473</td><td>$498</td></tr>
+          <tr><td class="la">$500</td><td class="ra">170%</td><td>$850</td><td>$900</td><td>$950</td><td>$1,000</td></tr>
+          <tr><td class="la">$1,000</td><td class="ra">170%</td><td>$1,700</td><td>$1,800</td><td>$1,900</td><td>$2,000</td></tr>
+          <tr><td class="la">$2,500</td><td class="ra">172%</td><td>$4,300</td><td>$4,550</td><td>$4,800</td><td>$5,050</td></tr>
+          <tr><td class="la">$5,000</td><td class="ra">174%</td><td>$8,700</td><td>$9,200</td><td>$9,700</td><td>$10,200</td></tr>
+          <tr><td class="la">$10,000</td><td class="ra">175%</td><td>$17,500</td><td>$18,500</td><td>$19,500</td><td>$20,500</td></tr>
+          <tr><td class="la">$25,000</td><td class="ra">177%</td><td>$44,250</td><td>$46,750</td><td>$49,250</td><td>$51,750</td></tr>
+          <tr><td class="la">$50,000</td><td class="ra">179%</td><td>$89,500</td><td>$94,500</td><td>$99,500</td><td>$104,500</td></tr>
+          <tr><td class="la">$100,000</td><td class="ra">180%</td><td>$180,000</td><td>$190,000</td><td>$200,000</td><td>$210,000</td></tr>
+          <tr><td class="la">$250,000</td><td class="ra">182%</td><td>$455,000</td><td>$480,000</td><td>$505,000</td><td>$530,000</td></tr>
+          <tr><td class="la">$500,000</td><td class="ra">184%</td><td>$920,000</td><td>$970,000</td><td>$1,020,000</td><td>$1,070,000</td></tr>
+        </table>
+      </div>
+
+    </div>
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">09</span></div>
+</div>
+
+<!-- ══════════════════════════════════════════ PAGE 10 — CONCLUSION -->
+<div class="page">
+  <div class="gt"></div>
+  <div class="gb"></div>
+  <div class="ph"><span class="ph-logo">HORDEX</span><span class="ph-pg">Why Investing Matters</span></div>
+  <div class="pc" style="display:flex;flex-direction:column;gap:8px">
+
+    <!-- Title -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-shrink:0">
+      <div>
+        <div class="stitle" style="font-size:40px;line-height:1">Why Investing Matters</div>
+        <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.5);margin-top:4px;max-width:360px;line-height:1.6">The earlier you commit capital, the longer your streak compounds, the more tokens you accumulate at current price — and the stronger your passive income network becomes.</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:var(--fd);font-size:10px;letter-spacing:3px;color:rgba(201,168,76,0.5)">HORDEX PLATFORM</div>
+        <div style="font-family:var(--fm);font-size:6.5px;color:var(--muted);margin-top:2px">Decentralised · Transparent · Rewarding</div>
+      </div>
+    </div>
+
+    <!-- Platform advantages — 3 cards -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;flex-shrink:0">
+
+      <div style="padding:7px 9px;background:var(--panel);border:1px solid var(--border);border-top:2px solid var(--gold);border-radius:4px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <div style="width:18px;height:18px;border-radius:50%;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;color:var(--gold)">◆</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--cream);letter-spacing:0.5px">RATE CERTAINTY</div>
+        </div>
+        <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.48);line-height:1.55">Your staking rate is fixed the moment you lock. No market turbulence or platform changes alter what you earn — giving you predictable, calculable returns from day one.</div>
+      </div>
+
+      <div style="padding:7px 9px;background:var(--panel);border:1px solid var(--border);border-top:2px solid var(--gold);border-radius:4px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <div style="width:18px;height:18px;border-radius:50%;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;color:var(--gold2)">★</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--cream);letter-spacing:0.5px">STREAK MULTIPLIER</div>
+        </div>
+        <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.48);line-height:1.55">Every consecutive restake in the same duration elevates your streak tier, unlocking progressively higher bonus rates that reward loyalty with compounding advantages each cycle.</div>
+      </div>
+
+      <div style="padding:7px 9px;background:var(--panel);border:1px solid var(--border);border-top:2px solid rgba(62,207,142,0.7);border-radius:4px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <div style="width:18px;height:18px;border-radius:50%;background:rgba(62,207,142,0.1);border:1px solid rgba(62,207,142,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;color:var(--success)">↑</div>
+          <div style="font-family:var(--fm);font-size:7px;color:var(--cream);letter-spacing:0.5px">CLAIM ANYTIME</div>
+        </div>
+        <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.48);line-height:1.55">Withdraw token rewards at any point without ending your lock or resetting your streak. Capital stays deployed, streak continues building, and liquidity remains accessible.</div>
+      </div>
+
+    </div>
+
+    <!-- Bottom: two columns -->
+    <div style="display:flex;gap:0;flex:1;min-height:0">
+
+      <!-- Left: Why early investing -->
+      <div style="flex:1;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:4px">WHY EARLY INVESTING MATTERS</div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1">
+
+          <div style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:7px 10px;background:var(--panel);border:1px solid var(--border);border-radius:3px">
+            <div style="font-family:var(--fd);font-size:20px;color:var(--gold);flex-shrink:0;line-height:1;margin-top:1px">01</div>
+            <div>
+              <div style="font-family:var(--fm);font-size:8px;color:var(--cream);margin-bottom:3px">MORE TOKENS PER USDT CURRENTLY</div>
+              <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.45);line-height:1.5">Platform tokens are priced at live market rate at claim time. Investing now means your fixed USDT reward converts into more tokens at current lower price — a structural advantage that diminishes as the platform grows.</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:7px 10px;background:var(--panel);border:1px solid var(--border);border-radius:3px">
+            <div style="font-family:var(--fd);font-size:20px;color:var(--gold);flex-shrink:0;line-height:1;margin-top:1px">02</div>
+            <div>
+              <div style="font-family:var(--fm);font-size:8px;color:var(--cream);margin-bottom:3px">BUILD YOUR STREAK SOONER</div>
+              <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.45);line-height:1.5">Streak tiers require multiple consecutive lock cycles to reach. Starting early means reaching Streak 3 — the maximum bonus tier — sooner, and every additional cycle at that tier compounds your returns further.</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:7px 10px;background:var(--panel);border:1px solid var(--border);border-radius:3px">
+            <div style="font-family:var(--fd);font-size:20px;color:var(--gold);flex-shrink:0;line-height:1;margin-top:1px">03</div>
+            <div>
+              <div style="font-family:var(--fm);font-size:8px;color:var(--cream);margin-bottom:3px">GROW YOUR REFERRAL NETWORK</div>
+              <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.45);line-height:1.5">Referral commissions scale with the size and activity of your network. Building it early means more cycles of passive income accumulating — compounding earnings well beyond your own investment returns alone.</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:7px 10px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.15);border-radius:3px">
+            <div style="font-family:var(--fd);font-size:20px;color:var(--gold2);flex-shrink:0;line-height:1;margin-top:1px">04</div>
+            <div>
+              <div style="font-family:var(--fm);font-size:8px;color:var(--cream);margin-bottom:3px">LOCK IN CURRENT RATES</div>
+              <div style="font-family:var(--fb);font-size:8px;color:rgba(237,232,220,0.45);line-height:1.5">Staking rates are set at lock time. Entering now locks in current published rates for the full duration of your lock — protecting you from any future platform-wide adjustments that may apply only to new entrants.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="width:1px;background:rgba(201,168,76,0.1);margin:0 10px;flex-shrink:0"></div>
+
+      <!-- Right: metrics + streak visual + quote -->
+      <div style="flex:1;display:flex;flex-direction:column">
+        <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:4px">PLATFORM AT A GLANCE</div>
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;flex-shrink:0">
+            <div style="padding:6px 8px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.15);border-radius:3px;text-align:center">
+              <div style="font-family:var(--fd);font-size:24px;color:var(--gold2);line-height:1">184%</div>
+              <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:2px;letter-spacing:0.5px">MAX BASE REWARD RATE</div>
+            </div>
+            <div style="padding:6px 8px;background:rgba(62,207,142,0.04);border:1px solid rgba(62,207,142,0.12);border-radius:3px;text-align:center">
+              <div style="font-family:var(--fd);font-size:24px;color:var(--success);line-height:1">3×</div>
+              <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:2px;letter-spacing:0.5px">MAX STREAK BONUS</div>
+            </div>
+            <div style="padding:6px 8px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.15);border-radius:3px;text-align:center">
+              <div style="font-family:var(--fd);font-size:24px;color:var(--gold);line-height:1">12</div>
+              <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:2px;letter-spacing:0.5px">INVESTMENT TIERS</div>
+            </div>
+            <div style="padding:6px 8px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.15);border-radius:3px;text-align:center">
+              <div style="font-family:var(--fd);font-size:24px;color:var(--gold);line-height:1">6</div>
+              <div style="font-family:var(--fm);font-size:5.5px;color:var(--muted);margin-top:2px;letter-spacing:0.5px">LOCK DURATIONS</div>
+            </div>
+          </div>
+
+          <!-- Streak progression visual -->
+          <div style="flex:1;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 8px;display:flex;flex-direction:column">
+            <div style="font-family:var(--fm);font-size:6px;color:rgba(201,168,76,0.55);letter-spacing:1px;margin-bottom:4px">STREAK TIER — TOTAL REWARD GROWTH</div>
+            <div style="display:flex;flex-direction:column;gap:5px;flex:1;justify-content:center">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:46px;font-family:var(--fm);font-size:6.5px;color:var(--muted);text-align:right;flex-shrink:0">STREAK 0</div>
+                <div style="flex:1;height:13px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(126,200,227,0.15);overflow:hidden;position:relative">
+                  <div style="position:absolute;top:0;left:0;width:55%;height:100%;background:linear-gradient(90deg,rgba(126,200,227,0.28),rgba(126,200,227,0.04))"></div>
+                  <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 6px"><span style="font-family:var(--fm);font-size:6px;color:rgba(126,200,227,0.75)">Base rate only · no bonus</span></div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:46px;font-family:var(--fm);font-size:6.5px;color:var(--gold);text-align:right;flex-shrink:0">STREAK 1</div>
+                <div style="flex:1;height:13px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(168,216,168,0.2);overflow:hidden;position:relative">
+                  <div style="position:absolute;top:0;left:0;width:70%;height:100%;background:linear-gradient(90deg,rgba(168,216,168,0.3),rgba(168,216,168,0.05))"></div>
+                  <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 6px"><span style="font-family:var(--fm);font-size:6px;color:rgba(168,216,168,0.8)">Base + 1× streak bonus</span></div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:46px;font-family:var(--fm);font-size:6.5px;color:var(--gold);text-align:right;flex-shrink:0">STREAK 2</div>
+                <div style="flex:1;height:13px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(62,207,142,0.2);overflow:hidden;position:relative">
+                  <div style="position:absolute;top:0;left:0;width:85%;height:100%;background:linear-gradient(90deg,rgba(62,207,142,0.3),rgba(62,207,142,0.05))"></div>
+                  <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 6px"><span style="font-family:var(--fm);font-size:6px;color:rgba(62,207,142,0.8)">Base + 2× streak bonus</span></div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:46px;font-family:var(--fm);font-size:6.5px;color:var(--gold2);text-align:right;flex-shrink:0">STREAK 3</div>
+                <div style="flex:1;height:13px;background:rgba(255,255,255,0.03);border-radius:2px;border:1px solid rgba(201,168,76,0.35);overflow:hidden;position:relative">
+                  <div style="position:absolute;top:0;left:0;width:100%;height:100%;background:linear-gradient(90deg,rgba(201,168,76,0.38),rgba(201,168,76,0.08))"></div>
+                  <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 6px"><span style="font-family:var(--fm);font-size:6px;color:rgba(240,208,128,0.9)">Base + 3× bonus · MAXIMUM TIER</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Closing quote -->
+          <div style="padding:7px 10px;background:linear-gradient(135deg,rgba(201,168,76,0.08),rgba(201,168,76,0.02));border:1px solid rgba(201,168,76,0.2);border-radius:3px;flex-shrink:0">
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.65;text-align:center">Every day without a position is a day your streak isn't growing, your tokens aren't accumulating, and your network isn't earning.<br><span style="color:var(--gold2);font-weight:500">The best time to start was yesterday. The next best time is now.</span></div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+  <div class="pf"><span class="pfl" style="text-transform:none">www.hordex.io</span><span style="position:absolute;left:50%;transform:translateX(-50%);font-family:var(--fm);font-size:5.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.32);white-space:nowrap">0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D</span><span class="pfr">10</span></div>
+</div>
+
+</body>
+</html>

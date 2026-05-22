@@ -104,6 +104,13 @@
 }
 #mobileNavOverlay.open { display: block; }
 
+body.modal-open #mobileNav,
+body.modal-open footer {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
 #mobileNav {
   position: fixed;
   top: 0;
@@ -373,6 +380,29 @@
    Sidebar nav replaces horizontal tabs
 ═══════════════════════════════════════════ */
 @media (max-width: 768px) {
+  body { zoom: 0.9; }
+
+  /* Tab headings — mobile only */
+  .panel::before {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: 2.5px;
+    color: var(--gold);
+    padding: 4px 4px 0;
+    margin-bottom: 10px;
+  }
+  #panel-dashboard::before   { content: 'DASHBOARD'; }
+  #panel-investments::before { content: 'INVESTMENTS'; }
+  #panel-invest::before      { content: 'INVEST'; }
+  #panel-pool::before        { content: 'POOL'; }
+  #panel-genealogy::before   { content: 'GENEALOGY'; }
+  #panel-rewards::before     { content: 'REWARDS'; }
+  #panel-myinfo::before      { content: 'MY INFO'; }
+  #panel-history::before     { content: 'HISTORY'; }
+  #panel-owner::before       { content: 'OWNER'; }
+
   /* Show hamburger, hide desktop tabs */
   #hamburgerBtn { display: flex; }
   .tabs.visible { display: none !important; }
@@ -389,8 +419,8 @@
   #netPill { font-size: 11px; }
 
   /* Footer */
-  footer { padding: 16px 14px; font-size: 12px; }
-  .footer-contract { font-size: 10px; word-break: break-all; }
+  footer { padding: 10px 14px; font-size: 10px; letter-spacing: 1px; }
+  .footer-contract { font-size: 9px; word-break: break-all; margin-top: 4px; }
 
   /* Wallet dropdown */
   .wallet-dropdown { min-width: 140px; width: 92vw; max-width: 280px; }

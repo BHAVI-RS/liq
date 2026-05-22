@@ -26,8 +26,26 @@ async function main() {
 
   console.log("HordexToken deployed:", tokenAddress);
 
-  // Deploy Liquidity
-  const Liquidity = await hre.ethers.getContractFactory("Liquidity");
+  // Deploy LiquidityMath library
+  const LiquidityMath = await hre.ethers.getContractFactory("LiquidityMath");
+  const liquidityMath = await LiquidityMath.deploy();
+  await liquidityMath.waitForDeployment();
+  const libAddress = await liquidityMath.getAddress();
+  console.log("LiquidityMath deployed:", libAddress);
+
+  // Deploy LiquidityViewLib (linked to LiquidityMath)
+  const LiquidityViewLib = await hre.ethers.getContractFactory("LiquidityViewLib", {
+    libraries: { LiquidityMath: libAddress },
+  });
+  const liquidityViewLib = await LiquidityViewLib.deploy();
+  await liquidityViewLib.waitForDeployment();
+  const libViewAddress = await liquidityViewLib.getAddress();
+  console.log("LiquidityViewLib deployed:", libViewAddress);
+
+  // Deploy Liquidity (linked to both libraries)
+  const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
+    libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
+  });
 
   const liquidity = await Liquidity.deploy(
     UNI_ROUTER,
@@ -107,6 +125,12 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   fs.writeFileSync(
     path.join(__dirname, "..", "frontend", "contract-config.js"),
     config
+  );
+
+  const indexPath = path.join(__dirname, "..", "frontend", "index.html");
+  fs.writeFileSync(indexPath,
+    fs.readFileSync(indexPath, "utf8")
+      .replace(/contract-config\.js\?v=\d+/g, `contract-config.js?v=${Date.now()}`)
   );
 
   console.log("contract-config.js updated ✓ (root + frontend)");

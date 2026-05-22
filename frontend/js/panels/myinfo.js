@@ -23,10 +23,6 @@ async function loadMyInfo() {
       </div>
       <div class="info-grid">
         <div class="info-cell">
-          <div class="info-cell-label">STATUS</div>
-          <div class="info-cell-value" style="color:${user.isRegistered ? 'var(--success)' : 'var(--danger)'}">${user.isRegistered ? '✓ REGISTERED' : '✗ NOT REGISTERED'}</div>
-        </div>
-        <div class="info-cell">
           <div class="info-cell-label">MY ADDRESS</div>
           <div class="info-cell-value" style="word-break:break-all;">${walletAddress}</div>
         </div>

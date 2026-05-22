@@ -156,9 +156,9 @@ async function loadInvestments() {
       }
       const growthCls   = growthETH > 0.000001 ? 'dash-growth-pos' : growthETH < -0.000001 ? 'dash-growth-neg' : 'dash-growth-neu';
       const priceEth    = pool ? pool.priceEth : null;
-      const lpFmt       = parseFloat(ethers.utils.formatEther(lpAmount)).toFixed(8);
+      const lpFmt       = fmtNum(parseFloat(ethers.utils.formatEther(lpAmount)));
       const logoSrc     = td.meta && td.meta.logo ? `<img src="${td.meta.logo}" style="width:100%;height:100%;object-fit:contain;"/>` : '⬡';
-      const badgeHtml   = isRemoved ? `<span class="dash-inv-badge removed">REMOVED</span>` : isClaimed ? `<span class="dash-inv-badge claimed">CLAIMED</span>` : isUnlocked ? `<span class="dash-inv-badge unlocked">UNLOCKED</span>` : `<span class="dash-inv-badge locked">LOCKED</span>`;
+      const badgeHtml   = isRemoved ? `<span class="dash-inv-badge removed">REMOVED</span>` : isClaimed ? `<span class="dash-inv-badge claimed">CLAIMED</span>` : isUnlocked ? `<span class="dash-inv-badge unlocked">NOT LOCKED</span>` : `<span class="dash-inv-badge locked">LOCKED</span>`;
       const cdId        = `inv-cd-${i}`;
 
       const lockDurSecs = unlockTime - lockedAt;
@@ -221,20 +221,20 @@ async function loadInvestments() {
         <div class="dis-bar-active" style="left:${claimedPct.toFixed(3)}%; width:${pendingPct.toFixed(3)}%"></div>
       </div>`;
       const initialRewardStr = liveUSDTNow > 0
-        ? '$' + liveUSDTNow.toFixed(6) + ' USDT'
+        ? '$' + fmtNum(liveUSDTNow) + ' USDT'
         : '— USDT';
 
       let stakingFooterHtml = '';
       if (canClaimStaking) {
-        stakingFooterHtml = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${i}" onclick="claimStakingRewardForLock(${i})">CLAIM ${claimableTokensAtPrice.toFixed(4)} ${tokenSymbol}</button>`;
+        stakingFooterHtml = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${i}" onclick="claimStakingRewardForLock(${i})">CLAIM ${fmtNum(claimableTokensAtPrice)} ${tokenSymbol}</button>`;
       } else if (isRemoved) {
         stakingFooterHtml = `<div class="dis-staking-claimed">LP removed · staking rewards fully claimed</div>`;
       } else if (elapsedStaking >= lockDurForStaking) {
         stakingFooterHtml = `<div class="dis-staking-hint">Staking period complete · max reward reached</div>`;
       } else {
         const hint = liveUSDTNow > 0
-          ? `$${liveUSDTNow.toFixed(6)} USDT earned · $${perSecUSDT.toFixed(6)} USDT/sec`
-          : `Rewards accumulating · $${perSecUSDT.toFixed(6)} USDT/sec`;
+          ? `$${fmtNum(liveUSDTNow)} USDT earned · $${fmtNum(perSecUSDT)} USDT/sec`
+          : `Rewards accumulating · $${fmtNum(perSecUSDT)} USDT/sec`;
         stakingFooterHtml = `<div class="dis-staking-hint">${hint}</div>`;
       }
 
@@ -251,7 +251,7 @@ async function loadInvestments() {
              data-tokens-accumulated="${tokensAccumulated.toFixed(18)}"
              data-per-sec-usdt="${perSecUSDT.toFixed(12)}">
           <div class="dis-staking-header">
-            <span class="dis-sl-label">STAKING REWARD · ${rewardTotalUSDT.toLocaleString(undefined,{maximumFractionDigits:2})} USDT · ${lockDurLabel} · CONTINUOUS</span>
+            <span class="dis-sl-label">STAKING REWARD · ${fmtNum(rewardTotalUSDT)} USDT · ${lockDurLabel} · CONTINUOUS</span>
             <span class="dis-sl-reward">${initialRewardStr}</span>
           </div>
           ${isInActiveLock ? `<div class="dis-slots">${initialSlotHtml}</div>` : ''}
@@ -272,7 +272,6 @@ async function loadInvestments() {
         </div>`;
       } else if (isUnlocked) {
         actionColHtml = `<div id="${cdId}" class="dis-col dis-col-action" style="gap:8px;">
-          <button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i}, '${lock.token}', '${lpAmountHex}')" class="inv-action-btn inv-btn-remove">REMOVE LP</button>
           <button onclick="openStakeModal(${i})" class="inv-action-btn inv-btn-stake">${rewardTotalETH === 0 ? 'LOCK-IN' : 'STAKE'}</button>
         </div>`;
       } else {
@@ -288,24 +287,22 @@ async function loadInvestments() {
         ? `<button id="removeLPBtn-${i}" onclick="removeLP(${i}, '${lock.token}', '${lpAmountHex}')" style="background:transparent;border:1px solid #f87171;color:#f87171;border-radius:4px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;padding:9px 18px;cursor:pointer;transition:background 0.2s,color 0.2s;" onmouseover="this.style.background='rgba(248,113,113,0.15)'" onmouseout="this.style.background='transparent'">REMOVE LP</button>`
         : '';
 
-      // Per-duration streak summary: indices 1-5 = 30s/60s/90s/180s/360s
-      const _durStreakMeta = [[1,'30s'],[2,'60s'],[3,'90s'],[4,'180s'],[5,'360s']];
-      const streakLabel = _durStreakMeta.map(([idx, lbl]) => {
+      // Per-duration streak summary: indices 0-5 = 7s/30s/60s/90s/180s/360s
+      const _si = (idx, lbl) => {
         const cnt = restakeCounts[idx] || 0;
-        const dot = cnt >= 3
-          ? `<span style="color:var(--gold)">●</span>`
-          : cnt > 0
-            ? `<span style="color:var(--cream)">●</span>`
-            : `<span style="color:var(--muted)">○</span>`;
+        const dot = cnt >= 3 ? `<span style="color:var(--gold)">●</span>` : cnt > 0 ? `<span style="color:var(--cream)">●</span>` : `<span style="color:var(--muted)">○</span>`;
         return `${dot}&nbsp;${lbl}:${cnt >= 3 ? '<span style="color:var(--gold)">MAX</span>' : cnt}`;
-      }).join('&nbsp;&nbsp;');
+      };
+      const _sRow1 = [[0,'7s'],[1,'30s'],[2,'60s']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
+      const _sRow2 = [[3,'90s'],[4,'180s'],[5,'360s']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
+      const streakLabel = `<div class="inv-streak-wrap"><span>${_sRow1}</span><span>${_sRow2}</span></div>`;
 
       cards.push(`
         <div class="dash-inv-card${isClaimed ? ' claimed' : ''}" data-lock-index="${i}" data-eth-invested="${ethInvested.toFixed(12)}" data-eth-invested-wei="${lock.ethInvested.toHexString()}" data-restake-counts='${JSON.stringify(restakeCounts)}' data-lock-dur-secs="${lockDurSecs}">
           <div class="dash-inv-header">
             <div class="dash-inv-logo">${logoSrc}</div>
             <div class="dash-inv-title"><div class="sym">${td.symbol}</div><div class="nm">${td.name}</div></div>
-            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">${badgeHtml}<button class="lock-hist-btn" onclick="showLockHistory(${i})">LOCK HISTORY</button></div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">${badgeHtml}</div>
           </div>
           <div class="dash-inv-summary">
             <div class="dis-col">
@@ -319,7 +316,7 @@ async function loadInvestments() {
             </div>
             <div class="dis-col">
               <div class="dis-label">REWARDS CLAIMED</div>
-              <div class="dis-val" style="color:#4ade80;">${totalTokensClaimed > 0 ? totalTokensClaimed.toFixed(4) + ' ' + tokenSymbol : '—'}</div>
+              <div class="dis-val" style="color:#4ade80;">${totalTokensClaimed > 0 ? fmtNum(totalTokensClaimed) + ' ' + tokenSymbol : '—'}</div>
             </div>
             ${actionColHtml}
           </div>
@@ -331,8 +328,7 @@ async function loadInvestments() {
             ${!isRemoved ? `<div class="did-row">
               <span class="did-label">REF CAP${capTagHtml}</span>
               <span class="did-val">
-                ${fmtUSDT(commissionsCapUsed)} / ${fmtUSDT(lockCap)}
-                <span style="color:var(--muted);font-size:10px;margin-left:4px;">(${capPct.toFixed(1)}%)</span>
+                <span class="refcap-detail">${fmtUSDT(commissionsCapUsed)} / ${fmtUSDT(lockCap)}<span style="color:var(--muted);font-size:10px;margin-left:4px;">(${fmtNum(capPct, 1)}%)</span></span>
                 <span style="color:${capIsFull ? '#f87171' : capIsActive ? '#4ade80' : '#eab308'};font-size:10px;margin-left:6px;">${fmtUSDT(lockCapRemaining)} remaining</span>
               </span>
             </div>
@@ -344,21 +340,25 @@ async function loadInvestments() {
                 </div>
               </span>
             </div>` : ''}
-            <div class="did-row"><span class="did-label">RESTAKE STREAK</span><span class="did-val" style="font-size:11px;">${streakLabel}</span></div>
-            <div class="did-row">
-              <span class="did-label">DEPOSITED</span>
-              <span class="did-val">${tokensDeposited > 0 ? tokensDeposited.toFixed(4)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+usdtDeposited.toFixed(2)+' USDT' : '—'}</span>
-            </div>
+            <div class="did-row"><span class="did-label">RESTAKE STREAK</span><div class="did-val">${streakLabel}</div></div>
             <div class="did-row">
               <span class="did-label">LP TOKENS</span>
               <span class="did-val">${lpFmt}</span>
             </div>
             <div class="did-row">
+              <span class="did-label">DEPOSITED</span>
+              <span class="did-val">${tokensDeposited > 0 ? fmtNum(tokensDeposited)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+fmtNum(usdtDeposited)+' USDT' : '—'}</span>
+            </div>
+            <div class="did-row">
               <span class="did-label">AVAILABLE</span>
-              <span class="did-val">${myTokensInPool > 0 ? myTokensInPool.toLocaleString(undefined,{maximumFractionDigits:4})+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+(myETHInPool*USDT_PER_ETH).toFixed(2)+' USDT' : '—'}</span>
+              <span class="did-val">${myTokensInPool > 0 ? fmtNum(myTokensInPool)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+fmtNum(myETHInPool*USDT_PER_ETH)+' USDT' : '—'}</span>
             </div>
             ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val" style="word-break:break-all;"><a href="https://sepolia.etherscan.io/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr} ↗</a></span></div>` : ''}
-            ${removeLPBtn ? `<div class="did-actions">${removeLPBtn}</div>` : ''}
+            <div class="did-row"><span class="did-label"></span><span class="did-val" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              ${isUnlocked ? `<button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i}, '${lock.token}', '${lpAmountHex}')" style="background:transparent;border:1px solid #f87171;color:#f87171;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:5px 12px;cursor:pointer;" onmouseover="this.style.background='rgba(248,113,113,0.12)'" onmouseout="this.style.background='transparent'">REMOVE LP</button>` : ''}
+              ${removeLPBtn}
+              <button onclick="showLockHistory(${i})" style="background:rgba(167,139,250,0.07);border:1px solid rgba(167,139,250,0.35);color:#a78bfa;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:5px 12px;cursor:pointer;">LOCK HISTORY</button>
+            </span></div>
           </div>
         </div>`);
     }
@@ -458,9 +458,9 @@ async function removeLP(lockIndex, tokenAddr, lpAmountHex) {
 
   try {
     const { tokensOut, usdtOut, sym } = await _computeRemoveLPPreview(tokenAddr, lpAmountHex);
-    document.getElementById('removeLPTokenAmt').textContent = tokensOut.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    document.getElementById('removeLPTokenAmt').textContent = fmtNum(tokensOut);
     document.getElementById('removeLPTokenSym').textContent = sym;
-    document.getElementById('removeLPUsdtAmt').textContent  = usdtOut.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
+    document.getElementById('removeLPUsdtAmt').textContent  = fmtNum(usdtOut) + ' USDT';
   } catch(_) {
     document.getElementById('removeLPTokenAmt').textContent = 'Unable to estimate';
     document.getElementById('removeLPUsdtAmt').textContent  = 'Unable to estimate';
@@ -478,9 +478,9 @@ async function removeLPDirect(lockIndex, tokenAddr, lpAmountHex) {
 
   try {
     const { tokensOut, usdtOut, sym } = await _computeRemoveLPPreview(tokenAddr, lpAmountHex);
-    document.getElementById('removeLPTokenAmt').textContent = tokensOut.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    document.getElementById('removeLPTokenAmt').textContent = fmtNum(tokensOut);
     document.getElementById('removeLPTokenSym').textContent = sym;
-    document.getElementById('removeLPUsdtAmt').textContent  = usdtOut.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
+    document.getElementById('removeLPUsdtAmt').textContent  = fmtNum(usdtOut) + ' USDT';
   } catch(_) {
     document.getElementById('removeLPTokenAmt').textContent = 'Unable to estimate';
     document.getElementById('removeLPUsdtAmt').textContent  = 'Unable to estimate';
@@ -622,9 +622,9 @@ async function openStakeModal(lockIndex) {
 
       const ratePPM    = baseRatePPM + streakBonusPPM;
       const rewardUSDT = investedUSDT * ratePPM / 1_000_000;
-      const pct        = rewardUSDT > 0 ? (rewardUSDT / investedUSDT * 100).toFixed(1) + '%' : '';
+      const pct        = rewardUSDT > 0 ? fmtNum(rewardUSDT / investedUSDT * 100, 1) + '%' : '';
 
-      rewardEl.textContent = rewardUSDT > 0 ? '$' + rewardUSDT.toLocaleString(undefined, {maximumFractionDigits: 2}) : '—';
+      rewardEl.textContent = rewardUSDT > 0 ? '$' + fmtNum(rewardUSDT) : '—';
       if (pctEl)    pctEl.textContent    = pct;
       if (streakEl) streakEl.textContent = streakLabel;
     });
@@ -749,10 +749,12 @@ async function showLockHistory(lockIndex) {
   const body = document.getElementById('lhBody');
 
   try {
+    const _latestBN  = await provider.getBlockNumber();
+    const _fromBlock = getFromBlock(_latestBN);
     const [investedEvs, restakedEvs, claimEvs] = await Promise.all([
-      contract.queryFilter(contract.filters.Invested(walletAddress, lock.token)).catch(() => []),
-      contract.queryFilter(contract.filters.LPRestaked(walletAddress, lock.token)).catch(() => []),
-      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress)).catch(() => []),
+      contract.queryFilter(contract.filters.Invested(walletAddress, lock.token), _fromBlock, 'latest').catch(() => []),
+      contract.queryFilter(contract.filters.LPRestaked(walletAddress, lock.token), _fromBlock, 'latest').catch(() => []),
+      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest').catch(() => []),
     ]);
 
     investedEvs.sort((a, b) => a.blockNumber - b.blockNumber);
@@ -833,7 +835,7 @@ async function showLockHistory(lockIndex) {
     // Render table rows.
     const rows = periods.map(p => {
       const clTxt = p.claimed > 0.000001
-        ? `<span style="color:#4ade80;">${p.claimed.toFixed(4)} ${td.symbol}</span>`
+        ? `<span style="color:#4ade80;">${fmtNum(p.claimed)} ${td.symbol}</span>`
         : `<span style="color:var(--muted);">—</span>`;
       const rowBg  = p.isCurrent ? 'background:rgba(201,168,76,0.05);' : '';
       const lbClr  = p.isCurrent ? 'var(--gold)' : 'var(--muted)';
@@ -849,7 +851,7 @@ async function showLockHistory(lockIndex) {
 
     const totalRow = `<tr style="border-top:1px solid rgba(201,168,76,0.25);background:rgba(201,168,76,0.04);">
       <td colspan="4" style="padding:7px 8px;font-size:10px;color:var(--muted);letter-spacing:1px;">TOTAL CLAIMED</td>
-      <td style="padding:7px 8px;text-align:right;font-size:12px;color:#4ade80;">${totalClaimed > 0.000001 ? totalClaimed.toFixed(4)+' '+td.symbol : '—'}</td>
+      <td style="padding:7px 8px;text-align:right;font-size:12px;color:#4ade80;">${totalClaimed > 0.000001 ? fmtNum(totalClaimed)+' '+td.symbol : '—'}</td>
     </tr>`;
 
     body.innerHTML = `<div style="overflow-x:auto;">

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import "./LiquidityMath.sol";
+import "./LiquidityTypes.sol";
+import "./LiquidityViewLib.sol";
+
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 value) external returns (bool);
@@ -43,6 +47,8 @@ interface IUniswapV2Pair {
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function token0() external view returns (address);
     function totalSupply() external view returns (uint256);
+    function price0CumulativeLast() external view returns (uint256);
+    function price1CumulativeLast() external view returns (uint256);
 }
 
 contract Liquidity {
@@ -89,80 +95,56 @@ contract Liquidity {
     error ETHWithdrawFailed();
     error NoTokensToWithdraw();
     error TokenWithdrawFailed();
+    error TWAPStale();
+    error TokenTWAPStale();
 
-    struct User {
-        address userAddress;
-        address referrer;
-        address[] referrals;
-        bool isRegistered;
-        uint256 registeredAt;
-    }
-
-    struct Token {
-        address tokenAddress;
-        string name;
-        string symbol;
-        uint256 addedAt;
-        bool removed;
-        string inProgressLabel;
-    }
-
-    // address (20 bytes) + claimed (1 byte) + removed (1 byte) packed into slot 0 — saves 2 slots vs original.
-    // uint8[6] restakeCounts packs all 6 counters into 1 slot — saves 5 slots vs uint256[6].
-    struct LPLock {
-        address token;              // slot 0: 20 bytes
-        bool claimed;               //         +1 byte
-        bool removed;               //         +1 byte  (22 bytes total, slot 0)
-        uint256 lpAmount;           // slot 1
-        uint256 unlockTime;         // slot 2
-        uint256 ethInvested;        // slot 3
-        uint256 lockedAt;           // slot 4
-        uint256 rewardClaimedETH;   // slot 5
-        uint256 tokensAccumulated;  // slot 6
-        uint256 totalTokensClaimed; // slot 7
-        uint256 rewardRatePPM;      // slot 8
-        uint8[6] restakeCounts;     // slot 9  (6 bytes — was 6 full slots)
-        uint256 streakBaseEth;      // slot 10
-        uint256 commissionsCapUsed; // slot 11
-    }
-
+    // Public getters used directly by the frontend
     mapping(address => User) public users;
-    mapping(address => Token) public tokens;
     mapping(address => uint256) public userTotalInvested;
-    mapping(address => LPLock[]) public userLPLocks;
-    mapping(address => uint256) public userCommissionsEarned;
-    mapping(address => mapping(address => bytes)) private _refLabels;
-
-    uint256 public totalRegisteredUsers;
-    uint256 public totalEthInvested;
-    uint256 public totalStakingRewardsPaidETH;
-
-    address[] public registeredTokens;
     address public featuredToken;
     address public owner;
-
-    address public immutable UNISWAP_ROUTER;
-    address public immutable UNISWAP_FACTORY;
-    address public immutable WETH;
     address public immutable platformToken;
-
-    // 10 x uint16 = 20 bytes = 1 storage slot  (was 10 slots as uint256[10])
     uint16[10] public referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
     uint256 public minDirectReferralInvestment;
 
-    uint256 public constant LP_LOCK_DURATION = 90;
-    uint256 public constant USDT_PER_ETH     = 1000;
+    // Internal state — accessed via explicit getter functions (getToken, getUserLPLocks, etc.)
+    mapping(address => Token) private tokens;
+    mapping(address => LPLock[]) private userLPLocks;
+    mapping(address => uint256) private userCommissionsEarned;
+    mapping(address => uint256) private activeReferralCount;
+    mapping(address => mapping(address => bytes)) private _refLabels;
+    uint256 private totalRegisteredUsers;
+    uint256 private totalEthInvested;
+    uint256 private totalStakingRewardsPaidETH;
+    address[] private registeredTokens;
+    mapping(uint256 => bool) private validPackageAmounts;
 
-    // 12 x uint32 = 48 bytes = 2 storage slots  (was 12 slots as uint256[12])
-    uint32[12] public investmentTiers;
-    // 6 x uint16 = 12 bytes = 1 storage slot   (was 6 slots as uint256[6])
-    uint16[6]  public stakingDurations;
-    // Flat array: slot lookup via arithmetic, not 3 nested keccak hashes  (was 3D mapping)
-    uint256[4][12][6] public stakingRates;
+    // Immutables (not called by frontend; used internally and passed to libraries)
+    address private immutable UNISWAP_ROUTER;
+    address private immutable UNISWAP_FACTORY;
+    address private immutable WETH;
 
-    mapping(uint256 => bool) public validPackageAmounts;
+    // Constants (not exposed to frontend; inlined by optimizer)
+    uint256 private constant LP_LOCK_DURATION  = 90;
+    uint256 private constant USDT_PER_ETH      = 1000;
+    uint256 private constant TWAP_PERIOD       = 30 minutes;
+    uint256 private constant TWAP_MAX_STALE    = 2 hours;
+    uint256 private constant MAX_REFERRAL_HOPS = 15;
+    uint256 private constant MAX_SLIPPAGE_BPS  = 200; // 2 %
+
+    // Staking config (accessed via getStakingRatesForAmount, not directly by frontend)
+    uint32[12] private investmentTiers;
+    uint16[6]  private stakingDurations;
+    uint256[4][12][6] private stakingRates;
 
     bool private _locked;
+
+    // Unified TWAP storage for all tokens (platform token uses platformToken as key)
+    mapping(address => TwapObs) private _tokenTwapObs0;
+    mapping(address => TwapObs) private _tokenTwapObs1;
+    mapping(address => uint256) private _tokenTwapPrice;
+    mapping(address => uint256) private _tokenTwapLastUpdated;
+    mapping(address => bool)    private _tokenTwapReady;
 
     event UserRegistered(address indexed user, address indexed referrer);
     event CommissionPaid(address indexed recipient, address indexed from, uint256 amount, uint256 level);
@@ -176,6 +158,7 @@ contract Liquidity {
     event PoolSeeded(address indexed token, uint256 ethAmount, uint256 tokenAmount, uint256 lpReceived);
     event LPRestaked(address indexed user, address indexed token, uint256 lpAmount, uint256 newUnlockTime, uint256 durationDays);
     event StakingRewardClaimed(address indexed user, uint256 tokensAmount, uint256 ethEquivalent);
+    event TWAPUpdated(uint256 price, uint256 timestamp);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -249,33 +232,13 @@ contract Liquidity {
         validPackageAmounts[ethWei] = valid;
     }
 
-    function _getTierIndex(uint256 ethInvestedWei) internal view returns (uint256 best) {
-        uint256 usdtAmt = ethInvestedWei * USDT_PER_ETH / 1e18;
-        uint256 t0 = investmentTiers[0];
-        uint256 bestDiff = usdtAmt >= t0 ? usdtAmt - t0 : t0 - usdtAmt;
-        for (uint256 i = 1; i < 12; ) {
-            uint256 ti = investmentTiers[i];
-            uint256 d  = usdtAmt >= ti ? usdtAmt - ti : ti - usdtAmt;
-            if (d < bestDiff) { bestDiff = d; best = i; }
-            unchecked { i++; }
-        }
-    }
-
-    function _getDurationIndex(uint256 durationDays) internal view returns (uint256 best) {
-        uint256 s0 = stakingDurations[0];
-        uint256 bestDiff = durationDays >= s0 ? durationDays - s0 : s0 - durationDays;
-        for (uint256 i = 1; i < 6; ) {
-            uint256 si = stakingDurations[i];
-            uint256 d  = durationDays >= si ? durationDays - si : si - durationDays;
-            if (d < bestDiff) { bestDiff = d; best = i; }
-            unchecked { i++; }
-        }
-    }
-
     function _getRewardRatePPM(uint256 ethInvestedWei, uint256 durationDays, uint256 streakLevel) internal view returns (uint256) {
         if (ethInvestedWei * USDT_PER_ETH / 1e18 < 100) return 0;
         uint256 sIdx = streakLevel > 3 ? 3 : streakLevel;
-        return stakingRates[_getDurationIndex(durationDays)][_getTierIndex(ethInvestedWei)][sIdx];
+        return stakingRates
+            [LiquidityMath.getDurationIndex(stakingDurations, durationDays)]
+            [LiquidityMath.getTierIndex(investmentTiers, ethInvestedWei)]
+            [sIdx];
     }
 
     function register(address _referrer) external notRegistered {
@@ -361,6 +324,7 @@ contract Liquidity {
         emit TokenInProgressSet(_tokenAddress, _label);
     }
 
+
     function invest(address _token) external payable onlyRegistered nonReentrant {
         if (!validPackageAmounts[msg.value]) revert InvalidPackageAmount();
         if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
@@ -368,13 +332,41 @@ contract Liquidity {
         if (bytes(tokens[_token].inProgressLabel).length != 0) revert TokenInProgress();
         if (IERC20(_token).balanceOf(address(this)) == 0) revert InsufficientContractTokenBalance();
 
+        updateTWAP();
+        _updateTokenTWAP(_token);
+
+        // Require a valid, fresh per-token TWAP before any swap so that the
+        // swapAmountOutMin is anchored to the time-weighted price, not the
+        // manipulatable spot price (sandwich protection).
+        if (!_tokenTwapReady[_token]) revert PriceUnavailable();
+        if (block.timestamp - _tokenTwapLastUpdated[_token] > TWAP_MAX_STALE) revert TokenTWAPStale();
+
         uint256 T   = msg.value;
         uint256 A   = T / 2;
         uint256 B   = T - A;
         uint256 A60 = (A * 60) / 100;
         uint256 A40 = A - A60;
 
-        // ── Pool buy: A60 ETH → _token via Uniswap ───────────────────────
+        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
+        if (pair == address(0)) revert PoolNotFound();
+
+        uint256 platformBuyTokens;
+        uint256 swapAmountOutMin;
+        {
+            (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
+            address t0 = IUniswapV2Pair(pair).token0();
+            uint256 resToken = t0 == _token ? uint256(r0) : uint256(r1);
+            uint256 resETH   = t0 == _token ? uint256(r1) : uint256(r0);
+            if (resETH == 0) revert PriceUnavailable();
+            // platformBuyTokens: contract-side token contribution — spot ratio is fine here
+            platformBuyTokens = A40 * resToken / resETH;
+            // swapAmountOutMin: derived from TWAP so a sandwich cannot inflate it
+            // _tokenTwapPrice is WETH-wei per full token; expected = A60 * 1e18 / twapPrice
+            swapAmountOutMin = A60 * 1e18 / _tokenTwapPrice[_token] * (10000 - MAX_SLIPPAGE_BPS) / 10000;
+        }
+
+        if (IERC20(_token).balanceOf(address(this)) < platformBuyTokens) revert InsufficientContractTokenBalance();
+
         address[] memory path = new address[](2);
         path[0] = WETH;
         path[1] = _token;
@@ -382,41 +374,29 @@ contract Liquidity {
         uint256 balanceBefore = IERC20(_token).balanceOf(address(this));
 
         IUniswapV2Router02(UNISWAP_ROUTER).swapExactETHForTokens{value: A60}(
-            0, path, address(this), block.timestamp + 300
+            swapAmountOutMin, path, address(this), block.timestamp + 300
         );
 
         uint256 poolBuyTokens = IERC20(_token).balanceOf(address(this)) - balanceBefore;
+        uint256 totalTokens   = poolBuyTokens + platformBuyTokens;
 
-        // ── Platform buy: A40 ETH → _token from contract at post-pool-buy price ─
-        // Read reserves after the pool buy so price reflects its impact.
-        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
-        if (pair == address(0)) revert PoolNotFound();
-
-        (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
-        address t0 = IUniswapV2Pair(pair).token0();
-        uint256 resToken = t0 == _token ? uint256(r0) : uint256(r1);
-        uint256 resETH   = t0 == _token ? uint256(r1) : uint256(r0);
-        if (resETH == 0) revert PriceUnavailable();
-
-        // Tokens the contract sells to itself at current market rate for A40 ETH.
-        // A40 ETH is retained by the contract and later distributed as referral commissions.
-        uint256 platformBuyTokens = A40 * resToken / resETH;
-
-        uint256 totalTokens = poolBuyTokens + platformBuyTokens;
-
-        // Contract must hold enough reserve tokens to cover the platform buy portion.
         if (IERC20(_token).balanceOf(address(this)) < totalTokens) revert InsufficientContractTokenBalance();
 
-        // ── Pair poolBuyTokens + platformBuyTokens with B ETH ────────────
         IERC20(_token).approve(UNISWAP_ROUTER, totalTokens);
 
         (,, uint256 lpReceived) = IUniswapV2Router02(UNISWAP_ROUTER).addLiquidityETH{value: B}(
-            _token, totalTokens, 0, 0, address(this), block.timestamp + 300
+            _token,
+            totalTokens,
+            totalTokens * (10000 - MAX_SLIPPAGE_BPS) / 10000,
+            B           * (10000 - MAX_SLIPPAGE_BPS) / 10000,
+            address(this),
+            block.timestamp + 300
         );
 
         IERC20(_token).approve(UNISWAP_ROUTER, 0);
 
-        // Surplus ETH returned by addLiquidityETH goes to owner; A40 stays for commissions.
+        if (lpReceived == 0) revert NoLPTokens();
+
         uint256 surplus = address(this).balance > A40 ? address(this).balance - A40 : 0;
         if (surplus > 0) {
             (bool ok,) = payable(owner).call{value: surplus}("");
@@ -440,10 +420,14 @@ contract Liquidity {
             commissionsCapUsed: 0
         }));
 
+        bool wasQualifying = _qualifies(msg.sender);
         userTotalInvested[msg.sender] += T;
         totalEthInvested += T;
+        if (!wasQualifying && _qualifies(msg.sender)) {
+            address ref = users[msg.sender].referrer;
+            if (ref != address(0)) activeReferralCount[ref]++;
+        }
 
-        // A40 ETH (earned from platform buy) is distributed to eligible upline referrers.
         distributeReferralCommissions(msg.sender, A40, _token);
 
         emit Invested(msg.sender, _token, T, lpReceived);
@@ -464,9 +448,18 @@ contract Liquidity {
         emit LPClaimed(msg.sender, lock.token, lock.lpAmount);
     }
 
-    function removeLP(uint256 _lockIndex) external nonReentrant {
+    // ── Shared LP-removal logic ──────────────────────────────────────────────
+    // direct=false → removeLP    (user already claimed LP to wallet; pull it back)
+    // direct=true  → removeLPDirect (LP still held by contract; remove without claim step)
+    function _removeLPCore(uint256 _lockIndex, bool direct) internal {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
-        if (!lock.claimed) revert ClaimLPFirst();
+        if (direct) {
+            if (lock.removed) revert AlreadyRemoved();
+            if (lock.claimed) revert LPAlreadyClaimed();
+            if (block.timestamp < lock.unlockTime) revert LPStillLocked();
+        } else {
+            if (!lock.claimed) revert ClaimLPFirst();
+        }
         if (lock.lpAmount == 0) revert NoLPTokens();
 
         _settleStakingReward(msg.sender, _lockIndex);
@@ -474,19 +467,40 @@ contract Liquidity {
         uint256 lpAmount    = lock.lpAmount;
         uint256 ethInvested = lock.ethInvested;
         lock.lpAmount = 0;
-        lock.removed  = true;
+        if (direct) lock.claimed = true;
+        lock.removed = true;
 
-        if (userTotalInvested[msg.sender] >= ethInvested)
+        bool wasQualifying = _qualifies(msg.sender);
+        if (userTotalInvested[msg.sender] >= ethInvested) {
             userTotalInvested[msg.sender] -= ethInvested;
+            if (wasQualifying && !_qualifies(msg.sender)) {
+                address ref = users[msg.sender].referrer;
+                if (ref != address(0)) activeReferralCount[ref]--;
+            }
+        }
 
         address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(lock.token, WETH);
         if (pair == address(0)) revert PoolNotFound();
 
-        if (!IERC20(pair).transferFrom(msg.sender, address(this), lpAmount)) revert LPPullFailed();
+        if (!direct) {
+            if (!IERC20(pair).transferFrom(msg.sender, address(this), lpAmount)) revert LPPullFailed();
+        }
         IERC20(pair).approve(UNISWAP_ROUTER, lpAmount);
 
+        uint256 minTokenOut;
+        uint256 minETHOut;
+        {
+            IUniswapV2Pair p = IUniswapV2Pair(pair);
+            (uint112 r0, uint112 r1,) = p.getReserves();
+            address t0     = p.token0();
+            uint256 resTok = t0 == lock.token ? uint256(r0) : uint256(r1);
+            uint256 resETH = t0 == lock.token ? uint256(r1) : uint256(r0);
+            uint256 supply = p.totalSupply();
+            (minTokenOut, minETHOut) = LiquidityMath.calcRemoveLPAmounts(resTok, resETH, supply, lpAmount, MAX_SLIPPAGE_BPS);
+        }
+
         (uint256 tokensReturned, uint256 ethReturned) = IUniswapV2Router02(UNISWAP_ROUTER)
-            .removeLiquidityETH(lock.token, lpAmount, 0, 0, address(this), block.timestamp + 300);
+            .removeLiquidityETH(lock.token, lpAmount, minTokenOut, minETHOut, address(this), block.timestamp + 300);
 
         if (tokensReturned > 0) {
             if (!IERC20(lock.token).transfer(msg.sender, tokensReturned)) revert TokenReturnFailed();
@@ -499,41 +513,12 @@ contract Liquidity {
         emit LPRemoved(msg.sender, lock.token, lpAmount, ethReturned, tokensReturned);
     }
 
+    function removeLP(uint256 _lockIndex) external nonReentrant {
+        _removeLPCore(_lockIndex, false);
+    }
+
     function removeLPDirect(uint256 _lockIndex) external nonReentrant {
-        LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
-        if (lock.removed) revert AlreadyRemoved();
-        if (lock.claimed) revert LPAlreadyClaimed();
-        if (block.timestamp < lock.unlockTime) revert LPStillLocked();
-        if (lock.lpAmount == 0) revert NoLPTokens();
-
-        _settleStakingReward(msg.sender, _lockIndex);
-
-        uint256 lpAmount    = lock.lpAmount;
-        uint256 ethInvested = lock.ethInvested;
-        lock.lpAmount = 0;
-        lock.claimed  = true;
-        lock.removed  = true;
-
-        if (userTotalInvested[msg.sender] >= ethInvested)
-            userTotalInvested[msg.sender] -= ethInvested;
-
-        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(lock.token, WETH);
-        if (pair == address(0)) revert PoolNotFound();
-
-        IERC20(pair).approve(UNISWAP_ROUTER, lpAmount);
-
-        (uint256 tokensReturned, uint256 ethReturned) = IUniswapV2Router02(UNISWAP_ROUTER)
-            .removeLiquidityETH(lock.token, lpAmount, 0, 0, address(this), block.timestamp + 300);
-
-        if (tokensReturned > 0) {
-            if (!IERC20(lock.token).transfer(msg.sender, tokensReturned)) revert TokenReturnFailed();
-        }
-        if (ethReturned > 0) {
-            (bool ok,) = payable(msg.sender).call{value: ethReturned}("");
-            if (!ok) revert ETHReturnFailed();
-        }
-
-        emit LPRemoved(msg.sender, lock.token, lpAmount, ethReturned, tokensReturned);
+        _removeLPCore(_lockIndex, true);
     }
 
     function restakeLP(uint256 _lockIndex, uint256 _durationSecs) external nonReentrant {
@@ -547,13 +532,15 @@ contract Liquidity {
         if (block.timestamp < lock.unlockTime) revert LPStillLocked();
         if (lock.lpAmount == 0) revert NoLPTokens();
 
-        uint256 price = _tokenPriceInETH();
-        if (price > 0) {
-            uint256 pendingETH = _calcPendingRewardETH(lock);
-            if (pendingETH > 0) lock.tokensAccumulated += (pendingETH * 1e18) / price;
-        }
+        updateTWAP();
+        // getTWAPPrice() reverts if stale — prevents silent reward loss when rewardClaimedETH is reset below
+        uint256 price = getTWAPPrice();
+        uint256 pendingETH = LiquidityMath.calcPendingRewardETH(
+            lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
+        );
+        if (pendingETH > 0) lock.tokensAccumulated += (pendingETH * 1e18) / price;
 
-        uint256 dIdx = _getDurationIndex(_durationSecs);
+        uint256 dIdx = LiquidityMath.getDurationIndex(stakingDurations, _durationSecs);
 
         if (lock.streakBaseEth != 0 && lock.ethInvested != lock.streakBaseEth) {
             for (uint256 i = 0; i < 6; ) {
@@ -564,7 +551,7 @@ contract Liquidity {
         }
 
         uint256 prevDurSecs = lock.unlockTime > lock.lockedAt ? lock.unlockTime - lock.lockedAt : LP_LOCK_DURATION;
-        uint256 prevDIdx    = _getDurationIndex(prevDurSecs);
+        uint256 prevDIdx    = LiquidityMath.getDurationIndex(stakingDurations, prevDurSecs);
         uint256 sIdx;
         if (dIdx == prevDIdx) {
             lock.restakeCounts[dIdx] += 1;
@@ -582,25 +569,6 @@ contract Liquidity {
         emit LPRestaked(msg.sender, lock.token, lock.lpAmount, lock.unlockTime, _durationSecs);
     }
 
-    // O(1) single storage read replacing the original O(n locks) loop.
-    // userTotalInvested tracks the same sum (incremented in invest, decremented in removeLP/removeLPDirect).
-    function _hasActiveInvestment(address _user) internal view returns (bool) {
-        uint256 total = userTotalInvested[_user];
-        return total > 0 && (minDirectReferralInvestment == 0 || total >= minDirectReferralInvestment);
-    }
-
-    function getActiveDirectReferralCount(address _user) public view returns (uint256 count) {
-        address[] storage refs = users[_user].referrals;
-        uint256 len = refs.length;
-        for (uint256 i = 0; i < len; ) {
-            if (_hasActiveInvestment(refs[i])) count++;
-            unchecked { i++; }
-        }
-    }
-
-    function setMinDirectReferralInvestment(uint256 _amount) external onlyOwner {
-        minDirectReferralInvestment = _amount;
-    }
 
     function _getAvailableCapForToken(address _user, address _token) internal view returns (uint256 available) {
         LPLock[] storage locks = userLPLocks[_user];
@@ -635,11 +603,38 @@ contract Liquidity {
         }
     }
 
+    function getActiveDirectReferralCount(address _user) public view returns (uint256) {
+        return activeReferralCount[_user];
+    }
+
+    function _qualifies(address _user) internal view returns (bool) {
+        uint256 total = userTotalInvested[_user];
+        return total > 0 && (minDirectReferralInvestment == 0 || total >= minDirectReferralInvestment);
+    }
+
+    function setMinDirectReferralInvestment(uint256 _amount) external onlyOwner {
+        minDirectReferralInvestment = _amount;
+    }
+
     function _payCommission(address recipient, address from, uint256 amount, uint256 level) internal {
-        userCommissionsEarned[recipient] += amount;
-        (bool success,) = payable(recipient).call{value: amount}("");
-        if (!success) revert CommissionTransferFailed();
-        emit CommissionPaid(recipient, from, amount, level);
+        uint256 toRecipient = amount;
+        if (recipient != owner) {
+            uint256 deployerCut = amount * 5 / 100;
+            toRecipient = amount - deployerCut;
+            if (deployerCut > 0) {
+                (bool ok,) = payable(owner).call{value: deployerCut}("");
+                if (!ok) revert CommissionTransferFailed();
+            }
+        }
+        (bool success,) = payable(recipient).call{value: toRecipient}("");
+        if (!success) {
+            (bool ok,) = payable(owner).call{value: toRecipient}("");
+            if (!ok) revert CommissionTransferFailed();
+        } else {
+            // Only credit the recipient when they actually received the funds
+            userCommissionsEarned[recipient] += toRecipient;
+        }
+        emit CommissionPaid(recipient, from, toRecipient, level);
     }
 
     function distributeReferralCommissions(address _from, uint256 _amount, address _token) internal {
@@ -652,11 +647,12 @@ contract Liquidity {
             address search = current;
 
             while (toDistribute > 0) {
-                // cachedCap holds the result of _getAvailableCapForToken when the inner
-                // loop breaks on a qualifying recipient — avoids calling it twice.
                 uint256 cachedCap = 0;
+                uint256 hops = 0;
                 while (search != address(0) && users[search].isRegistered) {
-                    bool enoughReferrals = getActiveDirectReferralCount(search) > i;
+                    if (hops >= MAX_REFERRAL_HOPS) { search = address(0); break; }
+                    unchecked { hops++; }
+                    bool enoughReferrals = activeReferralCount[search] > i;
                     if (!enoughReferrals) { search = users[search].referrer; continue; }
                     if (search == owner) break;
                     cachedCap = _getAvailableCapForToken(search, _token);
@@ -688,46 +684,91 @@ contract Liquidity {
         }
     }
 
-    function _calcPendingRewardETH(LPLock storage lock) internal view returns (uint256) {
-        if (lock.rewardRatePPM == 0) return 0;
-        uint256 lockDur = lock.unlockTime > lock.lockedAt
-            ? lock.unlockTime - lock.lockedAt : LP_LOCK_DURATION;
-        uint256 elapsed = block.timestamp > lock.lockedAt
-            ? block.timestamp - lock.lockedAt : 0;
-        if (elapsed > lockDur) elapsed = lockDur;
-        uint256 totalEarned = (lock.ethInvested * lock.rewardRatePPM * elapsed) / (1_000_000 * lockDur);
-        return totalEarned > lock.rewardClaimedETH ? totalEarned - lock.rewardClaimedETH : 0;
-    }
-
     function _settleStakingReward(address _user, uint256 _lockIndex) internal {
         LPLock storage lock = userLPLocks[_user][_lockIndex];
         if (lock.removed) return;
-        uint256 price = _tokenPriceInETH();
-        if (price == 0) return;
-        uint256 pendingETH = _calcPendingRewardETH(lock);
-        uint256 carry      = lock.tokensAccumulated;
-        uint256 newTokens  = (pendingETH * 1e18) / price;
-        uint256 total      = newTokens + carry;
+
+        uint256 pendingETH = LiquidityMath.calcPendingRewardETH(
+            lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
+        );
+        uint256 carry = lock.tokensAccumulated;
+
+        // Always advance rewardClaimedETH and zero carry so this period cannot
+        // be double-counted even if we can't transfer tokens right now.
+        lock.rewardClaimedETH += pendingETH;
+        lock.tokensAccumulated = 0;
+
+        uint256 price     = _twapTokenPrice();
+        uint256 newTokens = price > 0 ? (pendingETH * 1e18) / price : 0;
+        uint256 total     = newTokens + carry;
+
         if (total == 0) return;
         uint256 available = IERC20(platformToken).balanceOf(address(this));
         if (available < total) return;
-        lock.rewardClaimedETH  += pendingETH;
-        lock.tokensAccumulated  = 0;
+
         lock.totalTokensClaimed += total;
         if (!IERC20(platformToken).transfer(_user, total)) revert StakingRewardTransferFailed();
         emit StakingRewardClaimed(_user, total, pendingETH);
     }
 
-    function _tokenPriceInETH() internal view returns (uint256) {
-        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(platformToken, WETH);
-        if (pair == address(0)) return 0;
-        IUniswapV2Pair p = IUniswapV2Pair(pair);
-        (uint112 r0, uint112 r1,) = p.getReserves();
-        address t0 = p.token0();
-        uint256 resToken = t0 == platformToken ? uint256(r0) : uint256(r1);
-        uint256 resETH   = t0 == platformToken ? uint256(r1) : uint256(r0);
-        if (resToken == 0) return 0;
-        return (resETH * 1e18) / resToken;
+    function updateTWAP() public {
+        uint256 priceBefore = _tokenTwapPrice[platformToken];
+        _updateTokenTWAP(platformToken);
+        uint256 priceAfter = _tokenTwapPrice[platformToken];
+        if (priceAfter > 0 && priceAfter != priceBefore) {
+            emit TWAPUpdated(priceAfter, block.timestamp);
+        }
+    }
+
+    function getTWAPPrice() public view returns (uint256) {
+        if (!_tokenTwapReady[platformToken]) revert PriceUnavailable();
+        if (block.timestamp - _tokenTwapLastUpdated[platformToken] > TWAP_MAX_STALE) revert TWAPStale();
+        return _tokenTwapPrice[platformToken];
+    }
+
+    function _twapTokenPrice() private view returns (uint256) {
+        if (!_tokenTwapReady[platformToken]) return 0;
+        if (block.timestamp - _tokenTwapLastUpdated[platformToken] > TWAP_MAX_STALE) return 0;
+        return _tokenTwapPrice[platformToken];
+    }
+
+    function _updateTokenTWAP(address _token) internal {
+        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
+        if (pair == address(0)) return;
+
+        (uint256 cumulative, uint32 ts) = LiquidityMath.pairCumulative(pair, _token);
+
+        if (_tokenTwapLastUpdated[_token] == 0) {
+            _tokenTwapObs0[_token] = TwapObs({ priceCumulative: cumulative, timestamp: ts });
+            _tokenTwapObs1[_token] = TwapObs({ priceCumulative: cumulative, timestamp: ts });
+            _tokenTwapLastUpdated[_token] = block.timestamp;
+            return;
+        }
+
+        unchecked {
+            uint32 elapsedSinceLast = ts - _tokenTwapObs1[_token].timestamp;
+            if (elapsedSinceLast == 0) return;
+            if (elapsedSinceLast >= uint32(TWAP_PERIOD)) {
+                _tokenTwapObs0[_token] = _tokenTwapObs1[_token];
+            }
+        }
+
+        _tokenTwapObs1[_token] = TwapObs({ priceCumulative: cumulative, timestamp: ts });
+        _tokenTwapLastUpdated[_token] = block.timestamp;
+
+        unchecked {
+            uint32 span = _tokenTwapObs1[_token].timestamp - _tokenTwapObs0[_token].timestamp;
+            if (span >= uint32(TWAP_PERIOD)) {
+                uint256 cumDiff = _tokenTwapObs1[_token].priceCumulative - _tokenTwapObs0[_token].priceCumulative;
+                uint256 rawAvg  = cumDiff / uint256(span);
+                _tokenTwapPrice[_token] = (rawAvg * 1e18) >> 112;
+                _tokenTwapReady[_token] = true;
+            }
+        }
+    }
+
+    function updateTokenTWAP(address _token) public {
+        _updateTokenTWAP(_token);
     }
 
     function getStakingReward(address _user) external view returns (
@@ -735,35 +776,37 @@ contract Liquidity {
         uint256 previewNewTokens,
         uint256 lifetimeClaimed
     ) {
-        uint256 price = _tokenPriceInETH();
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        for (uint256 i = 0; i < len; ) {
-            totalAccumulated += locks[i].tokensAccumulated;
-            lifetimeClaimed  += locks[i].totalTokensClaimed;
-            if (price > 0) {
-                uint256 pendingETH = _calcPendingRewardETH(locks[i]);
-                if (pendingETH > 0) previewNewTokens += (pendingETH * 1e18) / price;
-            }
-            unchecked { i++; }
+        uint256 price = LiquidityMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH);
+        LPLock[] memory locks = userLPLocks[_user];
+        return LiquidityViewLib.computeStakingReward(locks, price);
+    }
+
+    // Calculates tokens due, updates lock state, returns amounts for the caller to transfer.
+    function _computeLockReward(LPLock storage lock, uint256 price)
+        internal returns (uint256 lockTokens, uint256 pendingETH)
+    {
+        pendingETH = LiquidityMath.calcPendingRewardETH(
+            lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
+        );
+        uint256 carry = lock.tokensAccumulated;
+        lockTokens = (pendingETH * 1e18) / price + carry;
+        if (lockTokens > 0) {
+            lock.rewardClaimedETH  += pendingETH;
+            lock.tokensAccumulated  = 0;
+            lock.totalTokensClaimed += lockTokens;
         }
     }
 
     function claimStakingReward() external nonReentrant onlyRegistered {
-        uint256 price = _tokenPriceInETH();
+        updateTWAP();
+        uint256 price = _twapTokenPrice();
         if (price == 0) revert PriceUnavailable();
         LPLock[] storage locks = userLPLocks[msg.sender];
         uint256 len = locks.length;
-        uint256 totalTokens = 0;
-        uint256 totalPendingETH = 0;
+        uint256 totalTokens;
+        uint256 totalPendingETH;
         for (uint256 i = 0; i < len; ) {
-            uint256 pendingETH = _calcPendingRewardETH(locks[i]);
-            uint256 carry      = locks[i].tokensAccumulated;
-            uint256 lockTokens = (pendingETH * 1e18) / price + carry;
-            if (lockTokens == 0) { unchecked { i++; } continue; }
-            locks[i].rewardClaimedETH  += pendingETH;
-            locks[i].tokensAccumulated  = 0;
-            locks[i].totalTokensClaimed += lockTokens;
+            (uint256 lockTokens, uint256 pendingETH) = _computeLockReward(locks[i], price);
             totalTokens     += lockTokens;
             totalPendingETH += pendingETH;
             unchecked { i++; }
@@ -777,16 +820,13 @@ contract Liquidity {
 
     function claimStakingRewardForLock(uint256 _lockIndex) external nonReentrant onlyRegistered {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
-        uint256 price = _tokenPriceInETH();
+        if (lock.removed) revert AlreadyRemoved();
+        updateTWAP();
+        uint256 price = _twapTokenPrice();
         if (price == 0) revert PriceUnavailable();
-        uint256 pendingETH   = _calcPendingRewardETH(lock);
-        uint256 carry        = lock.tokensAccumulated;
-        uint256 tokensToSend = (pendingETH * 1e18) / price + carry;
+        (uint256 tokensToSend, uint256 pendingETH) = _computeLockReward(lock, price);
         if (tokensToSend == 0) revert NothingToClaim();
         if (IERC20(platformToken).balanceOf(address(this)) < tokensToSend) revert InsufficientTokenBalance();
-        lock.rewardClaimedETH  += pendingETH;
-        lock.tokensAccumulated  = 0;
-        lock.totalTokensClaimed += tokensToSend;
         totalStakingRewardsPaidETH += pendingETH;
         if (!IERC20(platformToken).transfer(msg.sender, tokensToSend)) revert TokenTransferFailed();
         emit StakingRewardClaimed(msg.sender, tokensToSend, pendingETH);
@@ -827,156 +867,25 @@ contract Liquidity {
         uint256 remainingCap,
         uint256 active
     ) {
-        earned = userCommissionsEarned[_user];
-        uint256 activeCap = 0;
-        uint256 pausedCap = 0;
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        for (uint256 i = 0; i < len; ) {
-            LPLock storage l = locks[i];
-            if (l.removed) { unchecked { i++; } continue; }
-            uint256 cap     = l.ethInvested * 5;
-            uint256 capLeft = l.commissionsCapUsed < cap ? cap - l.commissionsCapUsed : 0;
-            if (capLeft == 0) { unchecked { i++; } continue; }
-            if (block.timestamp < l.unlockTime) {
-                activeCap += capLeft;
-            } else {
-                pausedCap += capLeft;
-            }
-            unchecked { i++; }
-        }
-        totalCap     = activeCap + pausedCap;
-        remainingCap = activeCap;
-        active       = userTotalInvested[_user];
-    }
-
-    struct LockCapInfo {
-        address token;
-        uint256 ethInvested;
-        uint256 totalCap;
-        uint256 capUsed;
-        uint256 capRemaining;
-        bool    isActive;
-        bool    isRemoved;
-    }
-
-    function getLockCapInfo(address _user) external view returns (LockCapInfo[] memory) {
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        LockCapInfo[] memory info = new LockCapInfo[](len);
-        for (uint256 i = 0; i < len; ) {
-            LPLock storage l = locks[i];
-            uint256 cap  = l.ethInvested * 5;
-            uint256 used = l.commissionsCapUsed;
-            info[i] = LockCapInfo({
-                token:        l.token,
-                ethInvested:  l.ethInvested,
-                totalCap:     cap,
-                capUsed:      used,
-                capRemaining: cap > used ? cap - used : 0,
-                isActive:     !l.removed && block.timestamp < l.unlockTime,
-                isRemoved:    l.removed
-            });
-            unchecked { i++; }
-        }
-        return info;
-    }
-
-    struct WealthLockParam {
-        uint256 ethInvested;
-        uint256 rewardRatePPM;
-        uint256 lockedAt;
-        uint256 unlockTime;
-        bool    removed;
-        uint256 tokensAccumulated;
-        uint256 lpAmount;
-        uint256 reserveETH;
-        uint256 totalLPSupply;
-    }
-
-    struct WealthParams {
-        uint256            refEarnings;
-        uint256            platformTokenPriceEth;
-        uint256            lpLockDuration;
-        WealthLockParam[]  locks;
+        LPLock[] memory locks = userLPLocks[_user];
+        return LiquidityViewLib.computeCommissionStats(
+            locks,
+            userCommissionsEarned[_user],
+            userTotalInvested[_user],
+            block.timestamp
+        );
     }
 
     function getWealthParams(address _user) external view returns (WealthParams memory p) {
-        p.refEarnings           = userCommissionsEarned[_user];
-        p.platformTokenPriceEth = _tokenPriceInETH();
-        p.lpLockDuration        = LP_LOCK_DURATION;
-
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        p.locks = new WealthLockParam[](len);
-        for (uint256 i = 0; i < len; ) {
-            LPLock storage l = locks[i];
-            p.locks[i].ethInvested       = l.ethInvested;
-            p.locks[i].rewardRatePPM     = l.rewardRatePPM;
-            p.locks[i].lockedAt          = l.lockedAt;
-            p.locks[i].unlockTime        = l.unlockTime;
-            p.locks[i].removed           = l.removed;
-            p.locks[i].tokensAccumulated = l.tokensAccumulated;
-            p.locks[i].lpAmount          = l.lpAmount;
-            if (!l.removed && l.lpAmount > 0) {
-                address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(WETH, l.token);
-                if (pair != address(0)) {
-                    (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
-                    address t0 = IUniswapV2Pair(pair).token0();
-                    p.locks[i].reserveETH    = (t0 == WETH) ? uint256(r0) : uint256(r1);
-                    p.locks[i].totalLPSupply = IUniswapV2Pair(pair).totalSupply();
-                }
-            }
-            unchecked { i++; }
-        }
-    }
-
-    struct LockStakingSnapshot {
-        uint256 earnedETH;
-        uint256 claimedETH;
-        uint256 tokensAccumulated;
-        bool    isActive;
-        uint256 lockDur;
-        uint256 elapsed;
-    }
-
-    function getLockStakingSnapshots(address _user) external view returns (LockStakingSnapshot[] memory snaps) {
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        snaps = new LockStakingSnapshot[](len);
-        for (uint256 i = 0; i < len; ) {
-            LPLock storage l = locks[i];
-            uint256 dur = l.unlockTime > l.lockedAt ? l.unlockTime - l.lockedAt : LP_LOCK_DURATION;
-            uint256 el  = block.timestamp > l.lockedAt ? block.timestamp - l.lockedAt : 0;
-            if (el > dur) el = dur;
-            uint256 earned = (l.removed || l.rewardRatePPM == 0 || dur == 0)
-                ? l.rewardClaimedETH
-                : (l.ethInvested * l.rewardRatePPM * el) / (1_000_000 * dur);
-            snaps[i] = LockStakingSnapshot({
-                earnedETH:         earned,
-                claimedETH:        l.rewardClaimedETH,
-                tokensAccumulated: l.tokensAccumulated,
-                isActive:          !l.removed && block.timestamp < l.unlockTime,
-                lockDur:           dur,
-                elapsed:           el
-            });
-            unchecked { i++; }
-        }
-    }
-
-    function getLockTimesLeft(address _user) external view returns (uint256[] memory) {
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        uint256[] memory times = new uint256[](len);
-        for (uint256 i = 0; i < len; ) {
-            if (locks[i].claimed || locks[i].removed || block.timestamp >= locks[i].unlockTime) {
-                times[i] = 0;
-            } else {
-                times[i] = locks[i].unlockTime - block.timestamp;
-            }
-            unchecked { i++; }
-        }
-        return times;
+        LPLock[] memory locks = userLPLocks[_user];
+        return LiquidityViewLib.computeWealthParams(
+            locks,
+            userCommissionsEarned[_user],
+            LiquidityMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH),
+            LP_LOCK_DURATION,
+            UNISWAP_FACTORY,
+            WETH
+        );
     }
 
     function getContractTokenBalance(address _token) external view returns (uint256) {
@@ -989,7 +898,7 @@ contract Liquidity {
     ) {
         uint256 investUSDT = ethInvestedWei * USDT_PER_ETH / 1e18;
         bool hasReward = investUSDT >= 100;
-        uint256 tierIdx = hasReward ? _getTierIndex(ethInvestedWei) : 0;
+        uint256 tierIdx = hasReward ? LiquidityMath.getTierIndex(investmentTiers, ethInvestedWei) : 0;
         for (uint256 i = 0; i < 6; ) {
             durSecs[i]  = stakingDurations[i];
             ratesPPM[i] = hasReward ? stakingRates[i][tierIdx][0] : 0;
@@ -1002,34 +911,6 @@ contract Liquidity {
         if (tierIdx >= 12) revert InvalidTierIndex();
         if (streakLevel >= 4) revert InvalidStreakLevel();
         stakingRates[durationIdx][tierIdx][streakLevel] = rate;
-    }
-
-    function getRestakePreview(address _user, uint256 _lockIndex, uint256 _durationSecs)
-        external view returns (
-            uint256 nextRestakeCount,
-            uint256 streakBonusPPM,
-            uint256 baseRatePPM,
-            uint256 totalRatePPM
-        )
-    {
-        LPLock storage lock = userLPLocks[_user][_lockIndex];
-        uint256 dIdx        = _getDurationIndex(_durationSecs);
-        uint256 prevDurSecs = lock.unlockTime > lock.lockedAt ? lock.unlockTime - lock.lockedAt : LP_LOCK_DURATION;
-        uint256 prevDIdx    = _getDurationIndex(prevDurSecs);
-        bool willReset      = lock.streakBaseEth != 0 && lock.ethInvested != lock.streakBaseEth;
-        bool sameDur        = dIdx == prevDIdx && !willReset;
-        uint256 sIdx;
-        if (sameDur) {
-            uint256 cnt = lock.restakeCounts[dIdx] + 1;
-            sIdx = cnt > 3 ? 3 : cnt;
-            nextRestakeCount = sIdx;
-        } else {
-            sIdx = 0;
-            nextRestakeCount = 0;
-        }
-        baseRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationSecs, 0);
-        totalRatePPM   = _getRewardRatePPM(lock.ethInvested, _durationSecs, sIdx);
-        streakBonusPPM = totalRatePPM - baseRatePPM;
     }
 
     function setRefLabel(address _ref, bytes calldata _label) external {

@@ -1,4 +1,4 @@
-let _activeHistTab = 'rewards';
+let _activeHistTab = 'invest';
 
 function switchHistoryTab(name) {
   _activeHistTab = name;
@@ -24,8 +24,10 @@ async function loadHistory() {
   const el = document.getElementById('historyList');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock   = getFromBlock(latestBlock);
     const filter = contract.filters.Invested(walletAddress);
-    const events = await contract.queryFilter(filter);
+    const events = await contract.queryFilter(filter, fromBlock, 'latest');
     if (events.length === 0) {
       el.innerHTML = '<div class="empty-state">No investments found.</div>';
       return;
@@ -53,8 +55,8 @@ async function _buildHistoryItem(ev) {
   const date  = new Date(block.timestamp * 1000).toLocaleString();
 
   const ethRaw  = parseFloat(ethers.utils.formatEther(ethAmount));
-  const ethFmt  = (ethRaw * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
-  const lpFmt   = parseFloat(ethers.utils.formatEther(lpTokens)).toFixed(6);
+  const ethFmt  = fmtNum(ethRaw * USDT_PER_ETH);
+  const lpFmt   = fmtNum(parseFloat(ethers.utils.formatEther(lpTokens)));
 
   const div = document.createElement('div');
   div.className = 'history-item';
@@ -96,6 +98,14 @@ async function toggleHistoryDetail(summaryEl) {
     chevron.style.transform = '';
     return;
   }
+
+  // Collapse any other open item
+  document.querySelectorAll('#historyList .history-detail.open').forEach(other => {
+    other.classList.remove('open');
+    const otherChevron = other.closest('.history-item')?.querySelector('.history-chevron');
+    if (otherChevron) otherChevron.style.transform = '';
+  });
+
   detail.classList.add('open');
   chevron.style.transform = 'rotate(90deg)';
   if (detail.dataset.loaded) return;
@@ -195,39 +205,53 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
   if (resBefore && swapTokensOut)
     resMid = { eth: resBefore.eth.add(A60), token: resBefore.token.sub(swapTokensOut) };
 
-  const fE = bn => bn ? parseFloat(ethers.utils.formatEther(bn)).toFixed(6) : '—';
-  const fU = bn => bn ? (parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT' : '—';
+  const fE = bn => bn ? fmtNum(parseFloat(ethers.utils.formatEther(bn))) : '—';
+  const fU  = bn => bn ? fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT' : '—';
+  const fU3 = bn => bn ? fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT' : '—';
   const fT = bn => {
     if (!bn) return '—';
     const n = parseFloat(ethers.utils.formatUnits(bn, tokenDecimals));
-    return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    return fmtNum(n);
   };
   const fPrice = res => {
     if (!res || res.eth.isZero()) return '—';
     const p = (parseFloat(ethers.utils.formatEther(res.eth)) * USDT_PER_ETH)
             / parseFloat(ethers.utils.formatUnits(res.token, tokenDecimals));
-    return p.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' USDT/' + tokenSymbol;
+    return fmtNum(p) + ' USDT/' + tokenSymbol;
   };
 
   let effectiveSwapPrice = '—';
   if (swapTokensOut && !A60.isZero()) {
     const p = (parseFloat(ethers.utils.formatEther(A60)) * USDT_PER_ETH)
             / parseFloat(ethers.utils.formatUnits(swapTokensOut, tokenDecimals));
-    effectiveSwapPrice = p.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' USDT/' + tokenSymbol;
+    effectiveSwapPrice = fmtNum(p) + ' USDT/' + tokenSymbol;
   }
 
   const totalTokens = mintToken || null;
+  const hdArrow = `<div style="text-align:center;color:rgba(255,255,255,0.15);font-size:9px;line-height:1;margin:0;">▼</div>`;
+  const hdCell  = (clr, label, value, sub) => `<div style="border:1px solid rgba(${clr},0.4);border-radius:6px;background:rgba(${clr},0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 10px;text-align:center;"><div style="font-size:8px;color:rgba(${clr},0.7);letter-spacing:1.4px;margin-bottom:7px;">${label}</div><div style="font-family:var(--font-display);font-size:18px;letter-spacing:1px;line-height:1.1;">${value}</div>${sub ? `<div style="font-size:9px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">${sub}</div>` : ''}</div>`;
+  const refSplitId = 'hdRef_' + txHash.slice(2, 10);
 
   return `<div class="hd-body">
 
     <div class="hd-section">
-      <div class="hd-section-title">INVESTMENT SPLIT</div>
-      <div class="hd-tree">
-        <div class="hd-row hd-root"><span class="hd-label">Total Investment</span><span class="hd-value">${fU(ethAmount)}</span></div>
-        <div class="hd-row hd-branch"><span class="hd-label">├─ Token-side (A)</span><span class="hd-value">${fU(halfETH)} <span class="hd-pct">50%</span></span></div>
-        <div class="hd-row hd-leaf"><span class="hd-label">│&nbsp;&nbsp;&nbsp;├─ Pool Buy via Uniswap (A60)</span><span class="hd-value">${fU(A60)} <span class="hd-pct">30% of T</span></span></div>
-        <div class="hd-row hd-leaf"><span class="hd-label">│&nbsp;&nbsp;&nbsp;└─ Referral Commissions (A40)</span><span class="hd-value">${fU(A40)} <span class="hd-pct">20% of T</span></span></div>
-        <div class="hd-row hd-branch"><span class="hd-label">└─ Liquidity USDT (B) → addLiquidityETH</span><span class="hd-value">${fU(B)} <span class="hd-pct">50%</span></span></div>
+      <div class="hd-section-title">INVESTMENT FLOW</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        ${hdCell('201,168,76', 'INVESTED AMOUNT', `<span style="color:var(--gold);">${fU(ethAmount)}</span>`, null)}
+        ${hdArrow}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+          ${hdCell('96,165,250', 'TOKEN ACQUISITION', `<span style="color:var(--cream);">${mintToken ? fT(mintToken) : (swapTokensOut ? fT(swapTokensOut) : '—')} ${tokenSymbol}</span>`, 'swap + platform supply')}
+          ${hdCell('96,165,250', 'USDT PAIRING', `<span style="color:var(--cream);">${fU(B)}</span>`, '50% of investment')}
+        </div>
+        ${hdArrow}
+        <div style="border:1px solid rgba(236,72,153,0.4);border-radius:6px;background:rgba(236,72,153,0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 10px;text-align:center;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:#ec4899;box-shadow:0 0 6px rgba(236,72,153,0.8);flex-shrink:0;display:inline-block;"></span>
+            <span style="font-size:8px;color:rgba(236,72,153,0.8);letter-spacing:1.4px;">UNISWAP V2 POOL</span>
+          </div>
+          <div style="font-family:var(--font-display);font-size:18px;letter-spacing:1px;color:#f472b6;line-height:1.1;">${fE(lpTokens)} LP</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">actual LP tokens minted</div>
+        </div>
       </div>
     </div>
 
@@ -235,74 +259,53 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
       <div class="hd-section-title">TOKEN ACQUISITION</div>
       <div class="hd-grid2">
         <div class="hd-kv">
-          <div class="hd-key">POOL BUY — Uniswap V2 (A60, 30% of T)</div>
+          <div class="hd-key">POOL BUY</div>
           <div class="hd-val">${fT(swapTokensOut)} ${tokenSymbol}</div>
-          <div class="hd-sub">Swapped ${fU(A60)} (incl. 0.3% Uniswap fee)</div>
-          <div class="hd-sub">Effective price: ${effectiveSwapPrice}</div>
+          <div class="hd-sub">${effectiveSwapPrice}</div>
         </div>
         <div class="hd-kv">
-          <div class="hd-key">PLATFORM SUPPLY — Contract pre-seeded balance</div>
+          <div class="hd-key">PLATFORM SUPPLY</div>
           <div class="hd-val">${preSeededTokens.gt(0) ? fT(preSeededTokens) : '—'} ${tokenSymbol}</div>
-          <div class="hd-sub">Owner-seeded tokens in contract used to pair with B ETH</div>
-          <div class="hd-sub">Pre-swap spot price: ${fPrice(resBefore)}</div>
+          <div class="hd-sub">${fPrice(resBefore)}</div>
         </div>
       </div>
-      ${totalTokens ? `<div class="hd-total-row"><span>Total tokens deposited to pool</span><span>${fT(totalTokens)} ${tokenSymbol}</span></div>` : ''}
     </div>
 
-    <div class="hd-section">
-      <div class="hd-section-title">POOL STATE (${tokenSymbol} / USDT)</div>
-      <div class="hd-pool-table">
-        <div class="hd-pt-head"><div></div><div>BEFORE INVEST</div><div>AFTER SWAP (60%)</div><div>AFTER ADD LIQUIDITY</div></div>
-        <div class="hd-pt-row"><div class="hd-pt-label">USDT</div><div>${resBefore ? fU(resBefore.eth) : '—'}</div><div>${resMid ? fU(resMid.eth) : '—'}</div><div>${resAfter ? fU(resAfter.eth) : '—'}</div></div>
-        <div class="hd-pt-row"><div class="hd-pt-label">${tokenSymbol}</div><div>${resBefore ? fT(resBefore.token) : '—'}</div><div>${resMid ? fT(resMid.token) : '—'}</div><div>${resAfter ? fT(resAfter.token) : '—'}</div></div>
-        <div class="hd-pt-row hd-pt-price"><div class="hd-pt-label">PRICE</div><div>${fPrice(resBefore)}</div><div>${fPrice(resMid)}</div><div>${fPrice(resAfter)}</div></div>
-      </div>
-    </div>
-
-    <div class="hd-section">
-      <div class="hd-section-title">LIQUIDITY ADDED TO POOL</div>
-      <div class="hd-grid2">
-        <div class="hd-kv"><div class="hd-key">USDT DEPOSITED</div><div class="hd-val">${fU(mintETH)}</div><div class="hd-sub">B half of investment</div></div>
-        <div class="hd-kv"><div class="hd-key">${tokenSymbol} DEPOSITED</div><div class="hd-val">${fT(mintToken)} ${tokenSymbol}</div><div class="hd-sub">A60 swap tokens + contract pre-seeded supply (any surplus stays in contract)</div></div>
-        <div class="hd-kv"><div class="hd-key">LP TOKENS RECEIVED</div><div class="hd-val">${fE(lpTokens)} LP</div><div class="hd-sub">Locked in contract until unlock period ends</div></div>
-      </div>
-    </div>
-
-    <div class="hd-section">
-      <div class="hd-section-title">REFERRAL COMMISSION SPLIT</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:11px;font-family:var(--font-mono);">
-        <span style="color:var(--muted);">Referral commissions (A40 — 20% of total investment)</span>
-        <span style="color:var(--cream);">${fU(A40)}</span>
-      </div>
-      <div class="hd-ref-list">
-        ${refEvents.length === 0
-          ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">No commission events found in this transaction.</div>`
-          : refEvents.map(ev => {
-              const short = ev.recipient;
-              const poolFloat = parseFloat(ethers.utils.formatEther(A40));
-              const amtFloat  = parseFloat(ethers.utils.formatEther(ev.amount));
-              const pctOfPool = poolFloat > 0 ? amtFloat / poolFloat * 100 : 0;
-              const rateLabel = pctOfPool > 0
-                ? pctOfPool.toFixed(pctOfPool >= 1 ? 1 : 2).replace(/\.?0+$/, '') + '% of pool'
-                : '';
-              const addrDisplay = ev.isPlatform
-                ? `<span style="color:var(--gold);font-family:var(--font-mono);" title="${ev.recipient}">${short}</span>`
-                : `<span title="${ev.recipient}">${short}</span>`;
-              return `<div class="hd-ref-row">
-                <div class="hd-ref-lvl">L${ev.level}<br><span style="font-size:8px;">${rateLabel}</span></div>
-                <div class="hd-ref-addr">${addrDisplay}</div>
-                <div class="hd-ref-badge paid">✓ PAID</div>
-                <div class="hd-ref-amt">${fU(ev.amount)}</div>
-              </div>`;
-            }).join('')
-        }
-      </div>
-    </div>
-
-    <div class="hd-tx-row">
+    <div class="hd-tx-row" style="flex-wrap:wrap;gap:8px;">
       <span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TX</span>
-      <span style="font-family:var(--font-mono);font-size:11px;color:var(--cream);word-break:break-all;">${txHash}</span>
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--cream);word-break:break-all;flex:1;">${txHash}</span>
+      <button onclick="openHistRefSplitPopup('${refSplitId}')" style="flex-shrink:0;padding:5px 12px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);border-radius:4px;color:var(--gold);font-family:var(--font-mono);font-size:10px;letter-spacing:1.2px;cursor:pointer;">REFERRAL SPLIT ›</button>
+    </div>
+
+    <div id="${refSplitId}_pop" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;pointer-events:all;" onclick="if(event.target===this)closeHistRefSplitPopup('${refSplitId}')">
+      <div class="hd-ref-popup-body" style="background:var(--panel);border:1px solid rgba(201,168,76,0.3);border-radius:12px;max-width:680px;width:94%;padding:22px;">
+        <div style="font-family:var(--font-display);font-size:18px;letter-spacing:2px;color:var(--gold);margin-bottom:4px;">REFERRAL SPLIT</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;">Commissions split across eligible levels &nbsp;·&nbsp; ${fU3(A40)}</div>
+        <div class="hd-ref-list" style="max-height:55vh;overflow-y:auto;margin-bottom:16px;">
+          ${refEvents.length === 0
+            ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">No commission events found in this transaction.</div>`
+            : refEvents.map(ev => {
+                const short = ev.recipient;
+                const poolFloat = parseFloat(ethers.utils.formatEther(A40));
+                const amtFloat  = parseFloat(ethers.utils.formatEther(ev.amount));
+                const pctOfPool = poolFloat > 0 ? amtFloat / poolFloat * 100 : 0;
+                const rateLabel = pctOfPool > 0
+                  ? pctOfPool.toFixed(pctOfPool >= 1 ? 1 : 2).replace(/\.?0+$/, '') + '% of pool'
+                  : '';
+                const addrDisplay = ev.isPlatform
+                  ? `<span class="addr-text" style="color:var(--gold);" title="${ev.recipient}">${ev.recipient}</span>`
+                  : `<span class="addr-text" title="${ev.recipient}">${ev.recipient}</span>`;
+                return `<div class="hd-ref-row">
+                  <div class="hd-ref-lvl">L${ev.level}<br><span style="font-size:8px;color:var(--muted);white-space:nowrap;">${rateLabel}</span></div>
+                  <div class="hd-ref-addr">${addrDisplay}<button class="hd-copy-btn" onclick="navigator.clipboard.writeText('${ev.recipient}')" title="Copy address">⧉</button></div>
+                  <div class="hd-ref-badge paid">✓ PAID</div>
+                  <div class="hd-ref-amt">${fU3(ev.amount)}</div>
+                </div>`;
+              }).join('')
+          }
+        </div>
+        <button onclick="closeHistRefSplitPopup('${refSplitId}')" style="width:100%;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;">CLOSE</button>
+      </div>
     </div>
 
   </div>`;
@@ -314,9 +317,12 @@ async function loadPoolHistory() {
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
 
   try {
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock   = getFromBlock(latestBlock);
+
     const [claimedEvs, removedEvs] = await Promise.all([
-      contract.queryFilter(contract.filters.LPClaimed(walletAddress)),
-      contract.queryFilter(contract.filters.LPRemoved(walletAddress)),
+      contract.queryFilter(contract.filters.LPClaimed(walletAddress), fromBlock, 'latest'),
+      contract.queryFilter(contract.filters.LPRemoved(walletAddress), fromBlock, 'latest'),
     ]);
 
     const SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
@@ -335,7 +341,7 @@ async function loadPoolHistory() {
       const logs = await provider.getLogs({
         address: pairAddr,
         topics:  [SWAP_TOPIC, null, paddedUser],
-        fromBlock: 0,
+        fromBlock,
         toBlock: 'latest',
       });
       if (!logs.length) continue;
@@ -380,7 +386,7 @@ async function loadPoolHistory() {
       })),
       ...removedEvs.map(ev => ({
         type: 'remove', tokenAddr: ev.args.token,
-        ethReceived: ev.args.ethReceived, lpAmount: ev.args.lpAmount,
+        ethReturned: ev.args.ethReturned, lpAmount: ev.args.lpAmount,
         blockNumber: ev.blockNumber, txHash: ev.transactionHash,
       })),
     ].sort((a, b) => b.blockNumber - a.blockNumber);
@@ -407,11 +413,9 @@ async function loadPoolHistory() {
     el.innerHTML = all.map(e => {
       const date = blockMap[e.blockNumber] || '';
       const tx   = e.txHash.slice(0,10) + '…';
-      const fE   = bn => parseFloat(ethers.utils.formatEther(bn)).toFixed(6);
-      const fT   = (bn, dec) => parseFloat(ethers.utils.formatUnits(bn, dec || 18))
-                                  .toLocaleString(undefined, { maximumFractionDigits: 4 });
-
-      const fEU = bn => (parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT';
+      const fE   = bn => fmtNum(parseFloat(ethers.utils.formatEther(bn)));
+      const fT   = (bn, dec) => fmtNum(parseFloat(ethers.utils.formatUnits(bn, dec || 18)));
+      const fEU = bn => fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT';
       if (e.type === 'buy') return `
         <div class="ph-row">
           <div class="ph-badge buy">BUY</div>
@@ -427,13 +431,13 @@ async function loadPoolHistory() {
       if (e.type === 'claim') return `
         <div class="ph-row">
           <div class="ph-badge claim">LP CLAIM</div>
-          <div class="ph-main"><div class="ph-title">${parseFloat(ethers.utils.formatEther(e.lpAmount)).toFixed(6)} LP — ${e.tokenSymbol}</div><div class="ph-sub">LP tokens transferred to your wallet (lock expired)</div></div>
+          <div class="ph-main"><div class="ph-title">${fmtNum(parseFloat(ethers.utils.formatEther(e.lpAmount)))} LP — ${e.tokenSymbol}</div><div class="ph-sub">LP tokens transferred to your wallet (lock expired)</div></div>
           <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
         </div>`;
       if (e.type === 'remove') return `
         <div class="ph-row">
           <div class="ph-badge remove">LP REMOVE</div>
-          <div class="ph-main"><div class="ph-title">${parseFloat(ethers.utils.formatEther(e.lpAmount)).toFixed(6)} LP removed — ${e.tokenSymbol}</div><div class="ph-sub">Received ${fEU(e.ethReceived)} + tokens back from pool</div></div>
+          <div class="ph-main"><div class="ph-title">${fmtNum(parseFloat(ethers.utils.formatEther(e.lpAmount)))} LP removed — ${e.tokenSymbol}</div><div class="ph-sub">Received ${fEU(e.ethReturned)} + tokens back from pool</div></div>
           <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
         </div>`;
       return '';
@@ -451,7 +455,9 @@ async function loadRewardHistory() {
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
 
   try {
-    const events = await contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress));
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock   = getFromBlock(latestBlock);
+    const events = await contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress), fromBlock, 'latest');
 
     if (!events.length) {
       el.innerHTML = '<div class="empty-state">No reward claims found.</div>';
@@ -510,8 +516,8 @@ async function loadRewardHistory() {
       const date    = ts ? new Date(ts * 1000).toLocaleString() : '';
       const tokens  = fEth(ev.args.tokensAmount);
       const ethEq   = fEth(ev.args.ethEquivalent);
-      const usdtVal = (ethEq * USDT_PER_ETH).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const tokensFmt = tokens.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      const usdtVal = fmtNum(ethEq * USDT_PER_ETH);
+      const tokensFmt = fmtNum(tokens);
       const txHash  = ev.transactionHash;
       const txShort = txHash.slice(0, 10) + '…';
 
@@ -546,8 +552,8 @@ async function loadRewardHistory() {
           const lock = locks[idx];
           if (lock) {
             const sym     = symCache[lock.token] || lock.token;
-            const invested = (fEth(lock.ethInvested) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
-            const lp      = fEth(lock.lpAmount).toFixed(6);
+            const invested = fmtNum(fEth(lock.ethInvested) * USDT_PER_ETH);
+            const lp      = fmtNum(fEth(lock.lpAmount));
             positionDetail = `${sym} position · $${invested} invested · ${lp} LP`;
           }
         }
@@ -572,9 +578,30 @@ async function loadRewardHistory() {
   }
 }
 
-window.switchHistoryTab    = switchHistoryTab;
-window._refreshHistoryTab  = _refreshHistoryTab;
-window.loadHistory         = loadHistory;
-window.toggleHistoryDetail = toggleHistoryDetail;
-window.loadPoolHistory     = loadPoolHistory;
-window.loadRewardHistory   = loadRewardHistory;
+function openHistRefSplitPopup(id) {
+  const el = document.getElementById(id + '_pop');
+  if (!el) return;
+  document.body.appendChild(el);
+  el.style.display = 'flex';
+  document.body.style.overflow      = 'hidden';
+  document.body.style.pointerEvents = 'none';
+  document.body.classList.add('modal-open');
+}
+
+function closeHistRefSplitPopup(id) {
+  const el = document.getElementById(id + '_pop');
+  if (!el) return;
+  el.style.display = 'none';
+  document.body.style.overflow      = '';
+  document.body.style.pointerEvents = '';
+  document.body.classList.remove('modal-open');
+}
+
+window.switchHistoryTab        = switchHistoryTab;
+window._refreshHistoryTab      = _refreshHistoryTab;
+window.loadHistory             = loadHistory;
+window.toggleHistoryDetail     = toggleHistoryDetail;
+window.openHistRefSplitPopup   = openHistRefSplitPopup;
+window.closeHistRefSplitPopup  = closeHistRefSplitPopup;
+window.loadPoolHistory         = loadPoolHistory;
+window.loadRewardHistory       = loadRewardHistory;

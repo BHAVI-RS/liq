@@ -29,8 +29,26 @@ async function main() {
   const tokenAddress = await hordexToken.getAddress();
   console.log("HordexToken deployed to:", tokenAddress);
 
-  // ── Deploy Liquidity ──
-  const Liquidity = await hre.ethers.getContractFactory("Liquidity");
+  // ── Deploy LiquidityMath library ──
+  const LiquidityMath = await hre.ethers.getContractFactory("LiquidityMath");
+  const liquidityMath = await LiquidityMath.deploy();
+  await liquidityMath.waitForDeployment();
+  const libAddress = await liquidityMath.getAddress();
+  console.log("LiquidityMath  deployed to:", libAddress);
+
+  // ── Deploy LiquidityViewLib (linked to LiquidityMath) ──
+  const LiquidityViewLib = await hre.ethers.getContractFactory("LiquidityViewLib", {
+    libraries: { LiquidityMath: libAddress },
+  });
+  const liquidityViewLib = await LiquidityViewLib.deploy();
+  await liquidityViewLib.waitForDeployment();
+  const libViewAddress = await liquidityViewLib.getAddress();
+  console.log("LiquidityViewLib deployed to:", libViewAddress);
+
+  // ── Deploy Liquidity (linked to both libraries) ──
+  const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
+    libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
+  });
   const liquidity = await Liquidity.deploy(UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress);
   await liquidity.waitForDeployment();
   const liquidityAddress = await liquidity.getAddress();
@@ -82,6 +100,12 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   const frontendConfig = path.join(__dirname, "..", "frontend", "contract-config.js");
   fs.writeFileSync(configPath,     configContent);
   fs.writeFileSync(frontendConfig, configContent);
+
+  const indexPath = path.join(__dirname, "..", "frontend", "index.html");
+  fs.writeFileSync(indexPath,
+    fs.readFileSync(indexPath, "utf8")
+      .replace(/contract-config\.js\?v=\d+/g, `contract-config.js?v=${Date.now()}`)
+  );
   console.log("\ncontract-config.js updated ✓ (root + frontend)");
 
   console.log("\n── Deployment Summary ──────────────────────────");

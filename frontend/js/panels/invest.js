@@ -4,6 +4,12 @@ const PACKAGES = {
   elite:         [2500, 5000, 10000, 25000],
   institutional: [50000, 100000, 250000, 500000]
 };
+// RGB base colours for each category (border & tint shade)
+const PKG_CAT_RGB = {
+  basic:         [234, 179,   8],  // yellow
+  elite:         [ 74, 222, 128],  // green
+  institutional: [167, 139, 250],  // purple
+};
 const PKG_CATS = ['basic', 'elite', 'institutional'];
 let _ethPriceUSD      = null;
 let _activePkgCat     = 'basic';
@@ -49,21 +55,64 @@ function switchPkgCat(cat) {
     btn.classList.toggle('pkg-cat-active', c === cat);
   });
   renderPkgGrid();
+  renderTierInfo(cat);
 }
+
+// For basic, only packages >= $100 get category colour
+const PKG_COLOUR_FROM = { basic: 100, elite: 0, institutional: 0 };
+// Per-tier opacity range [min, max] — each tier starts stronger than the previous,
+// so $2500 (elite min) reads heavier than $1000 (basic max) even across tab switches.
+const PKG_OPACITY_RANGE = {
+  basic:         [0.15, 0.50],
+  elite:         [0.45, 0.78],
+  institutional: [0.72, 1.00],
+};
 
 function renderPkgGrid() {
   const grid = document.getElementById('pkgGrid');
   if (!grid) return;
   grid.innerHTML = '';
-  PACKAGES[_activePkgCat].forEach(usdt => {
-    const ethAmt = (usdt / USDT_PER_ETH).toFixed(usdt < 1000 ? 4 : 2);
+
+  const pkgs         = PACKAGES[_activePkgCat];
+  const count        = pkgs.length;
+  const [r, g, b]    = PKG_CAT_RGB[_activePkgCat];
+  const minColour    = PKG_COLOUR_FROM[_activePkgCat] ?? 0;
+  const [oMin, oMax] = PKG_OPACITY_RANGE[_activePkgCat];
+
+  const colouredPkgs = pkgs.filter(u => u >= minColour);
+  const clrCount     = colouredPkgs.length;
+
+  grid.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
+
+  pkgs.forEach((usdt) => {
+    const isSelected = usdt === _selectedPkgUSD;
+    const useColour  = usdt >= minColour;
+    const clrIdx     = colouredPkgs.indexOf(usdt);
+    const ratio      = clrCount <= 1 ? 1 : clrIdx / (clrCount - 1);
+
+    const opacity   = useColour ? oMin + ratio * (oMax - oMin) : undefined;
+    const borderClr = useColour ? `rgba(${r},${g},${b},${opacity.toFixed(2)})` : 'var(--border)';
+    const hoverClr  = useColour ? `rgba(${r},${g},${b},${Math.min(opacity + 0.2, 1).toFixed(2)})` : 'rgba(255,255,255,0.3)';
+
+    const ethAmt  = fmtNum(usdt / USDT_PER_ETH);
     const usdtFmt = usdt.toLocaleString('en-US');
+
     const card = document.createElement('div');
-    card.className = 'pkg-card' + (usdt === _selectedPkgUSD ? ' selected' : '');
+    card.className = 'pkg-card' + (isSelected ? ' selected' : '');
+    card.style.borderColor = isSelected ? hoverClr : borderClr;
+    card.style.background  = 'var(--bg)';
+    if (isSelected && useColour) {
+      card.style.boxShadow = `0 0 0 1px rgba(${r},${g},${b},${Math.min(opacity + 0.1, 1).toFixed(2)}), 0 0 14px rgba(${r},${g},${b},0.45), 0 0 30px rgba(${r},${g},${b},0.18)`;
+    } else if (isSelected) {
+      card.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.2), 0 0 10px rgba(255,255,255,0.12), 0 0 22px rgba(255,255,255,0.06)';
+    }
+
     card.innerHTML = `
       <div class="pkg-card-usd">${usdtFmt} USDT</div>
-      <div class="pkg-card-eth">${ethAmt} ETH</div>
     `;
+
+    card.addEventListener('mouseenter', () => { card.style.borderColor = hoverClr; });
+    card.addEventListener('mouseleave', () => { card.style.borderColor = isSelected ? hoverClr : borderClr; });
     card.onclick = () => selectPackage(usdt);
     grid.appendChild(card);
   });
@@ -71,14 +120,9 @@ function renderPkgGrid() {
 
 function selectPackage(usdt) {
   _selectedPkgUSD = usdt;
-  _resetInvestBtn();
-  const ethAmt = (usdt / USDT_PER_ETH).toFixed(6);
-  document.getElementById('investAmount').value = ethAmt;
-  document.getElementById('pkgSummaryUSD').textContent = usdt.toLocaleString('en-US') + ' USDT';
-  document.getElementById('pkgSummaryETH').textContent = ethAmt;
-  document.getElementById('pkgSummary').style.display = 'block';
+  document.getElementById('investAmount').value = parseFloat((usdt / USDT_PER_ETH).toFixed(5)).toString();
   renderPkgGrid();
-  computeInvestPreview();
+  showInvestConfirmModal();
 }
 
 window._investPreviewData = null;
@@ -144,7 +188,7 @@ async function computeInvestPreview() {
     const totalTokensF = poolTokensF + platformTokensF;
     const td  = typeof investTokenData !== 'undefined' ? investTokenData.get(tokenAddr.toLowerCase()) : null;
     const sym = td ? td.symbol : '—';
-    const fmt = n => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const fmt = n => fmtNum(n);
 
     if (poolEl) poolEl.textContent = fmt(poolTokensF)  + ' ' + sym;
     if (platEl) platEl.textContent = fmt(platformTokensF) + ' ' + sym;
@@ -158,8 +202,8 @@ async function computeInvestPreview() {
         const ratePPM   = Number(ratesPPM[idx90]);
         const investUSDT = ethAmt * USDT_PER_ETH;
         const rewardUSDT = investUSDT * ratePPM / 1_000_000;
-        const pct        = (ratePPM / 10_000).toFixed(1);
-        if (stakingEl)  stakingEl.textContent  = rewardUSDT > 0 ? '+$' + rewardUSDT.toLocaleString(undefined, {maximumFractionDigits: 2}) + ' USDT' : '—';
+        const pct        = fmtNum(ratePPM / 10_000, 1);
+        if (stakingEl)  stakingEl.textContent  = rewardUSDT > 0 ? '+$' + fmtNum(rewardUSDT) + ' USDT' : '—';
         if (stakingPct) stakingPct.textContent = rewardUSDT > 0 ? pct + '% return' : '';
       }
     } catch(_) {
@@ -178,46 +222,145 @@ async function computeInvestPreview() {
   }
 }
 
-function showInvestConfirmModal() {
+async function showInvestConfirmModal() {
   if (!requireConnected()) return;
   const tokenAddr = document.getElementById('investTokenSelect').value;
   if (!tokenAddr) { toast('Select a token first', 'warn'); return; }
   const ethAmtStr = document.getElementById('investAmount').value;
-  if (!parseFloat(ethAmtStr) > 0) { toast('Select an investment package first', 'warn'); return; }
+  const ethAmt = parseFloat(ethAmtStr);
+  if (!ethAmt || ethAmt <= 0) { toast('Select an investment package first', 'warn'); return; }
 
-  const d    = window._investPreviewData;
-  const td   = typeof investTokenData !== 'undefined' ? investTokenData.get(tokenAddr.toLowerCase()) : null;
-  const sym  = td ? td.symbol : '—';
-  const usdt = (parseFloat(ethAmtStr) * USDT_PER_ETH).toLocaleString('en-US');
-  const fmt  = n => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  const content    = document.getElementById('investPreviewContent');
+  const confirmBtn = document.getElementById('investConfirmBtn');
 
-  const content = document.getElementById('investPreviewContent');
-  if (content) {
-    content.innerHTML = `
-      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;">
-        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:4px;">PACKAGE</div>
-        <div style="font-family:var(--font-mono);font-size:15px;color:var(--gold);">${usdt} USDT</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;">
-          <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:4px;">POOL BUY</div>
-          <div style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">${d ? fmt(d.poolTokensF) + ' ' + sym : '—'}</div>
-        </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;">
-          <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:4px;">PLATFORM BUY</div>
-          <div style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">${d ? fmt(d.platformTokensF) + ' ' + sym : '—'}</div>
-        </div>
-      </div>
-      <div style="background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);border-radius:6px;padding:12px;">
-        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:4px;">TOTAL TOKENS ACQUIRED</div>
-        <div style="font-family:var(--font-mono);font-size:18px;color:var(--gold);">${d ? fmt(d.totalTokensF) + ' ' + sym : 'Computing…'}</div>
-      </div>`;
-  }
+  if (content) content.innerHTML = `<div style="text-align:center;padding:28px;color:var(--muted);font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;">Computing details<span class="ld"><span></span><span></span><span></span></span></div>`;
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'LOADING…'; }
   document.getElementById('investConfirmModal').style.display = 'flex';
+
+  const td      = typeof investTokenData !== 'undefined' ? investTokenData.get(tokenAddr.toLowerCase()) : null;
+  const sym     = td ? td.symbol : '—';
+  const usdt    = _selectedPkgUSD || (ethAmt * USDT_PER_ETH);
+  const fmt     = n => fmtNum(n);
+  const fmtU    = n => fmtNum(n);
+
+  try {
+    const totalWei     = ethers.utils.parseEther(ethAmtStr);
+    const A60          = totalWei.div(2).mul(60).div(100);
+    const A40          = totalWei.div(2).mul(40).div(100);
+    const liquidityETH = totalWei.div(2);
+
+    const routerAbi  = ['function getAmountsOut(uint256,address[]) view returns (uint256[])'];
+    const factoryAbi = ['function getPair(address,address) view returns (address)'];
+    const pairAbi    = [
+      'function getReserves() view returns (uint112,uint112,uint32)',
+      'function token0() view returns (address)',
+      'function totalSupply() view returns (uint256)',
+    ];
+    const erc20Abi = ['function decimals() view returns (uint8)'];
+
+    const router  = new ethers.Contract(ROUTER_ADDRESS,  routerAbi,  provider);
+    const factory = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, provider);
+
+    const [amountsOut, pairAddr] = await Promise.all([
+      router.getAmountsOut(A60, [WETH_ADDRESS, tokenAddr]),
+      factory.getPair(tokenAddr, WETH_ADDRESS),
+    ]);
+    const poolTokensBN = amountsOut[1];
+
+    let platformTokensBN = ethers.BigNumber.from(0);
+    let lpMintedF = null;
+    let dec = 18;
+
+    if (pairAddr && pairAddr !== ethers.constants.AddressZero) {
+      const pair  = new ethers.Contract(pairAddr, pairAbi, provider);
+      const erc20 = new ethers.Contract(tokenAddr, erc20Abi, provider);
+      const [[r0, r1], tok0, d, lpSupply] = await Promise.all([
+        pair.getReserves(), pair.token0(), erc20.decimals().catch(() => 18), pair.totalSupply(),
+      ]);
+      dec = Number(d);
+      const isToken0 = tok0.toLowerCase() === tokenAddr.toLowerCase();
+      const resToken = isToken0 ? r0 : r1;
+      const resETH   = isToken0 ? r1 : r0;
+      if (!resETH.isZero()) {
+        platformTokensBN = A40.mul(resToken).div(resETH);
+        if (!lpSupply.isZero() && !resToken.isZero()) {
+          const totalTokensBN = poolTokensBN.add(platformTokensBN);
+          const lpFromTokens  = lpSupply.mul(totalTokensBN).div(resToken);
+          const lpFromETH     = lpSupply.mul(liquidityETH).div(resETH);
+          const lpMintedBN    = lpFromTokens.lt(lpFromETH) ? lpFromTokens : lpFromETH;
+          lpMintedF = parseFloat(ethers.utils.formatEther(lpMintedBN));
+        }
+      }
+    }
+
+    const poolTokensF     = parseFloat(ethers.utils.formatUnits(poolTokensBN, dec));
+    const platformTokensF = parseFloat(ethers.utils.formatUnits(platformTokensBN, dec));
+    const totalTokensF    = poolTokensF + platformTokensF;
+
+    let stakingBox = '';
+    try {
+      const [durDays, ratesPPM] = await contract.getStakingRatesForAmount(totalWei);
+      const idx90 = Array.from(durDays).findIndex(d => Number(d) === 90);
+      if (idx90 !== -1) {
+        const ratePPM    = Number(ratesPPM[idx90]);
+        const rewardUSDT = usdt * ratePPM / 1_000_000;
+        const pct        = fmtNum(ratePPM / 10_000, 1);
+        stakingBox = `
+          <div style="text-align:center;color:rgba(255,255,255,0.15);font-size:9px;line-height:1;margin:0;">▼</div>
+          <div style="border:1px solid rgba(74,222,128,0.4);border-radius:6px;background:rgba(74,222,128,0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 10px;text-align:center;">
+            <div style="font-size:8px;color:rgba(74,222,128,0.7);letter-spacing:1.4px;margin-bottom:7px;">STAKING REWARD · 90-DAY BASE RATE</div>
+            <div style="font-family:var(--font-display);font-size:20px;letter-spacing:1px;color:#4ade80;line-height:1.1;">+${fmtU(rewardUSDT)} USDT</div>
+            <div style="font-size:9px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">${pct}% return on investment</div>
+          </div>`;
+      }
+    } catch(_) {}
+
+    const arrow = `<div style="text-align:center;color:rgba(255,255,255,0.15);font-size:9px;line-height:1;margin:0;">▼</div>`;
+    const cell  = (clr, label, value, sub) => `
+      <div style="border:1px solid rgba(${clr},0.4);border-radius:6px;background:rgba(${clr},0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 10px;text-align:center;">
+        <div style="font-size:8px;color:rgba(${clr},0.7);letter-spacing:1.4px;margin-bottom:7px;">${label}</div>
+        <div style="font-family:var(--font-display);font-size:20px;letter-spacing:1px;line-height:1.1;">${value}</div>
+        ${sub ? `<div style="font-size:9px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">${sub}</div>` : ''}
+      </div>`;
+
+    if (content) {
+      content.style.maxHeight = '';
+      content.style.overflowY = '';
+      content.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          ${cell('201,168,76', 'INVESTED AMOUNT', `<span style="color:var(--gold);">${usdt.toLocaleString('en-US',{maximumFractionDigits:0})} USDT</span>`, null)}
+          ${arrow}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            ${cell('96,165,250', 'TOKEN ACQUISITION', `<span style="color:var(--cream);">${fmt(totalTokensF)} ${sym}</span>`, null)}
+            ${cell('96,165,250', 'USDT PAIRING', `<span style="color:var(--cream);">${fmtU(usdt / 2)} USDT</span>`, null)}
+          </div>
+          ${arrow}
+          <div style="border:1px solid rgba(236,72,153,0.4);border-radius:6px;background:rgba(236,72,153,0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 10px;text-align:center;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;">
+              <span style="width:6px;height:6px;border-radius:50%;background:#ec4899;box-shadow:0 0 6px rgba(236,72,153,0.8);flex-shrink:0;display:inline-block;"></span>
+              <span style="font-size:8px;color:rgba(236,72,153,0.8);letter-spacing:1.4px;">UNISWAP V2 POOL</span>
+            </div>
+            <div style="font-family:var(--font-display);font-size:20px;letter-spacing:1px;color:#f472b6;line-height:1.1;">${lpMintedF !== null ? fmt(lpMintedF) + ' LP' : '—'}</div>
+            <div style="font-size:9px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">estimated LP tokens minted</div>
+          </div>
+          ${arrow}
+          ${cell('45,212,191', 'LOCK-IN', `<span style="color:#2dd4bf;">90 days</span>`, null)}
+          ${stakingBox}
+        </div>
+      `;
+    }
+
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'CONFIRM & INVEST'; }
+  } catch(e) {
+    if (content) content.innerHTML = `<div style="padding:16px 0;color:#f87171;font-family:var(--font-mono);font-size:12px;">Failed to load details. You may still proceed.</div>`;
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'CONFIRM & INVEST'; }
+  }
 }
 
 function closeInvestConfirmModal() {
   document.getElementById('investConfirmModal').style.display = 'none';
+  const btn = document.getElementById('investConfirmBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'CONFIRM & INVEST'; }
 }
 
 function confirmInvest() {
@@ -225,10 +368,6 @@ function confirmInvest() {
   invest();
 }
 
-function _resetInvestBtn() {
-  const btn = document.getElementById('investBtn');
-  if (btn) { btn.textContent = 'PROVIDE LIQUIDITY'; btn.style.background = ''; btn.disabled = false; }
-}
 
 async function invest() {
   if (!requireConnected()) return;
@@ -240,23 +379,13 @@ async function invest() {
   const ethAmt    = parseFloat(ethAmtStr);
   if (!ethAmt || ethAmt <= 0) { toast('Select an investment package first', 'warn'); return; }
 
-  const btn = document.getElementById('investBtn');
-  btn.disabled    = true;
-  btn.textContent = 'PROCESSING…';
-
   _txBegin();
   try {
     const totalWei = ethers.utils.parseEther(ethAmtStr);
 
-    const A60U  = ((ethAmt / 2 * 0.60) * USDT_PER_ETH).toLocaleString('en-US', {maximumFractionDigits:2});
-    const A40U  = ((ethAmt / 2 * 0.40) * USDT_PER_ETH).toLocaleString('en-US', {maximumFractionDigits:2});
-    const BU    = ((ethAmt / 2)         * USDT_PER_ETH).toLocaleString('en-US', {maximumFractionDigits:2});
-    toast(`Pool buy: ${A60U} USDT | Commissions: ${A40U} USDT | Liquidity: ${BU} USDT`, 'info');
-
     toast('Confirm transaction in MetaMask…', 'info');
     const tx = await contract.invest(tokenAddr, { value: totalWei });
 
-    btn.textContent = 'WAITING FOR CONFIRMATION…';
     toast('Transaction sent — waiting for confirmation…', 'info');
 
     const receipt = await tx.wait();
@@ -270,7 +399,7 @@ async function invest() {
         try {
           const parsed = iface.parseLog(log);
           if (parsed.name === 'Invested') {
-            lpReceived = parseFloat(ethers.utils.formatEther(parsed.args.lpTokens)).toFixed(8);
+            lpReceived = fmtNum(parseFloat(ethers.utils.formatEther(parsed.args.lpTokens)));
             break;
           }
         } catch(_) {}
@@ -286,11 +415,8 @@ async function invest() {
     );
 
     document.getElementById('investAmount').value = '';
-    document.getElementById('investTokenPreview').style.display = 'none';
-    document.getElementById('pkgSummary').style.display = 'none';
     _selectedPkgUSD = null;
     renderPkgGrid();
-    _resetInvestBtn();
 
     invalidateTabs('dashboard', 'investments');
     loadDashboard();
@@ -300,7 +426,6 @@ async function invest() {
     _txDone();
     const msg = e.reason || e?.error?.message || e.message || 'Unknown error';
     toast('Investment failed: ' + msg, 'error');
-    _resetInvestBtn();
   }
 }
 
@@ -385,8 +510,8 @@ async function loadInvestTokens() {
           <div class="token-info">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <span class="token-symbol">${t.symbol} — ${t.name}</span>
-              ${isFeatured && !isInProgress ? `<span style="background:var(--success,#26d97f);color:#000;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;text-transform:uppercase;">Featured</span>` : ''}
-              ${isInProgress ? `<span style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.45);font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 8px;border-radius:4px;">${inProgressLabel}</span>` : ''}
+              ${isFeatured && !isInProgress ? `<span style="background:var(--success,#26d97f);color:#000;font-size:8.5px;font-weight:700;letter-spacing:.05em;padding:1px 5px;border-radius:3px;text-transform:uppercase;">Featured</span>` : ''}
+              ${isInProgress ? `<span style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.45);font-size:8.5px;font-weight:600;letter-spacing:.05em;padding:1px 5px;border-radius:3px;">${inProgressLabel}</span>` : ''}
             </div>
             <div class="token-addr">${t.tokenAddress}</div>
           </div>
@@ -395,11 +520,15 @@ async function loadInvestTokens() {
       `;
       if (!isInProgress) {
         div.onclick = () => {
-          _setSelectedInvestToken(addr);
-          const card = document.getElementById('provideLiquidityCard');
-          if (card) {
-            card.style.display = '';
-            setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+          if (window.innerWidth <= 768) {
+            openTokenDetail(addr);
+          } else {
+            _setSelectedInvestToken(addr);
+            const card = document.getElementById('provideLiquidityCard');
+            if (card) {
+              card.style.display = '';
+              setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+            }
           }
         };
       }
@@ -439,6 +568,29 @@ async function openTokenDetail(addr) {
   document.getElementById('tdName').textContent   = t.name;
   document.getElementById('tdAddr').textContent   = t.tokenAddress;
 
+  // If the owner has set a tag (inProgressLabel), this token is not open for investment.
+  // Replace the "SELECT THIS TOKEN" button with a plain "CLOSE" button.
+  const selectBtn = document.getElementById('tdSelectBtn');
+  if (selectBtn) {
+    const hasOwnerTag = (t.inProgressLabel || '').length > 0;
+    if (hasOwnerTag) {
+      selectBtn.textContent = t.inProgressLabel.toUpperCase();
+      selectBtn.style.background    = 'transparent';
+      selectBtn.style.border        = '1px solid rgba(234,179,8,0.35)';
+      selectBtn.style.color         = '#eab308';
+      selectBtn.style.cursor        = 'default';
+      selectBtn.style.pointerEvents = 'none';
+    } else {
+      selectBtn.textContent         = 'SELECT THIS TOKEN';
+      selectBtn.style.background    = 'var(--gold)';
+      selectBtn.style.border        = 'none';
+      selectBtn.style.color         = 'var(--bg)';
+      selectBtn.style.cursor        = 'pointer';
+      selectBtn.style.pointerEvents = '';
+      selectBtn.onclick             = selectTokenFromDetail;
+    }
+  }
+
   try {
     const tokenAbi = [
       "function totalSupply() view returns (uint256)",
@@ -451,7 +603,7 @@ async function openTokenDetail(addr) {
     ]);
     const dec = Number(decimals);
     const supplyFloat = parseFloat(ethers.utils.formatUnits(totalSupply, dec));
-    const supplyFormatted = supplyFloat.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const supplyFormatted = fmtNum(supplyFloat);
     document.getElementById('tdSupply').textContent = `${supplyFormatted} ${t.symbol}`;
 
     const price = await _getTokenPoolPrice(addr);
@@ -491,7 +643,6 @@ function _setSelectedInvestToken(addr) {
   _selectedInvestAddr = addr;
   const select = document.getElementById('investTokenSelect');
   if (select) select.value = addr;
-  _resetInvestBtn();
 
   const infoEl = document.getElementById('investSelectedTokenInfo');
   if (infoEl) {

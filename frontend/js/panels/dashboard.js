@@ -33,6 +33,69 @@ var _dashStakingHWM          = 0;
 var _dashRefNow    = 0;
 var _dashWallRef   = 0;
 
+// Cached lock data for badge popup functions (set at end of loadDashboard).
+var _dashLpLocks = [];
+var _dashEffNow  = 0;
+
+// ── Team Wealth real-time ticker ──
+var _dashTeamWealthTicker    = null;
+var _dashTeamWealthFetcher   = null;
+var _dashTeamWealthParams    = [];  // wealthParams for each downline member
+var _dashTeamWealthAddrs     = [];  // downline addresses (set once per load)
+var _dashTeamWealthLastFetch = 0;
+
+function _dashStopTeamWealth() {
+  if (_dashTeamWealthTicker)  { clearInterval(_dashTeamWealthTicker);  _dashTeamWealthTicker  = null; }
+  if (_dashTeamWealthFetcher) { clearInterval(_dashTeamWealthFetcher); _dashTeamWealthFetcher = null; }
+}
+
+function _dashUpdateTeamWealthDisplay() {
+  const el = document.getElementById('dashTeamWealth');
+  if (!el) { _dashStopTeamWealth(); return; }
+  let total = 0;
+  for (const p of _dashTeamWealthParams) total += _computeWealthFromParams(p);
+  el.innerHTML = total > 0.000001
+    ? `<span style="color:#a855f7;">${fmtUSDT(total, {decimals:2})}</span>`
+    : '<span style="color:var(--muted);">—</span>';
+}
+
+async function _loadDashTeamWealth() {
+  const _tsNow = Date.now();
+  if (_tsNow - _dashTeamWealthLastFetch < 25000) return;
+  _dashTeamWealthLastFetch = _tsNow;
+  _dashStopTeamWealth();
+  try {
+    const treeData = await fetchGeneTree(walletAddress, 1);
+    const allAddrs = _geneCollectAddrs(treeData).slice(1); // exclude self
+    _dashTeamWealthAddrs = allAddrs;
+    if (allAddrs.length === 0) {
+      _dashTeamWealthParams = [];
+      _dashUpdateTeamWealthDisplay();
+      return;
+    }
+    const paramsList = await Promise.all(
+      allAddrs.map(a => contract.getWealthParams(a).catch(() => null))
+    );
+    _dashTeamWealthParams = paramsList.filter(p => p !== null);
+    _dashUpdateTeamWealthDisplay();
+    // Update display every 1s via wall-clock advancement
+    _dashTeamWealthTicker = setInterval(_dashUpdateTeamWealthDisplay, 1000);
+    // Re-fetch params from chain every 10s
+    _dashTeamWealthFetcher = setInterval(async () => {
+      const el = document.getElementById('dashTeamWealth');
+      if (!el) { _dashStopTeamWealth(); return; }
+      try {
+        const fresh = await Promise.all(
+          _dashTeamWealthAddrs.map(a => contract.getWealthParams(a).catch(() => null))
+        );
+        _dashTeamWealthParams = fresh.filter(p => p !== null);
+      } catch(e) {}
+    }, 10000);
+  } catch(e) {
+    console.error('_loadDashTeamWealth', e);
+  }
+}
+
 // ── Referral popup wealth ticker ──
 var _refPopupTickInterval    = null;
 var _refPopupParamFetchTimer = null;
@@ -125,7 +188,7 @@ function _dashTickCountdowns() {
     const rewardEl = el.querySelector('.dis-sl-reward');
     if (rewardEl) {
       rewardEl.textContent = perSecUSDT > 0 || accumulatedUSDT > 0
-        ? '$' + liveUSDT.toFixed(6) + ' USDT'
+        ? '$' + fmtNum(liveUSDT, 3) + ' USDT'
         : '— USDT';
     }
 
@@ -136,16 +199,16 @@ function _dashTickCountdowns() {
     if (footerEl) {
       const hasBtn = !!footerEl.querySelector('.inv-btn-claim-staking');
       if (canClaim && !hasBtn) {
-        footerEl.innerHTML = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${invIndex}" onclick="claimStakingRewardForLock(${invIndex})">CLAIM ${claimTokens.toFixed(4)} ${tokenSymbol}</button>`;
+        footerEl.innerHTML = `<button class="inv-action-btn inv-btn-claim-staking" id="claimStakingBtn-${invIndex}" onclick="claimStakingRewardForLock(${invIndex})">CLAIM ${fmtNum(claimTokens)} ${tokenSymbol}</button>`;
       } else if (canClaim && hasBtn) {
         const btn = footerEl.querySelector('.inv-btn-claim-staking');
-        if (btn && !btn.disabled) btn.textContent = 'CLAIM ' + claimTokens.toFixed(4) + ' ' + tokenSymbol;
+        if (btn && !btn.disabled) btn.textContent = 'CLAIM ' + fmtNum(claimTokens) + ' ' + tokenSymbol;
       } else if (!canClaim && hasBtn) {
         const hint = elapsed >= lockDurSecs
           ? `Staking period complete · max reward reached`
           : liveUSDT > 0
-            ? `$${liveUSDT.toFixed(6)} USDT earned · $${perSecUSDT.toFixed(6)} USDT/sec`
-            : `Rewards accumulating · $${perSecUSDT.toFixed(6)} USDT/sec`;
+            ? `$${fmtNum(liveUSDT, 3)} USDT earned · $${fmtNum(perSecUSDT, 3)} USDT/sec`
+            : `Rewards accumulating · $${fmtNum(perSecUSDT, 3)} USDT/sec`;
         footerEl.innerHTML = `<div class="dis-staking-hint">${hint}</div>`;
       }
     }
@@ -210,17 +273,14 @@ function _dashStartStakingTicker() {
     const displayETH = Math.max(totalETH, _dashStakingHWM);
 
     el.innerHTML = displayETH > 0.000001
-      ? `<span style="color:var(--gold);">${fmtUSDT(displayETH)}</span>`
+      ? `<span style="color:var(--gold);">${fmtUSDT(displayETH, {decimals:3})}</span>`
       : '<span style="color:var(--muted);">—</span>';
 
     const wealthEl = document.getElementById('dashPnL');
     if (wealthEl) {
       const liveWealthETH = _dashWealthBase + displayETH;
-      wealthEl.innerHTML = liveWealthETH > 0 ? fmtUSDT(liveWealthETH) : '—';
+      wealthEl.innerHTML = liveWealthETH > 0 ? fmtUSDT(liveWealthETH, {decimals:2}) : '—';
     }
-
-    const activeLocksEl = document.getElementById('dashActiveLocks');
-    if (activeLocksEl) activeLocksEl.textContent = activeLockCount || '0';
 
     // All locks have now expired — stop ticking, the value is final.
     if (!anyStillActive) _dashStopStakingTicker();
@@ -318,10 +378,12 @@ const GRAPH_OPTS = {
 async function fetchGraphData() {
   if (!contract || !walletAddress) return null;
   try {
+    const latestBlockNum = await provider.getBlockNumber();
+    const fromBlock      = Math.max(0, latestBlockNum - 2000);
     const [userInfo, investEvents, refEvents] = await Promise.all([
       contract.users(walletAddress),
-      contract.queryFilter(contract.filters.Invested(walletAddress)).catch(() => []),
-      contract.queryFilter(contract.filters.CommissionPaid(walletAddress)).catch(() => [])
+      contract.queryFilter(contract.filters.Invested(walletAddress), fromBlock, 'latest').catch(() => []),
+      contract.queryFilter(contract.filters.CommissionPaid(walletAddress), fromBlock, 'latest').catch(() => [])
     ]);
     const regTime = Number(userInfo.registeredAt);
 
@@ -470,7 +532,7 @@ function drawLineGraph(canvas, series, color, unitLabel) {
     const v = vMin + (i / GRID_ROWS) * vRange;
     const y = ty(v);
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-    const label = Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(1) : v.toFixed(v >= 1 ? 3 : 6);
+    const label = Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(1) : fmtNum(v);
     ctx.fillText(label, padL - 6, y + 3.5);
   }
 
@@ -564,9 +626,9 @@ function drawLineGraph(canvas, series, color, unitLabel) {
     ctx.fill(); ctx.stroke();
 
     const valLabel = unitLabel === 'USDT'
-      ? best.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT'
+      ? fmtNum(best.value) + ' USDT'
       : unitLabel
-        ? best.value.toFixed(best.value >= 1 ? 4 : 8) + ' ' + unitLabel
+        ? fmtNum(best.value) + ' ' + unitLabel
         : Math.round(best.value).toString();
     tooltip.innerHTML =
       `<div style="color:var(--muted);margin-bottom:3px;">${_fmtTsFull(best.time)}</div>` +
@@ -613,7 +675,7 @@ drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, p
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
     ctx.fillStyle = 'rgba(148,163,184,0.55)';
     ctx.font = '10px monospace'; ctx.textAlign = 'right';
-    const label = Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(1) : v.toFixed(v >= 1 ? 3 : 6);
+    const label = Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(1) : fmtNum(v);
     ctx.fillText(label, padL - 6, y + 3.5);
   }
   const xTicks = Math.min(series.length, 5);
@@ -754,7 +816,7 @@ async function _loadDashTeamStats() {
       teamBusinessETH += eth;
     }
     volEl.textContent  = teamVolume;
-    bizEl.innerHTML    = teamBusinessETH > 0 ? fmtUSDT(teamBusinessETH) : '—';
+    bizEl.innerHTML    = teamBusinessETH > 0 ? fmtUSDT(teamBusinessETH, {decimals:2}) : '—';
   } catch(e) {
     console.error('_loadDashTeamStats', e);
   }
@@ -783,22 +845,26 @@ async function loadDashboard(silent = false) {
     _labelCache.clear();
     _labelCryptoKey  = null;
     _labelKeyPromise = null;
-    _dashTeamStatsLastFetch = 0;
+    _dashTeamStatsLastFetch  = 0;
+    _dashTeamWealthLastFetch = 0;
+    _dashStopTeamWealth();
   }
 
   try {
+    const _latestBlockNum = await provider.getBlockNumber();
+    const _fromBlock      = Math.max(0, _latestBlockNum - 2000);
     const [lpLocks, commStats, stakingReward, platformToken, stakingEvents, latestBlock] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
       contract.platformToken(),
-      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress)).catch(() => []),
+      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest').catch(() => []),
       provider.getBlock('latest').catch(() => null),
     ]);
 
     const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned)) : 0;
     // Cap state assigned after _effNow is established below.
-    let capETH = 0, capRemETH = 0, isEligible = false, isPaused = false;
+    let capETH = 0, capRemETH = 0, pausedCapETH = 0, isEligible = false, isPaused = false;
 
     let totalInvestedETH = 0;
     let totalCurrentETH  = 0;
@@ -821,6 +887,9 @@ async function loadDashboard(silent = false) {
       }
     } catch(_) {}
 
+    _dashLpLocks = lpLocks;
+    _dashEffNow  = _effNow;
+
     // Compute referral cap state using _effNow (same clock as investments tab)
     // so PAUSED/ELIGIBLE badges stay in sync regardless of Hardhat block.timestamp lag.
     {
@@ -838,10 +907,11 @@ async function loadDashboard(silent = false) {
           _lPausedCap = _lPausedCap.add(_capLeft);
         }
       }
-      capETH    = parseFloat(ethers.utils.formatEther(_lActiveCap.add(_lPausedCap)));
-      capRemETH = parseFloat(ethers.utils.formatEther(_lActiveCap));
-      isEligible = _lActiveCap.gt(0);
-      isPaused   = !isEligible && _lPausedCap.gt(0);
+      capETH      = parseFloat(ethers.utils.formatEther(_lActiveCap.add(_lPausedCap)));
+      capRemETH   = parseFloat(ethers.utils.formatEther(_lActiveCap));
+      pausedCapETH = parseFloat(ethers.utils.formatEther(_lPausedCap));
+      isEligible  = _lActiveCap.gt(0);
+      isPaused    = !isEligible && _lPausedCap.gt(0);
     }
 
     if (lpLocks.length) {
@@ -913,29 +983,31 @@ async function loadDashboard(silent = false) {
     const pnlETH  = totalValueETH - totalInvestedETH;
     const pnlCls  = pnlETH > 0.000001 ? '#4ade80' : pnlETH < -0.000001 ? '#f87171' : 'var(--muted)';
 
-    document.getElementById('dashTotalInvested').innerHTML     = fmtUSDT(totalInvestedETH);
+    document.getElementById('dashTotalInvested').innerHTML     = fmtUSDT(totalInvestedETH, {decimals:2});
     document.getElementById('dashTotalInvestedUSD').innerHTML  = '';
     const lpFeesETH   = Math.max(0, totalCurrentETH - totalInvestedETH);
     const myWealthETH = refEarningsETH + _initDisplayETH + lpFeesETH + totalInvestedETH;
     _dashWealthBase   = myWealthETH - _initDisplayETH;
-    document.getElementById('dashTotalValue').innerHTML        = totalInvestedETH > 0 ? fmtUSDT(lpFeesETH) : '—';
+    document.getElementById('dashTotalValue').innerHTML        = totalInvestedETH > 0 ? fmtUSDT(lpFeesETH, {decimals:2}) : '—';
     document.getElementById('dashTotalValue').style.color      = 'white';
     document.getElementById('dashTotalValueUSD').innerHTML     = '';
     const lpTokensEl = document.getElementById('dashLPTokens');
-    if (lpTokensEl) lpTokensEl.textContent = totalLPTokens > 0 ? totalLPTokens.toFixed(6) + ' LP' : '';
-    document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH);
+    if (lpTokensEl) lpTokensEl.textContent = totalLPTokens > 0 ? fmtNum(totalLPTokens) + ' LP' : '';
+    document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH, {decimals: 3});
     document.getElementById('dashRefEarningsUSD').innerHTML    =
-      capETH > 0
-        ? `<span style="color:var(--muted);">Cap: ${fmtUSDT(capRemETH, {noEth:true})} remaining</span>`
-        : '';
+      isEligible
+        ? `<span style="color:var(--muted);">Cap: ${fmtUSDT(capRemETH, {decimals:2})} remaining</span>`
+        : isPaused
+          ? `<span style="color:rgba(234,179,8,0.7);">Cap: ${fmtUSDT(pausedCapETH, {decimals:2})} paused</span>`
+          : '';
 
     const eligBadge = isEligible
-      ? '<span style="font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">ELIGIBLE</span>'
+      ? '<span style="cursor:pointer;font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="event.stopPropagation();navToRewards(\'referral\')">ELIGIBLE</span>'
       : isPaused
-        ? '<span style="font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">PAUSED</span>'
-        : '<span style="font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;">INELIGIBLE</span>';
+        ? '<span style="cursor:pointer;font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="showPausedLocksPopup(event)">PAUSED</span>'
+        : '<span style="cursor:pointer;font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="showIneligiblePopup(event)">INELIGIBLE</span>';
     document.getElementById('dashStakingRewards').innerHTML = _initDisplayETH > 0.000001
-      ? `<span style="color:var(--gold);">${fmtUSDT(_initDisplayETH)}</span>` : '<span style="color:var(--muted);">—</span>';
+      ? `<span style="color:var(--gold);">${fmtUSDT(_initDisplayETH, {decimals:3})}</span>` : '<span style="color:var(--muted);">—</span>';
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');
     if (stakingSubEl) stakingSubEl.textContent = _initAnyActive
       ? 'accumulating'
@@ -946,17 +1018,17 @@ async function loadDashboard(silent = false) {
 
     const pnlEl = document.getElementById('dashPnL');
     pnlEl.style.color = '#4ade80'; // Always green for My Wealth
-    pnlEl.innerHTML = myWealthETH > 0 ? fmtUSDT(myWealthETH) : '—';
+    pnlEl.innerHTML = myWealthETH > 0 ? fmtUSDT(myWealthETH, {decimals:2}) : '—';
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
 
-    document.getElementById('dashActiveLocks').textContent = activeLocks || '0';
 
     _graphCache = null;
     fetchGraphData().then(data => { _graphCache = data; });
 
-    // Load team stats and direct referrals asynchronously
+    // Load team stats, team wealth, and direct referrals asynchronously
     _loadDashTeamStats();
+    _loadDashTeamWealth();
     _loadDashDirectRefs();
 
   } catch(e) {
@@ -1125,6 +1197,26 @@ async function saveRefLabel(addr) {
   }
 }
 
+function _computeCapState(locks) {
+  let activeCap = ethers.BigNumber.from(0);
+  let pausedCap = ethers.BigNumber.from(0);
+  for (const l of locks) {
+    if (l.removed) continue;
+    const capMax  = l.ethInvested.mul(5);
+    const capUsed = l.commissionsCapUsed || ethers.BigNumber.from(0);
+    const capLeft = capMax.gt(capUsed) ? capMax.sub(capUsed) : ethers.BigNumber.from(0);
+    if (capLeft.isZero()) continue;
+    if (_dashEffNow < Number(l.unlockTime)) {
+      activeCap = activeCap.add(capLeft);
+    } else {
+      pausedCap = pausedCap.add(capLeft);
+    }
+  }
+  if (activeCap.gt(0)) return 'eligible';
+  if (pausedCap.gt(0)) return 'paused';
+  return 'ineligible';
+}
+
 async function _loadDashDirectRefs(force = false) {
   const section = document.getElementById('dashDirectRefsSection');
   const listEl  = document.getElementById('dashDirectRefsList');
@@ -1138,26 +1230,30 @@ async function _loadDashDirectRefs(force = false) {
     section.style.display = '';
     listEl.innerHTML = '<div style="color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:8px 0;">Loading…</div>';
 
-    const [investedAmts, refCounts] = await Promise.all([
+    const [investedAmts, refCounts, refLocks] = await Promise.all([
       Promise.all(refs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
       Promise.all(refs.map(a => contract.getReferrals(a).catch(() => []).then(r => r.length))),
+      Promise.all(refs.map(a => contract.getUserLPLocks(a).catch(() => []))),
     ]);
 
     // Fetch labels from chain and decrypt (errors caught inside _getRefLabel)
     await _batchGetRefLabels(refs);
 
     listEl.innerHTML = refs.map((addr, i) => {
-      const invested = parseFloat(ethers.utils.formatEther(investedAmts[i]));
-      const dirCount = refCounts[i];
-      const label    = _labelCache.get(addr.toLowerCase()) || '';
-      const display  = label || addr;
-      const initial  = addr.slice(2, 4).toUpperCase();
+      const invested  = parseFloat(ethers.utils.formatEther(investedAmts[i]));
+      const dirCount  = refCounts[i];
+      const label     = _labelCache.get(addr.toLowerCase()) || '';
+      const display   = label || addr;
+      const initial   = addr.slice(2, 4).toUpperCase();
+      const capState  = _computeCapState(refLocks[i]);
+      const capClass  = capState === 'paused' ? ' cap-paused' : capState === 'ineligible' ? ' cap-ineligible' : '';
+      const noInvest  = invested === 0;
       return `
-        <div class="dash-dref-card" id="drefCard_${addr.toLowerCase()}" onclick="openRefPopup('${addr}')">
+        <div class="dash-dref-card${capClass}${noInvest ? ' dref-no-invest' : ''}" id="drefCard_${addr.toLowerCase()}"${noInvest ? '' : ` onclick="openRefPopup('${addr}')"`}>
           <div class="dash-dref-avatar">${initial}</div>
           <div style="flex:1;min-width:0;">
             <div class="dash-dref-addr dash-dref-name">${display}</div>
-            <div class="dash-dref-invested">${invested > 0 ? fmtUSDT(invested) + ' invested' : 'No active investment'} &nbsp;·&nbsp; ${dirCount} direct ref${dirCount !== 1 ? 's' : ''}</div>
+            <div class="dash-dref-invested">${invested > 0 ? fmtUSDT(invested, {decimals:2}) + ' invested' : 'No active investment'} &nbsp;·&nbsp; ${dirCount} direct ref${dirCount !== 1 ? 's' : ''}</div>
           </div>
           <div class="dash-dref-arrow">›</div>
         </div>`;
@@ -1205,10 +1301,11 @@ async function _computeMissedETHForAddr(addr) {
       }));
       if (membersAtDepth.length === 0) break;
       await Promise.all(membersAtDepth.map(async (member) => {
+        const fromBlock = (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0) ? DEPLOY_BLOCK : 0;
         const logs = await provider.getLogs({
           address: contract.address,
           topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
-          fromBlock: 0,
+          fromBlock,
           toBlock: 'latest',
         });
         const byTx = new Map();
@@ -1233,35 +1330,36 @@ async function _computeMissedETHForAddr(addr) {
 
 async function _refreshRefPopupStats(addr) {
   try {
-    const [investedRaw, directRefs] = await Promise.all([
-      contract.userTotalInvested(addr).catch(() => ethers.BigNumber.from(0)),
-      contract.getReferrals(addr).catch(() => []),
-    ]);
+    const investedRaw = await contract.userTotalInvested(addr).catch(() => ethers.BigNumber.from(0));
     const totalInv = parseFloat(ethers.utils.formatEther(investedRaw));
     const invEl = document.getElementById('refPopInvestedVal');
-    if (invEl) invEl.innerHTML = totalInv > 0 ? fmtUSDT(totalInv) : '—';
-    const refsEl = document.getElementById('refPopDirectRefsVal');
-    if (refsEl) refsEl.textContent = directRefs.length;
+    if (invEl) invEl.innerHTML = totalInv > 0 ? fmtUSDT(totalInv, {decimals:2}) : '—';
 
     const treeData  = await fetchGeneTree(addr, 1);
     const teamAddrs = _geneCollectAddrs(treeData).slice(1);
-    let teamVol = 0, teamBizETH = 0;
+    let teamVol = 0, teamBizETH = 0, teamWealthETH = 0;
     if (teamAddrs.length > 0) {
-      const amts = await Promise.all(teamAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0))));
-      for (const amt of amts) {
-        const e = parseFloat(ethers.utils.formatEther(amt));
+      const [amts, wps] = await Promise.all([
+        Promise.all(teamAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
+        Promise.all(teamAddrs.map(a => contract.getWealthParams(a).catch(() => null))),
+      ]);
+      for (let i = 0; i < amts.length; i++) {
+        const e = parseFloat(ethers.utils.formatEther(amts[i]));
         if (e > 0) teamVol++;
-        teamBizETH += e;
+        teamBizETH   += e;
+        teamWealthETH += _computeWealthFromParams(wps[i]);
       }
     }
+    const twEl = document.getElementById('refPopTeamWealthVal');
+    if (twEl) twEl.innerHTML = teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '—';
+    const tbEl = document.getElementById('refPopTeamBizVal');
+    if (tbEl) tbEl.innerHTML = teamBizETH > 0 ? fmtUSDT(teamBizETH, {decimals:2}) : '—';
     const tvEl = document.getElementById('refPopTeamVolVal');
     if (tvEl) tvEl.textContent = teamVol;
-    const tbEl = document.getElementById('refPopTeamBizVal');
-    if (tbEl) tbEl.innerHTML = teamBizETH > 0 ? fmtUSDT(teamBizETH) : '—';
 
     const missedETH = await _computeMissedETHForAddr(addr);
     const missEl = document.getElementById('refPopMissedVal');
-    if (missEl) missEl.innerHTML = missedETH > 0 ? fmtUSDT(missedETH) : '—';
+    if (missEl) missEl.innerHTML = missedETH > 0 ? fmtUSDT(missedETH, {decimals:2}) : '—';
   } catch(e) {
     console.error('_refreshRefPopupStats', e);
   }
@@ -1332,7 +1430,7 @@ function _startRefPopupTicker() {
     const valEl = document.getElementById('refPopWealthVal');
     if (!valEl) { _stopRefPopupTicker(); return; }
     const wealthETH = _computeWealthFromParams(_refPopupWealthParams);
-    valEl.innerHTML = wealthETH > 0 ? fmtUSDT(wealthETH) : '—';
+    valEl.innerHTML = wealthETH > 0 ? fmtUSDT(wealthETH, {decimals:2}) : '—';
   }, 1000);
 
   // Re-fetch the 5 non-wealth stats every 30s
@@ -1378,9 +1476,8 @@ async function openRefPopup(addr) {
   overlay.style.display = 'flex';
 
   try {
-    const [investedRaw, directRefs, wealthParams] = await Promise.all([
+    const [investedRaw, wealthParams] = await Promise.all([
       contract.userTotalInvested(addr).catch(() => ethers.BigNumber.from(0)),
-      contract.getReferrals(addr).catch(() => []),
       contract.getWealthParams(addr).catch(() => null),
     ]);
 
@@ -1394,23 +1491,27 @@ async function openRefPopup(addr) {
 
     const treeData  = await fetchGeneTree(addr, 1);
     const teamAddrs = _geneCollectAddrs(treeData).slice(1);
-    let teamVol = 0, teamBizETH = 0;
+    let teamVol = 0, teamBizETH = 0, teamWealthETH = 0;
     if (teamAddrs.length > 0) {
-      const amts = await Promise.all(teamAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0))));
-      for (const amt of amts) {
-        const e = parseFloat(ethers.utils.formatEther(amt));
+      const [amts, wps] = await Promise.all([
+        Promise.all(teamAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
+        Promise.all(teamAddrs.map(a => contract.getWealthParams(a).catch(() => null))),
+      ]);
+      for (let i = 0; i < amts.length; i++) {
+        const e = parseFloat(ethers.utils.formatEther(amts[i]));
         if (e > 0) teamVol++;
-        teamBizETH += e;
+        teamBizETH   += e;
+        teamWealthETH += _computeWealthFromParams(wps[i]);
       }
     }
 
     const stats = [
-      { label: 'WEALTH',              val: wealthETH > 0  ? fmtUSDT(wealthETH)  : '—', color: '#4ade80',      id: 'refPopWealthVal' },
-      { label: 'TOTAL INVESTED',      val: totalInv > 0   ? fmtUSDT(totalInv)   : '—', color: 'var(--gold)',   id: 'refPopInvestedVal' },
-      { label: 'DIRECT REFERRALS',    val: directRefs.length,                            color: 'var(--cream)',  id: 'refPopDirectRefsVal' },
-      { label: 'TEAM VOLUME',         val: teamVol,                                       color: 'var(--cream)',  id: 'refPopTeamVolVal' },
-      { label: 'TEAM BUSINESS',       val: teamBizETH > 0 ? fmtUSDT(teamBizETH) : '—', color: '#4ade80',       id: 'refPopTeamBizVal' },
-      { label: 'MISSED COMMISSIONS',  val: missedETH > 0  ? fmtUSDT(missedETH)  : '—', color: '#f87171',       id: 'refPopMissedVal' },
+      { label: 'WEALTH',             val: wealthETH > 0     ? fmtUSDT(wealthETH,     {decimals:2}) : '—', color: '#4ade80',    id: 'refPopWealthVal' },
+      { label: 'TOTAL INVESTED',     val: totalInv > 0      ? fmtUSDT(totalInv,      {decimals:2}) : '—', color: 'var(--gold)', id: 'refPopInvestedVal' },
+      { label: 'TEAM WEALTH',        val: teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '—', color: '#a78bfa',    id: 'refPopTeamWealthVal' },
+      { label: 'TEAM BUSINESS',      val: teamBizETH > 0    ? fmtUSDT(teamBizETH,    {decimals:2}) : '—', color: '#4ade80',    id: 'refPopTeamBizVal' },
+      { label: 'TEAM VOLUME',        val: teamVol,                                                          color: 'var(--cream)', id: 'refPopTeamVolVal' },
+      { label: 'MISSED COMMISSIONS', val: missedETH > 0     ? fmtUSDT(missedETH,     {decimals:2}) : '—', color: '#f87171',    id: 'refPopMissedVal' },
     ];
 
     // Replace only the loading section, keep the header/label area intact
@@ -1435,6 +1536,91 @@ function closeRefPopup() {
   _stopRefPopupTicker();
   const overlay = document.getElementById('dashRefPopupOverlay');
   if (overlay) overlay.style.display = 'none';
+}
+
+function _showDashEligPopup(html) {
+  const overlay = document.getElementById('dashEligPopupOverlay');
+  const content = document.getElementById('dashEligPopupContent');
+  if (!overlay || !content) return;
+  content.innerHTML = html;
+  overlay.style.display = 'flex';
+}
+
+function closeDashEligPopup() {
+  const overlay = document.getElementById('dashEligPopupOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function showPausedLocksPopup(event) {
+  event.stopPropagation();
+
+  const pausedLocks = _dashLpLocks.filter(l => {
+    if (l.removed) return false;
+    const capMax  = l.ethInvested.mul(5);
+    const capUsed = l.commissionsCapUsed || ethers.BigNumber.from(0);
+    const capLeft = capMax.gt(capUsed) ? capMax.sub(capUsed) : ethers.BigNumber.from(0);
+    if (capLeft.isZero()) return false;
+    return Number(l.unlockTime) <= _dashEffNow;
+  });
+
+  if (!pausedLocks.length) return;
+
+  const rows = pausedLocks.map(l => {
+    const addr     = l.token;
+    const short    = addr.slice(0, 6) + '…' + addr.slice(-4);
+    const ethInv   = parseFloat(ethers.utils.formatEther(l.ethInvested));
+    const capMax   = l.ethInvested.mul(5);
+    const capUsed  = l.commissionsCapUsed || ethers.BigNumber.from(0);
+    const capLeft  = capMax.gt(capUsed) ? capMax.sub(capUsed) : ethers.BigNumber.from(0);
+    const capLeftE = parseFloat(ethers.utils.formatEther(capLeft));
+    return `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div style="font-size:10px;color:#94a3b8;">Pair <span style="color:#e2e8f0;">${short}</span></div>
+      <div style="font-size:10px;color:#94a3b8;margin-top:3px;">Invested <span style="color:#fde68a;">$${fmtNum(ethInv * USDT_PER_ETH)}</span> &nbsp;&middot;&nbsp; Cap left <span style="color:#4ade80;">$${fmtNum(capLeftE * USDT_PER_ETH)}</span></div>
+    </div>`;
+  }).join('');
+
+  _showDashEligPopup(`<div style="padding:20px 24px;font-family:var(--font-mono);">
+    <div style="font-size:13px;color:#eab308;letter-spacing:1px;margin-bottom:6px;">REFERRAL EARNINGS PAUSED</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:14px;">Your lock period has ended for the investments below. Restake to resume earning commissions.</div>
+    ${rows}
+    <div style="margin-top:16px;">
+      <button onclick="closeDashEligPopup()" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.15);color:#94a3b8;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:7px 0;cursor:pointer;">CLOSE</button>
+    </div>
+  </div>`);
+}
+
+function showIneligiblePopup(event) {
+  event.stopPropagation();
+
+  const active = _dashLpLocks.filter(l => !l.removed);
+  let reason, detail;
+
+  if (active.length === 0) {
+    reason = 'No active investments';
+    detail = 'You have no active LP investments. Add liquidity to start earning referral commissions.';
+  } else {
+    const allExhausted = active.every(l => {
+      const capMax  = l.ethInvested.mul(5);
+      const capUsed = l.commissionsCapUsed || ethers.BigNumber.from(0);
+      return capUsed.gte(capMax);
+    });
+    if (allExhausted) {
+      reason = 'Commission cap exhausted';
+      detail = 'Your referral commission cap is fully used up across all investments. Add a new investment to continue earning.';
+    } else {
+      reason = 'No remaining cap';
+      detail = 'You have no remaining referral commission capacity at this time.';
+    }
+  }
+
+  _showDashEligPopup(`<div style="padding:20px 24px;font-family:var(--font-mono);">
+    <div style="font-size:13px;color:#f87171;letter-spacing:1px;margin-bottom:6px;">NOT ELIGIBLE</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Reason: <span style="color:#f87171;">${reason}</span></div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:16px;">${detail}</div>
+    <div>
+      <button onclick="closeDashEligPopup()" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.15);color:#94a3b8;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:7px 0;cursor:pointer;">CLOSE</button>
+    </div>
+  </div>`);
 }
 
 function navToRewards(section) {
@@ -1469,6 +1655,9 @@ window._dashFmtCountdown    = _dashFmtCountdown;
 window._dashFmtCompact      = _dashFmtCompact;
 window._dashTickCountdowns  = _dashTickCountdowns;
 window.navToRewards         = navToRewards;
+window.showPausedLocksPopup = showPausedLocksPopup;
+window.showIneligiblePopup  = showIneligiblePopup;
+window.closeDashEligPopup   = closeDashEligPopup;
 window.navToGeneView        = navToGeneView;
 window.openRefPopup         = openRefPopup;
 window.closeRefPopup        = closeRefPopup;

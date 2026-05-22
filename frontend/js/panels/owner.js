@@ -367,12 +367,11 @@ async function loadOwnerStats() {
         </div>
         <div class="info-cell">
           <div class="info-cell-label">TOTAL INVESTED</div>
-          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${totalInvestedUSDT.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:2})}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px;">${totalInvestedETH.toFixed(4)} ETH</div>
+          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalInvestedUSDT)}</div>
         </div>
         <div class="info-cell">
           <div class="info-cell-label">POOL LIQUIDITY (USDT)</div>
-          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${totalPoolUSDT.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:2})}</div>
+          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalPoolUSDT)}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:3px;">${tokenAddrs.length} pool${tokenAddrs.length!==1?'s':''}</div>
         </div>
         <div class="info-cell">
@@ -393,7 +392,7 @@ async function loadOwnerStats() {
               </div>
               <div style="text-align:right;">
                 ${r.hasPool
-                  ? `<div style="font-size:13px;color:var(--cream);">$${r.poolUSDT.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>`
+                  ? `<div style="font-size:13px;color:var(--cream);">$${fmtNum(r.poolUSDT)}</div>`
                   : `<div style="font-size:11px;color:var(--muted);">No pool</div>`
                 }
               </div>
@@ -414,7 +413,7 @@ async function loadOwnerStats() {
             <div style="text-align:right;">
               ${r.allowFloat === null
                 ? `<span style="font-size:11px;color:var(--muted);">Unable to read</span>`
-                : `<span style="font-size:13px;color:${r.isShort?'var(--danger)':'var(--success)'};">${r.isShort?'⚠ ':''} ${r.allowFloat.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} tokens</span>`
+                : `<span style="font-size:13px;color:${r.isShort?'var(--danger)':'var(--success)'};">${r.isShort?'⚠ ':''} ${fmtNum(r.allowFloat)} tokens</span>`
               }
             </div>
           </div>
@@ -435,7 +434,7 @@ async function loadOwnerInfo() {
     const rates = [];
     for (let i = 0; i < 10; i++) {
       const r = await contract.referralCommissionRates(i);
-      rates.push((r.toNumber() / 500).toFixed(2).replace(/\.?0+$/, '') + '% of investment');
+      rates.push(fmtNum(r.toNumber() / 500, 2) + '% of investment');
     }
     const el = document.getElementById('ownerInfoContent');
     el.innerHTML = `
@@ -524,7 +523,7 @@ async function onOwnerLiqTokenChange(addr) {
         _ownerLiqIsNewPool = false;
         newPoolSec.style.display = 'none';
         const pool = await _dashGetPoolPrice(addr);
-        const priceUSDT = pool ? (pool.priceEth * 1000).toFixed(6) : '—';
+        const priceUSDT = pool ? fmtNum(pool.priceEth * 1000) : '—';
         statusEl.style.color = 'var(--success)';
         statusEl.textContent = `Pool found — current price: $${priceUSDT} USDT per ${t.symbol}`;
       }
@@ -634,7 +633,7 @@ async function onOwnerRemoveLiqTokenChange(addr) {
     ], provider);
     _ownerRem_LPBal = await lpToken.balanceOf(walletAddress);
     document.getElementById('ownerLPBalance').textContent =
-      parseFloat(ethers.utils.formatEther(_ownerRem_LPBal)).toFixed(8) + ' LP';
+      fmtNum(parseFloat(ethers.utils.formatEther(_ownerRem_LPBal))) + ' LP';
     await _ownerUpdateRemoveEstimate(_ownerRem_LPBal);
   } catch(e) {
     document.getElementById('ownerLPBalance').textContent = 'Error';
@@ -658,7 +657,7 @@ async function _ownerUpdateRemoveEstimate(lpWei) {
     document.getElementById('ownerRemoveEstETH').textContent =
       (parseFloat(ethers.utils.formatEther(estETH)) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
     document.getElementById('ownerRemoveEstToken').textContent =
-      parseFloat(ethers.utils.formatUnits(estTok, _ownerRem_TokenDec)).toFixed(4) + ' ' + _ownerRem_TokenSym;
+      fmtNum(parseFloat(ethers.utils.formatUnits(estTok, _ownerRem_TokenDec))) + ' ' + _ownerRem_TokenSym;
   } catch(_) {}
 }
 
@@ -690,8 +689,8 @@ async function ownerRemoveLiquidity() {
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
     const pair = getPairContract(_ownerRem_PairAddr);
-    const [[r0, r1], token0, totalSupply] = await Promise.all([
-      pair.getReserves(), pair.token0(), pair.totalSupply()
+    const [[r0, r1], token0, totalSupply, latestBlock] = await Promise.all([
+      pair.getReserves(), pair.token0(), pair.totalSupply(), provider.getBlock('latest')
     ]);
     const isToken0 = token0.toLowerCase() === addr.toLowerCase();
     const rawTok = isToken0 ? r0 : r1;
@@ -700,7 +699,7 @@ async function ownerRemoveLiquidity() {
     const estETH = rawETH.mul(lpWei).div(totalSupply);
     const minTok = estTok.mul(9900).div(10000);
     const minETH = estETH.mul(9900).div(10000);
-    const deadline = Math.floor(Date.now() / 1000) + 300;
+    const deadline = (latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000)) + 300;
 
     toast('Step 1/2 — Approve LP tokens in MetaMask…', 'info');
     const lpToken = new ethers.Contract(_ownerRem_PairAddr, ["function approve(address,uint256) returns (bool)"], signer);
@@ -732,7 +731,7 @@ async function ownerLoadWithdrawBals() {
   try {
     const wei = await provider.getBalance(contract.address);
     const eth = parseFloat(ethers.utils.formatEther(wei));
-    el.textContent = `Contract ETH balance: ${eth.toFixed(6)} ETH ($${(eth * USDT_PER_ETH).toFixed(2)} USDT)`;
+    el.textContent = `Contract balance: $${fmtNum(eth * USDT_PER_ETH)} USDT`;
     el.style.color = eth > 0 ? 'var(--gold)' : 'var(--muted)';
   } catch(e) {
     el.textContent = 'Failed to load balance.';

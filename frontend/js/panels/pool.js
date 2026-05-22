@@ -63,7 +63,7 @@ async function _refreshListPrices() {
     if (!el) return;
     const color = (prev == null) ? 'var(--cream)' : price > prev ? '#4ade80' : price < prev ? '#f87171' : 'var(--cream)';
     el.style.color = color;
-    el.textContent = '$' + price.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    el.textContent = '$' + fmtNum(price);
   }));
 }
 
@@ -102,10 +102,10 @@ async function _refreshPoolData() {
     window._poolCurPrice  = priceUSDT;
     _updateHeaderPrice(priceUSDT);
 
-    _setStatText('poolStat-price',    priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT');
-    _setStatText('poolStat-tokenres', resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + sym);
-    _setStatText('poolStat-usdtres',  (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT');
-    _setStatText('poolStat-lpsupply', supplyF.toFixed(6) + ' HDEX-LP');
+    _setStatText('poolStat-price',    fmtNum(priceUSDT) + ' USDT');
+    _setStatText('poolStat-tokenres', fmtNum(resTokenF) + ' ' + sym);
+    _setStatText('poolStat-usdtres',  fmtNum(resETHF * USDT_PER_ETH) + ' USDT');
+    _setStatText('poolStat-lpsupply', fmtNum(supplyF) + ' HDEX-LP');
     _updatePoolRateDisplay(priceUSDT, sym);
     updateBalances(tokenAddr, dec);
     loadTradeHistory(pairAddr, isToken0, dec, sym, true);
@@ -169,11 +169,11 @@ function _updateHeaderPrice(priceUSDT) {
   const up   = prev <= 0 || priceUSDT >= prev;
   const color = prev <= 0 ? 'var(--muted)' : up ? '#4ade80' : '#f87171';
   el.style.color = color;
-  el.textContent = '$' + priceUSDT.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  el.textContent = '$' + fmtNum(priceUSDT);
   if (chEl && prev > 0) {
     const pct = ((priceUSDT - prev) / prev) * 100;
     chEl.style.color = up ? '#4ade80' : '#f87171';
-    chEl.textContent = (up ? '▲ +' : '▼ ') + pct.toFixed(4) + '%';
+    chEl.textContent = (up ? '▲ +' : '▼ ') + fmtNum(pct) + '%';
   }
 }
 
@@ -227,7 +227,7 @@ async function loadPoolPanel() {
     for (let i = 0; i < reversed.length; i++) {
       const addr  = reversed[i];
       const t     = tokens[i];
-      if (t.inProgress) continue;
+      if (t.inProgressLabel) continue;
       const price = prices[i];
       const meta  = getMeta(addr);
 
@@ -255,8 +255,8 @@ async function loadPoolPanel() {
           </div>
         </div>
         ${price !== null
-          ? `<div id="poolListPrice-${addr}" style="font-size:15px;color:${priceColor};font-family:var(--font-mono);font-weight:700;flex-shrink:0;letter-spacing:.03em;transition:color .4s;">$${price.toLocaleString(undefined,{maximumFractionDigits:6})}</div>`
-          : `<div id="poolListPrice-${addr}" style="font-size:14px;color:var(--muted);font-family:var(--font-mono);flex-shrink:0;">—</div>`}`;
+          ? `<div id="poolListPrice-${addr}" style="font-size:12px;color:${priceColor};font-family:var(--font-mono);font-weight:400;flex-shrink:0;letter-spacing:.03em;transition:color .4s;">$${fmtNum(price)}</div>`
+          : `<div id="poolListPrice-${addr}" style="font-size:12px;color:var(--muted);font-family:var(--font-mono);flex-shrink:0;">—</div>`}`;
       div.onclick = () => loadPoolInfo(addr);
       list.appendChild(div);
     }
@@ -346,10 +346,10 @@ async function loadPoolInfo(tokenAddr) {
     const priceUSDT = ethToUSDT(priceETH);
 
     const statItems = [
-      { id: 'poolStat-price',    label: 'PRICE',         value: priceUSDT.toLocaleString(undefined,{maximumFractionDigits:6}) + ' USDT' },
-      { id: 'poolStat-tokenres', label: 'TOKEN RESERVE', value: resTokenF.toLocaleString(undefined,{maximumFractionDigits:4}) + ' ' + t.symbol },
-      { id: 'poolStat-usdtres',  label: 'USDT RESERVE',  value: (resETHF * USDT_PER_ETH).toLocaleString(undefined,{maximumFractionDigits:2}) + ' USDT' },
-      { id: 'poolStat-lpsupply', label: 'LP SUPPLY',     value: supplyF.toFixed(6) + ' HDEX-LP' },
+      { id: 'poolStat-price',    label: 'PRICE',         value: fmtNum(priceUSDT) + ' USDT' },
+      { id: 'poolStat-tokenres', label: 'TOKEN RESERVE', value: fmtNum(resTokenF) + ' ' + t.symbol },
+      { id: 'poolStat-usdtres',  label: 'USDT RESERVE',  value: fmtNum(resETHF * USDT_PER_ETH) + ' USDT' },
+      { id: 'poolStat-lpsupply', label: 'LP SUPPLY',     value: fmtNum(supplyF) + ' HDEX-LP' },
       { id: 'poolStat-pairaddr', label: 'PAIR ADDRESS',  value: pairAddr, full: pairAddr },
     ];
 
@@ -383,8 +383,8 @@ async function updateBalances(tokenAddr, dec) {
     const usdtF  = parseFloat(ethers.utils.formatEther(ethBal)) * USDT_PER_ETH;
     const sellEl = document.getElementById('poolSellBal');
     const buyEl  = document.getElementById('poolBuyUsdtBal');
-    if (sellEl) sellEl.textContent = tokenF.toLocaleString(undefined, { maximumFractionDigits: 4 });
-    if (buyEl)  buyEl.textContent  = usdtF.toLocaleString(undefined,  { maximumFractionDigits: 2 });
+    if (sellEl) sellEl.textContent = fmtNum(tokenF);
+    if (buyEl)  buyEl.textContent  = fmtNum(usdtF);
     window._poolUserUsdtBal  = usdtF;
     window._poolUserTokenBal = tokenF;
   } catch(_) {}
@@ -395,7 +395,7 @@ function _updatePoolRateDisplay(priceUSDT, tokenSymbol) {
   const sellEl = document.getElementById('poolSellRate');
   const text   = (!priceUSDT || priceUSDT <= 0)
     ? '—'
-    : `1 ${tokenSymbol} = ${priceUSDT.toLocaleString(undefined, { maximumFractionDigits: 6 })} USDT`;
+    : `1 ${tokenSymbol} = ${fmtNum(priceUSDT)} USDT`;
   if (buyEl  && buyEl.textContent  !== text) buyEl.textContent  = text;
   if (sellEl && sellEl.textContent !== text) sellEl.textContent = text;
 }
@@ -415,7 +415,7 @@ function _renderTradeHistory(tokenSymbol) {
 
   const fmtAmt = n => n < 0.01
     ? n.toExponential(2)
-    : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+    : fmtNum(n);
   const fmtP = n => n < 0.000001
     ? n.toExponential(2)
     : n.toLocaleString(undefined, { maximumFractionDigits: 6 });
@@ -465,8 +465,10 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
   }
 
   try {
-    const pair  = getPairContract(pairAddr);
-    const swaps = await pair.queryFilter('Swap', 0, 'latest').catch(() => []);
+    const pair        = getPairContract(pairAddr);
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock   = getFromBlock(latestBlock);
+    const swaps = await pair.queryFilter('Swap', fromBlock, 'latest').catch(() => []);
 
     const allTrades = [...swaps].reverse().map(ev => {
       const { amount0In, amount0Out, amount1In, amount1Out } = ev.args;
@@ -544,7 +546,7 @@ async function onBuyUsdtInput() {
       [DEX_WETH, window._poolSelectedToken]
     );
     const out = parseFloat(ethers.utils.formatUnits(amounts[1], window._poolTokenDecimals));
-    document.getElementById('poolBuyToken').value = out.toLocaleString(undefined, {maximumFractionDigits:6, useGrouping:false});
+    document.getElementById('poolBuyToken').value = parseFloat(out.toFixed(5)).toString();
   } catch(_) { document.getElementById('poolBuyToken').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
@@ -563,7 +565,7 @@ async function onBuyTokenInput() {
       [DEX_WETH, window._poolSelectedToken]
     );
     const usdtNeeded = parseFloat(ethers.utils.formatEther(amounts[0])) * USDT_PER_ETH;
-    document.getElementById('poolBuyUSDT').value = usdtNeeded.toFixed(2);
+    document.getElementById('poolBuyUSDT').value = parseFloat(usdtNeeded.toFixed(2)).toString();
   } catch(_) { document.getElementById('poolBuyUSDT').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
@@ -580,7 +582,7 @@ async function onSellTokenInput() {
       [window._poolSelectedToken, DEX_WETH]
     );
     const usdtOut = parseFloat(ethers.utils.formatEther(amounts[1])) * USDT_PER_ETH;
-    document.getElementById('poolSellUSDT').value = usdtOut.toFixed(2);
+    document.getElementById('poolSellUSDT').value = parseFloat(usdtOut.toFixed(2)).toString();
   } catch(_) { document.getElementById('poolSellUSDT').value = ''; }
 }
 
@@ -597,7 +599,7 @@ async function onSellUsdtInput() {
       [window._poolSelectedToken, DEX_WETH]
     );
     const tokNeeded = parseFloat(ethers.utils.formatUnits(amounts[0], window._poolTokenDecimals));
-    document.getElementById('poolSellAmt').value = tokNeeded.toLocaleString(undefined, {maximumFractionDigits:6, useGrouping:false});
+    document.getElementById('poolSellAmt').value = parseFloat(tokNeeded.toFixed(5)).toString();
   } catch(_) { document.getElementById('poolSellAmt').value = ''; }
 }
 
@@ -627,8 +629,8 @@ async function poolBuyTokens() {
     const router = getRouter();
     const ethIn      = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
     const amountsOut = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
-    const minOut     = amountsOut[1].mul(990).div(1000); // 1% slippage
-    const deadline   = Math.floor(Date.now()/1000) + 300;
+    const minOut   = amountsOut[1].mul(990).div(1000); // 1% slippage
+    const deadline = (await provider.getBlock('latest')).timestamp + 86400;
     toast('Confirm transaction in MetaMask…', 'info');
     const tx = await router.swapExactETHForTokens(
       minOut, [DEX_WETH, window._poolSelectedToken], walletAddress, deadline, { value: ethIn }
@@ -660,14 +662,14 @@ async function poolSellTokens() {
     const balance = await erc20.balanceOf(walletAddress);
     if (balance.lt(amtIn)) {
       const have = parseFloat(ethers.utils.formatUnits(balance, window._poolTokenDecimals));
-      toast(`Insufficient balance — you have ${have.toLocaleString(undefined,{maximumFractionDigits:4})} ${window._poolTokenSymbol}`, 'error');
+      toast(`Insufficient balance — you have ${fmtNum(have)} ${window._poolTokenSymbol}`, 'error');
       _txDone();
       return;
     }
     const router   = getRouter();
     const amounts  = await router.getAmountsOut(amtIn, [window._poolSelectedToken, DEX_WETH]);
     const minETH   = amounts[1].mul(990).div(1000); // 1% slippage
-    const deadline = Math.floor(Date.now()/1000) + 300;
+    const deadline = (await provider.getBlock('latest')).timestamp + 86400;
     const allowance = await erc20.allowance(walletAddress, DEX_ROUTER);
     if (allowance.lt(amtIn)) {
       toast('Approve token spend in MetaMask…', 'info');
@@ -694,7 +696,7 @@ async function poolSellTokens() {
 // ── PRICE CHART ──────────────────────────────────────────────────────────────
 
 window._poolChartData      = [];
-window._poolChartTimeframe = '1h';
+window._poolChartTimeframe = 'all';
 window._poolChartState     = null; // {data, padL, padR, padT, padB, W, H, tMin, tMax, vLo, vHi}
 
 async function loadPriceChart(pairAddr, isToken0, dec) {
@@ -718,8 +720,10 @@ async function loadPriceChart(pairAddr, isToken0, dec) {
   _initChartHover(canvas);
 
   try {
-    const pair  = getPairContract(pairAddr);
-    const swaps = await pair.queryFilter('Swap', 0, 'latest').catch(() => []);
+    const pair        = getPairContract(pairAddr);
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock   = getFromBlock(latestBlock);
+    const swaps = await pair.queryFilter('Swap', fromBlock, 'latest').catch(() => []);
     if (!swaps.length) { window._poolChartData = []; renderPriceChart(window._poolChartTimeframe); return; }
 
     const uniqueBlocks = [...new Set(swaps.map(e => e.blockNumber))];
@@ -776,25 +780,53 @@ function switchPriceChart(tf) {
 
 function renderPriceChart(tf) {
   window._poolChartTimeframe = tf;
-  const ids = ['1h','4h','12h','24h','1w','1m','1y','all'];
+  const ids = ['24h','1w','1m','1y','all'];
   ids.forEach(t => {
     const btn = document.getElementById('pct-' + t);
     if (!btn) return;
-    btn.style.background = t === tf ? 'var(--gold)' : 'var(--surface)';
-    btn.style.color      = t === tf ? '#000' : 'var(--muted)';
+    btn.style.background  = t === tf ? 'rgba(201,168,76,0.85)' : 'transparent';
+    btn.style.color       = t === tf ? '#0a1628'               : 'rgba(148,163,184,0.65)';
+    btn.style.borderColor = t === tf ? 'rgba(201,168,76,0.85)' : 'rgba(255,255,255,0.1)';
   });
+
   const now   = Date.now();
-  const spans = { '1h':3600e3, '4h':14400e3, '12h':43200e3, '24h':86400e3, '1w':604800e3, '1m':2592000e3, '1y':31536000e3 };
-  const cutoff = tf === 'all' ? 0 : now - spans[tf];
-  const data = window._poolChartData.filter(p => p.time >= cutoff);
+  const spans = { '24h':86400e3,'1w':604800e3,'1m':2592000e3,'1y':31536000e3 };
+  const all   = window._poolChartData;
+
+  let viewMin, viewMax;
+  if (tf === 'all') {
+    if (!all.length) { viewMin = now - 3600e3; viewMax = now; }
+    else {
+      viewMin = all[0].time;
+      viewMax = all[all.length - 1].time;
+      const pad = (viewMax - viewMin) * 0.03 || 60000;
+      viewMin -= pad; viewMax += pad;
+    }
+  } else {
+    viewMax = now;
+    viewMin = now - spans[tf];
+  }
+
+  const data   = all.filter(p => p.time >= viewMin && p.time <= viewMax);
   const canvas = document.getElementById('poolPriceCanvas');
-  if (canvas) _drawPriceCanvas(canvas, data);
+  if (canvas) _drawPriceCanvas(canvas, data, viewMin, viewMax);
 }
 
-function _drawPriceCanvas(canvas, data, hoverIdx) {
+// Helper: rounded rect path
+function _rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx) {
   const dpr = window.devicePixelRatio || 1;
   const W   = canvas.parentElement.clientWidth || 500;
-  const H   = 220;
+  const H   = 268;
   canvas.width        = W * dpr;
   canvas.height       = H * dpr;
   canvas.style.width  = W + 'px';
@@ -804,7 +836,7 @@ function _drawPriceCanvas(canvas, data, hoverIdx) {
   ctx.clearRect(0, 0, W, H);
 
   if (!data.length) {
-    ctx.fillStyle    = 'rgba(148,163,184,0.45)';
+    ctx.fillStyle    = 'rgba(148,163,184,0.4)';
     ctx.font         = '11px monospace';
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
@@ -813,102 +845,140 @@ function _drawPriceCanvas(canvas, data, hoverIdx) {
     return;
   }
 
-  const padL = 72, padR = 16, padT = 18, padB = 40;
-  const cW   = W - padL - padR;
-  const cH   = H - padT - padB;
+  // Layout: price area only
+  const padL   = 70, padR = 14, padT = 18, padB = 34;
+  const priceH = H - padT - padB;
+  const cW     = W - padL - padR;
+
+  const tMin  = viewMin;
+  const tMax  = viewMax;
   const times = data.map(p => p.time);
   const vals  = data.map(p => p.price);
-  const tMin  = times[0], tMax = times[times.length - 1] || tMin + 1;
-  const vMin  = Math.min(...vals);
-  const vMax  = Math.max(...vals);
-  const vPad  = (vMax - vMin) * 0.12 || vMax * 0.12 || 0.000001;
-  const vLo   = vMin - vPad;
-  const vHi   = vMax + vPad;
-  const vRng  = vHi - vLo;
+
+  const vMin = Math.min(...vals);
+  const vMax = Math.max(...vals);
+  const vPad = (vMax - vMin) * 0.15 || vMax * 0.15 || 0.000001;
+  const vLo  = vMin - vPad;
+  const vHi  = vMax + vPad;
+  const vRng = vHi - vLo;
 
   const tx = t => padL + ((t - tMin) / (tMax - tMin || 1)) * cW;
-  const ty = v => padT + cH - ((v - vLo) / vRng) * cH;
+  const ty = v => padT + priceH - ((v - vLo) / vRng) * priceH;
 
-  // Save state for hover hit-testing
-  window._poolChartState = { data, padL, padR, padT, padB, W, H, tMin, tMax, vLo, vHi, vRng, cW, cH };
+  const isUp    = vals[vals.length - 1] >= vals[0];
+  const lineClr = isUp ? '#4ade80' : '#f87171';
 
-  // Grid
-  ctx.strokeStyle = 'rgba(201,168,76,0.08)';
-  ctx.lineWidth   = 1;
-  ctx.fillStyle   = 'rgba(148,163,184,0.55)';
-  ctx.font        = '9px monospace';
-  ctx.textAlign   = 'right';
+  window._poolChartState = { data, viewMin, viewMax, padL, padR, padT, padB, W, H, tMin, tMax, vLo, vHi, vRng, cW, cH: priceH };
+
+  // ── Price grid (horizontal) ──
+  ctx.font         = '9px monospace';
   ctx.textBaseline = 'middle';
-  for (let i = 0; i <= 4; i++) {
-    const v = vLo + (vRng / 4) * i;
+  ctx.textAlign    = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const v = vLo + (vRng / 5) * i;
     const y = ty(v);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth   = 1;
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-    const lbl = v < 0.001 ? v.toExponential(2) : v.toLocaleString(undefined, { maximumFractionDigits: 4 });
-    ctx.fillText(lbl, padL - 4, y);
+    const lbl = v < 0.0001 ? v.toExponential(2) : fmtNum(v);
+    ctx.fillStyle = 'rgba(148,163,184,0.42)';
+    ctx.fillText(lbl, padL - 5, y);
   }
 
-  // Time axis
+  // ── Time grid (vertical) + time labels ──
+  const span = tMax - tMin;
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'top';
-  const span = tMax - tMin;
-  for (let i = 0; i <= 4; i++) {
-    const t = tMin + span / 4 * i;
-    const x = tx(t);
+  for (let i = 0; i <= 5; i++) {
+    const t = tMin + (span / 5) * i;
+    const x = padL + (i / 5) * cW;
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + priceH); ctx.stroke();
+
     const d = new Date(t);
-    const lbl = span < 86400e3
-      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    ctx.fillStyle = 'rgba(148,163,184,0.55)';
-    ctx.fillText(lbl, x, H - padB + 8);
+    let lbl;
+    if      (span < 7200e3)   lbl = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    else if (span < 86400e3)  lbl = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    else if (span < 604800e3) lbl = d.toLocaleDateString([], { month:'short', day:'numeric' }) + ' ' + d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    else                      lbl = d.toLocaleDateString([], { month:'short', day:'numeric' });
+    ctx.fillStyle = 'rgba(148,163,184,0.38)';
+    ctx.fillText(lbl, x, H - padB + 5);
   }
 
-  // Gradient fill
-  const grad = ctx.createLinearGradient(0, padT, 0, padT + cH);
-  grad.addColorStop(0, 'rgba(201,168,76,0.20)');
-  grad.addColorStop(1, 'rgba(201,168,76,0.0)');
+// ── Clip to price area ──
+  ctx.save();
   ctx.beginPath();
-  ctx.moveTo(tx(times[0]), ty(vals[0]));
-  for (let i = 1; i < data.length; i++) ctx.lineTo(tx(times[i]), ty(vals[i]));
-  ctx.lineTo(tx(times[times.length - 1]), padT + cH);
-  ctx.lineTo(tx(times[0]), padT + cH);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
+  ctx.rect(padL - 1, padT - 1, cW + 2, priceH + 2);
+  ctx.clip();
 
-  // Price line
+
+  // Price line with glow
+  ctx.shadowColor = lineClr;
+  ctx.shadowBlur  = 5;
   ctx.beginPath();
   ctx.moveTo(tx(times[0]), ty(vals[0]));
   for (let i = 1; i < data.length; i++) ctx.lineTo(tx(times[i]), ty(vals[i]));
-  ctx.strokeStyle = '#c9a84c';
-  ctx.lineWidth   = 1.5;
+  ctx.strokeStyle = lineClr;
+  ctx.lineWidth   = 1.8;
   ctx.lineJoin    = 'round';
   ctx.stroke();
+  ctx.shadowBlur  = 0;
 
-  // Hover crosshair + highlight dot
+  ctx.restore();
+
+  // ── Current price tag on y-axis ──
+  const lastVal = vals[vals.length - 1];
+  const lastY   = ty(lastVal);
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = lineClr + '44';
+  ctx.lineWidth   = 1;
+  ctx.beginPath(); ctx.moveTo(padL, lastY); ctx.lineTo(W - padR, lastY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const pFmt = lastVal < 0.0001 ? lastVal.toExponential(2) : fmtNum(lastVal);
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'middle';
+  const tagW = ctx.measureText(pFmt).width + 12;
+  ctx.fillStyle = lineClr;
+  _rrect(ctx, padL - tagW - 1, lastY - 8, tagW, 16, 3);
+  ctx.fill();
+  ctx.fillStyle = '#0a1628';
+  ctx.fillText(pFmt, padL - 5, lastY);
+
+  // ── Hover crosshair & dot ──
   if (hoverIdx != null && hoverIdx >= 0 && hoverIdx < data.length) {
     const hx = tx(times[hoverIdx]);
     const hy = ty(vals[hoverIdx]);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = 'rgba(201,168,76,0.35)';
+    ctx.save();
+    ctx.beginPath(); ctx.rect(padL, padT, cW, priceH); ctx.clip();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + cH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + priceH); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(padL, hy); ctx.lineTo(W - padR, hy); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.shadowColor = lineClr; ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.arc(hx, hy, 5, 0, Math.PI * 2);
-    ctx.fillStyle   = '#c9a84c';
+    ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle   = lineClr;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth   = 1.5;
-    ctx.fill();
-    ctx.stroke();
+    ctx.fill(); ctx.stroke();
+    ctx.shadowBlur  = 0;
+    ctx.restore();
   } else {
-    // Last price dot
     const lx = tx(times[times.length - 1]);
-    const ly = ty(vals[vals.length - 1]);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(padL, padT, cW, priceH); ctx.clip();
+    ctx.shadowColor = lineClr; ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(lx, ly, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#c9a84c';
+    ctx.arc(lx, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = lineClr;
     ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 }
 
@@ -928,17 +998,19 @@ function _initChartHover(canvas) {
     const mx   = e.clientX - rect.left;
     const my   = e.clientY - rect.top;
 
-    // Find nearest data point by x distance
-    const { data, padL, padR, padT, padB, W, H, tMin, tMax, cW } = st;
-    if (mx < padL || mx > W - padR || my < padT || my > H - padB) {
+    const { data, padL, padR, padT, W, tMin, tMax, cW, cH } = st;
+    if (mx < padL || mx > W - padR || my < padT || my > padT + cH) {
       if (tooltip) tooltip.style.display = 'none';
-      if (lastIdx !== null) { lastIdx = null; cancelAnimationFrame(animFrame); animFrame = requestAnimationFrame(() => _drawPriceCanvas(canvas, data)); }
+      if (lastIdx !== null) {
+        lastIdx = null;
+        cancelAnimationFrame(animFrame);
+        animFrame = requestAnimationFrame(() => _drawPriceCanvas(canvas, data, tMin, tMax));
+      }
       return;
     }
 
     const tAtMouse = tMin + ((mx - padL) / cW) * (tMax - tMin);
-    let nearest = 0;
-    let minDist = Infinity;
+    let nearest = 0, minDist = Infinity;
     for (let i = 0; i < data.length; i++) {
       const d = Math.abs(data[i].time - tAtMouse);
       if (d < minDist) { minDist = d; nearest = i; }
@@ -947,30 +1019,29 @@ function _initChartHover(canvas) {
     if (nearest !== lastIdx) {
       lastIdx = nearest;
       cancelAnimationFrame(animFrame);
-      animFrame = requestAnimationFrame(() => _drawPriceCanvas(canvas, data, nearest));
+      animFrame = requestAnimationFrame(() => _drawPriceCanvas(canvas, data, tMin, tMax, nearest));
     }
 
     if (tooltip) {
-      const p  = data[nearest];
-      const dt = new Date(p.time);
+      const p       = data[nearest];
+      const dt      = new Date(p.time);
       const timeStr = dt.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-      const sym = window._poolTokenSymbol || 'TOKEN';
+      const sym     = window._poolTokenSymbol || 'TOKEN';
+      const sideClr = p.isBuy ? '#4ade80' : '#f87171';
       tooltip.innerHTML =
-        `<div style="color:var(--gold);margin-bottom:4px;">${timeStr}</div>` +
-        `<div>Price &nbsp;&nbsp;: <b>$${p.price.toLocaleString(undefined,{maximumFractionDigits:6})}</b></div>` +
-        `<div>Volume : <b>$${p.usdtVol != null ? p.usdtVol.toLocaleString(undefined,{maximumFractionDigits:2}) : '—'}</b></div>` +
-        `<div>Amount : <b>${p.tokenVol != null ? p.tokenVol.toLocaleString(undefined,{maximumFractionDigits:4}) : '—'} ${sym}</b></div>` +
-        `<div>Side &nbsp;&nbsp;&nbsp;: <b style="color:${p.isBuy?'#4ade80':'#f87171'}">${p.isBuy?'BUY':'SELL'}</b></div>`;
+        `<div style="color:rgba(201,168,76,0.9);margin-bottom:5px;font-size:10px;">${timeStr}</div>` +
+        `<div>Price  <b>$${fmtNum(p.price)}</b></div>` +
+        `<div>Volume <b>$${p.usdtVol != null ? fmtNum(p.usdtVol) : '—'}</b></div>` +
+        `<div>Amount <b>${p.tokenVol != null ? fmtNum(p.tokenVol) : '—'} ${sym}</b></div>` +
+        `<div>Side   <b style="color:${sideClr}">${p.isBuy ? 'BUY' : 'SELL'}</b></div>`;
 
-      // Position tooltip
-      const cRect  = canvas.parentElement.getBoundingClientRect();
-      let tipX = e.clientX - cRect.left + 14;
-      let tipY = e.clientY - cRect.top  + 14;
+      const cRect = canvas.parentElement.getBoundingClientRect();
+      let tipX = e.clientX - cRect.left + 16;
+      let tipY = e.clientY - cRect.top  + 16;
       tooltip.style.display = 'block';
-      const tw = tooltip.offsetWidth;
-      const th = tooltip.offsetHeight;
-      if (tipX + tw > cRect.width - 4) tipX = e.clientX - cRect.left - tw - 14;
-      if (tipY + th > cRect.height - 4) tipY = e.clientY - cRect.top - th - 14;
+      const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+      if (tipX + tw > cRect.width  - 4) tipX = e.clientX - cRect.left - tw - 16;
+      if (tipY + th > cRect.height - 4) tipY = e.clientY - cRect.top  - th - 16;
       tooltip.style.left = tipX + 'px';
       tooltip.style.top  = tipY + 'px';
     }
@@ -982,7 +1053,7 @@ function _initChartHover(canvas) {
       lastIdx = null;
       cancelAnimationFrame(animFrame);
       const st = window._poolChartState;
-      if (st) animFrame = requestAnimationFrame(() => _drawPriceCanvas(canvas, st.data));
+      if (st) animFrame = requestAnimationFrame(() => _drawPriceCanvas(canvas, st.data, st.tMin, st.tMax));
     }
   });
 }
