@@ -379,11 +379,11 @@ async function fetchGraphData() {
   if (!contract || !walletAddress) return null;
   try {
     const latestBlockNum = await provider.getBlockNumber();
-    const fromBlock      = Math.max(0, latestBlockNum - 2000);
+    const fromBlock      = getFromBlock(latestBlockNum);
     const [userInfo, investEvents, refEvents] = await Promise.all([
       contract.users(walletAddress),
-      contract.queryFilter(contract.filters.Invested(walletAddress), fromBlock, 'latest').catch(() => []),
-      contract.queryFilter(contract.filters.CommissionPaid(walletAddress), fromBlock, 'latest').catch(() => [])
+      queryFilterBatched(contract, contract.filters.Invested(walletAddress), fromBlock, 'latest'),
+      queryFilterBatched(contract, contract.filters.CommissionPaid(walletAddress), fromBlock, 'latest'),
     ]);
     const regTime = Number(userInfo.registeredAt);
 
@@ -852,13 +852,13 @@ async function loadDashboard(silent = false) {
 
   try {
     const _latestBlockNum = await provider.getBlockNumber();
-    const _fromBlock      = Math.max(0, _latestBlockNum - 2000);
+    const _fromBlock      = getFromBlock(_latestBlockNum);
     const [lpLocks, commStats, stakingReward, platformToken, stakingEvents, latestBlock] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
       contract.platformToken(),
-      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest').catch(() => []),
+      queryFilterBatched(contract, contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest'),
       provider.getBlock('latest').catch(() => null),
     ]);
 
@@ -1217,12 +1217,48 @@ function _computeCapState(locks) {
   return 'ineligible';
 }
 
+async function _refreshDashDirectRefStats() {
+  const listEl = document.getElementById('dashDirectRefsList');
+  if (!listEl) return;
+  const cards = [...listEl.querySelectorAll('.dash-dref-card[id^="drefCard_"]')];
+  if (!cards.length) return;
+  const addrs = cards.map(c => c.id.slice('drefCard_'.length));
+  try {
+    const [investedAmts, refCounts, refLocks] = await Promise.all([
+      Promise.all(addrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
+      Promise.all(addrs.map(a => contract.getReferrals(a).catch(() => []).then(r => r.length))),
+      Promise.all(addrs.map(a => contract.getUserLPLocks(a).catch(() => []))),
+    ]);
+    for (let i = 0; i < cards.length; i++) {
+      const card     = cards[i];
+      const addr     = addrs[i];
+      const invested = parseFloat(ethers.utils.formatEther(investedAmts[i]));
+      const dirCount = refCounts[i];
+      const capState = _computeCapState(refLocks[i]);
+      const invEl    = card.querySelector('.dash-dref-invested');
+      if (invEl) invEl.innerHTML = `${invested > 0 ? fmtUSDT(invested, {decimals:2}) + ' invested' : 'No active investment'} &nbsp;·&nbsp; ${dirCount} direct ref${dirCount !== 1 ? 's' : ''}`;
+      card.classList.remove('cap-paused', 'cap-ineligible', 'dref-no-invest');
+      if (capState === 'paused')      card.classList.add('cap-paused');
+      else if (capState === 'ineligible') card.classList.add('cap-ineligible');
+      if (invested === 0) {
+        card.classList.add('dref-no-invest');
+        card.removeAttribute('onclick');
+      } else if (!card.getAttribute('onclick')) {
+        card.setAttribute('onclick', `openRefPopup('${addr}')`);
+      }
+    }
+  } catch(e) { console.warn('_refreshDashDirectRefStats', e); }
+}
+
 async function _loadDashDirectRefs(force = false) {
   const section = document.getElementById('dashDirectRefsSection');
   const listEl  = document.getElementById('dashDirectRefsList');
   if (!section || !listEl) return;
-  // Skip on poll refreshes — avoids the UI shake every 10 s
-  if (!force && listEl.querySelector('.dash-dref-card')) return;
+  // On background polls, refresh existing cards in-place instead of rebuilding
+  if (!force && listEl.querySelector('.dash-dref-card')) {
+    _refreshDashDirectRefStats();
+    return;
+  }
   try {
     const refs = await contract.getReferrals(walletAddress).catch(() => []);
     if (!refs || refs.length === 0) { section.style.display = 'none'; return; }
@@ -1302,12 +1338,10 @@ async function _computeMissedETHForAddr(addr) {
       if (membersAtDepth.length === 0) break;
       await Promise.all(membersAtDepth.map(async (member) => {
         const fromBlock = (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0) ? DEPLOY_BLOCK : 0;
-        const logs = await provider.getLogs({
+        const logs = await getLogsBatched({
           address: contract.address,
           topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
-          fromBlock,
-          toBlock: 'latest',
-        });
+        }, fromBlock, 'latest');
         const byTx = new Map();
         for (const log of logs) {
           const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
@@ -1666,5 +1700,6 @@ window._stopRefPopupTicker  = _stopRefPopupTicker;
 window.showRefLabelEdit     = showRefLabelEdit;
 window.hideRefLabelEdit     = hideRefLabelEdit;
 window.saveRefLabel         = saveRefLabel;
-window._initLabelKey        = _initLabelKey;
-window._unlockLabels        = _unlockLabels;
+window._initLabelKey              = _initLabelKey;
+window._unlockLabels              = _unlockLabels;
+window._refreshDashDirectRefStats = _refreshDashDirectRefStats;

@@ -85,6 +85,7 @@ contract Liquidity {
     error CommissionTransferFailed();
     error StakingRewardTransferFailed();
     error PriceUnavailable();
+    error PriceDeviationTooHigh();
     error NothingToClaim();
     error InsufficientTokenBalance();
     error TokenTransferFailed();
@@ -127,10 +128,11 @@ contract Liquidity {
     // Constants (not exposed to frontend; inlined by optimizer)
     uint256 private constant LP_LOCK_DURATION  = 90;
     uint256 private constant USDT_PER_ETH      = 1000;
-    uint256 private constant TWAP_PERIOD       = 30 minutes;
+    uint256 private constant TWAP_PERIOD       = 30 seconds; // testing — change to 30 minutes for mainnet
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant MAX_REFERRAL_HOPS = 15;
-    uint256 private constant MAX_SLIPPAGE_BPS  = 200; // 2 %
+    uint256 private constant MAX_SLIPPAGE_BPS  = 200; // 2 % — swap / LP execution tolerance
+    uint256 private constant TWAP_GUARD_BPS    = 500; // 5 % — max spot-vs-TWAP deviation before sandwich revert
 
     // Staking config (accessed via getStakingRatesForAmount, not directly by frontend)
     uint32[12] private investmentTiers;
@@ -138,6 +140,16 @@ contract Liquidity {
     uint256[4][12][6] private stakingRates;
 
     bool private _locked;
+
+    // On-chain price and trade history for frontend charting (avoids unreliable eth_getLogs)
+    mapping(address => PriceSnap[]) private _priceHistory;
+    mapping(address => TradeSnap[])  private _tradeHistory;
+
+    // On-chain per-user history records (avoids unreliable eth_getLogs on Amoy RPC)
+    mapping(address => CommissionRecord[]) private _commissionRecords;
+    mapping(address => InvestRecord[])     private _investRecords;
+    mapping(address => ClaimRecord[])      private _claimRecords;
+    mapping(address => LPEventRecord[])    private _lpEventRecords;
 
     // Unified TWAP storage for all tokens (platform token uses platformToken as key)
     mapping(address => TwapObs) private _tokenTwapObs0;
@@ -275,6 +287,20 @@ contract Liquidity {
 
         IERC20(_token).approve(UNISWAP_ROUTER, 0);
 
+        // Capture on-chain price snapshot for frontend chart
+        {
+            address _pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
+            if (_pair != address(0)) {
+                (uint112 sr0, uint112 sr1,) = IUniswapV2Pair(_pair).getReserves();
+                address st0 = IUniswapV2Pair(_pair).token0();
+                _priceHistory[_token].push(PriceSnap({
+                    ts:       uint64(block.timestamp),
+                    resETH:   st0 == _token ? sr1 : sr0,
+                    resToken: st0 == _token ? sr0 : sr1
+                }));
+            }
+        }
+
         uint256 remaining = address(this).balance;
         if (remaining > 0) {
             (bool ok,) = payable(owner).call{value: remaining}("");
@@ -358,11 +384,23 @@ contract Liquidity {
             uint256 resToken = t0 == _token ? uint256(r0) : uint256(r1);
             uint256 resETH   = t0 == _token ? uint256(r1) : uint256(r0);
             if (resETH == 0) revert PriceUnavailable();
-            // platformBuyTokens: contract-side token contribution — spot ratio is fine here
-            platformBuyTokens = A40 * resToken / resETH;
-            // swapAmountOutMin: derived from TWAP so a sandwich cannot inflate it
-            // _tokenTwapPrice is WETH-wei per full token; expected = A60 * 1e18 / twapPrice
-            swapAmountOutMin = A60 * 1e18 / _tokenTwapPrice[_token] * (10000 - MAX_SLIPPAGE_BPS) / 10000;
+
+            // Spot-based amounts: exact AMM formula guarantees the swap succeeds
+            // regardless of how far spot has drifted from TWAP over time.
+            uint256 spotExpected;
+            (platformBuyTokens, spotExpected) = LiquidityMath.calcInvestAmounts(
+                A60, A40, resToken, resETH, 0
+            );
+
+            // Sandwich guard: reject if spot output is more than TWAP_GUARD_BPS below
+            // the TWAP-derived expectation.  Legitimate long-term drift stays within
+            // this window; a same-block front-run moves it well beyond.
+            uint256 twapFloor = A60 * 1e18 / _tokenTwapPrice[_token]
+                                * (10000 - TWAP_GUARD_BPS) / 10000;
+            if (spotExpected < twapFloor) revert PriceDeviationTooHigh();
+
+            // Execution slippage: 2 % below the live spot output.
+            swapAmountOutMin = spotExpected * (10000 - MAX_SLIPPAGE_BPS) / 10000;
         }
 
         if (IERC20(_token).balanceOf(address(this)) < platformBuyTokens) revert InsufficientContractTokenBalance();
@@ -397,6 +435,23 @@ contract Liquidity {
 
         if (lpReceived == 0) revert NoLPTokens();
 
+        // Capture on-chain trade and price snapshots for frontend
+        {
+            (uint112 pr0, uint112 pr1,) = IUniswapV2Pair(pair).getReserves();
+            address pt0 = IUniswapV2Pair(pair).token0();
+            _tradeHistory[_token].push(TradeSnap({
+                ts:     uint64(block.timestamp),
+                isBuy:  true,
+                ethAmt: uint128(A60),
+                tokAmt: uint128(poolBuyTokens)
+            }));
+            _priceHistory[_token].push(PriceSnap({
+                ts:       uint64(block.timestamp),
+                resETH:   uint112(pt0 == _token ? pr1 : pr0),
+                resToken: uint112(pt0 == _token ? pr0 : pr1)
+            }));
+        }
+
         uint256 surplus = address(this).balance > A40 ? address(this).balance - A40 : 0;
         if (surplus > 0) {
             (bool ok,) = payable(owner).call{value: surplus}("");
@@ -418,6 +473,13 @@ contract Liquidity {
             restakeCounts:      [uint8(0), 0, 0, 0, 0, 0],
             streakBaseEth:      T,
             commissionsCapUsed: 0
+        }));
+
+        _investRecords[msg.sender].push(InvestRecord({
+            token:     _token,
+            ts:        uint64(block.timestamp),
+            ethAmount: uint128(T),
+            lpTokens:  uint128(lpReceived)
         }));
 
         bool wasQualifying = _qualifies(msg.sender);
@@ -444,6 +506,14 @@ contract Liquidity {
         address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(lock.token, WETH);
         if (pair == address(0)) revert PoolNotFound();
         if (!IERC20(pair).transfer(msg.sender, lock.lpAmount)) revert LPTransferFailed();
+
+        _lpEventRecords[msg.sender].push(LPEventRecord({
+            token:       lock.token,
+            ts:          uint64(block.timestamp),
+            isClaim:     true,
+            lpAmount:    uint128(lock.lpAmount),
+            ethReturned: 0
+        }));
 
         emit LPClaimed(msg.sender, lock.token, lock.lpAmount);
     }
@@ -509,6 +579,14 @@ contract Liquidity {
             (bool ok,) = payable(msg.sender).call{value: ethReturned}("");
             if (!ok) revert ETHReturnFailed();
         }
+
+        _lpEventRecords[msg.sender].push(LPEventRecord({
+            token:       lock.token,
+            ts:          uint64(block.timestamp),
+            isClaim:     false,
+            lpAmount:    uint128(lpAmount),
+            ethReturned: uint128(ethReturned)
+        }));
 
         emit LPRemoved(msg.sender, lock.token, lpAmount, ethReturned, tokensReturned);
     }
@@ -633,6 +711,12 @@ contract Liquidity {
         } else {
             // Only credit the recipient when they actually received the funds
             userCommissionsEarned[recipient] += toRecipient;
+            _commissionRecords[recipient].push(CommissionRecord({
+                from:   from,
+                ts:     uint64(block.timestamp),
+                level:  uint8(level),
+                amount: uint128(toRecipient)
+            }));
         }
         emit CommissionPaid(recipient, from, toRecipient, level);
     }
@@ -815,6 +899,11 @@ contract Liquidity {
         if (IERC20(platformToken).balanceOf(address(this)) < totalTokens) revert InsufficientTokenBalance();
         totalStakingRewardsPaidETH += totalPendingETH;
         if (!IERC20(platformToken).transfer(msg.sender, totalTokens)) revert TokenTransferFailed();
+        _claimRecords[msg.sender].push(ClaimRecord({
+            tokensAmount:  uint128(totalTokens),
+            ethEquivalent: uint128(totalPendingETH),
+            ts:            uint64(block.timestamp)
+        }));
         emit StakingRewardClaimed(msg.sender, totalTokens, totalPendingETH);
     }
 
@@ -829,6 +918,11 @@ contract Liquidity {
         if (IERC20(platformToken).balanceOf(address(this)) < tokensToSend) revert InsufficientTokenBalance();
         totalStakingRewardsPaidETH += pendingETH;
         if (!IERC20(platformToken).transfer(msg.sender, tokensToSend)) revert TokenTransferFailed();
+        _claimRecords[msg.sender].push(ClaimRecord({
+            tokensAmount:  uint128(tokensToSend),
+            ethEquivalent: uint128(pendingETH),
+            ts:            uint64(block.timestamp)
+        }));
         emit StakingRewardClaimed(msg.sender, tokensToSend, pendingETH);
     }
 
@@ -934,6 +1028,30 @@ contract Liquidity {
         uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
         if (toSend == 0) revert NoTokensToWithdraw();
         if (!IERC20(_token).transfer(owner, toSend)) revert TokenWithdrawFailed();
+    }
+
+    function getPriceHistory(address _token) external view returns (PriceSnap[] memory) {
+        return _priceHistory[_token];
+    }
+
+    function getTradeHistory(address _token) external view returns (TradeSnap[] memory) {
+        return _tradeHistory[_token];
+    }
+
+    function getCommissionRecords(address _user) external view returns (CommissionRecord[] memory) {
+        return _commissionRecords[_user];
+    }
+
+    function getInvestRecords(address _user) external view returns (InvestRecord[] memory) {
+        return _investRecords[_user];
+    }
+
+    function getClaimRecords(address _user) external view returns (ClaimRecord[] memory) {
+        return _claimRecords[_user];
+    }
+
+    function getLPEventRecords(address _user) external view returns (LPEventRecord[] memory) {
+        return _lpEventRecords[_user];
     }
 
     receive() external payable {}

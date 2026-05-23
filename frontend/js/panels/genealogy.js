@@ -267,7 +267,7 @@ async function loadGenealogy() {
           return `<div class="gene-addr-row" data-addr="${a}" style="justify-content:space-between;gap:12px;cursor:default;flex-wrap:wrap;">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;">
               <div class="gene-addr-dot"></div>
-              <a href="https://sepolia.etherscan.io/address/${a}" target="_blank" rel="noopener"
+              <a href="https://amoy.polygonscan.com/address/${a}" target="_blank" rel="noopener"
                  style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:12px;word-break:break-all;"
                  onclick="event.stopPropagation()">${rowLabel}</a>
               <button onclick="event.stopPropagation();copyAddr('${a}',this)" title="Copy address"

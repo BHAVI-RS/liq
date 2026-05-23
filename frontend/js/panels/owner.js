@@ -87,7 +87,7 @@ async function addToken() {
   _txBegin();
   try {
     toast('Sending transaction...', 'info');
-    const tx = await contract.addToken(addr, name, symbol);
+    const tx = await contract.addToken(addr, name, symbol, _GAS);
     await tx.wait();
 
     saveMeta(addr, {
@@ -234,7 +234,7 @@ async function setFeaturedToken(addr) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.setFeaturedToken(addr);
+    const tx = await contract.setFeaturedToken(addr, _GAS);
     await tx.wait();
     _txDone();
     toast('Featured token updated on-chain.', 'success');
@@ -252,7 +252,7 @@ async function delistToken(addr) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.removeToken(addr);
+    const tx = await contract.removeToken(addr, _GAS);
     await tx.wait();
     _txDone();
     toast('Token delisted successfully.', 'success');
@@ -282,7 +282,7 @@ async function toggleTokenInProgress(addr) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.setTokenInProgress(addr, label);
+    const tx = await contract.setTokenInProgress(addr, label, _GAS);
     await tx.wait();
     _txDone();
     toast(label ? `Tag "${label}" set on token.` : 'Tag cleared.', 'success');
@@ -585,7 +585,7 @@ async function ownerAddLiquidity() {
     }
 
     toast('Confirm in MetaMask — sending ETH to seed the pool…', 'info');
-    await (await contract.seedPool(addr, tokenWei, { value: ethWei })).wait();
+    await (await contract.seedPool(addr, tokenWei, { value: ethWei, ..._GAS })).wait();
 
     toast('Liquidity added successfully!', 'success');
     document.getElementById('ownerLiqUSDT').value          = '';
@@ -703,12 +703,12 @@ async function ownerRemoveLiquidity() {
 
     toast('Step 1/2 — Approve LP tokens in MetaMask…', 'info');
     const lpToken = new ethers.Contract(_ownerRem_PairAddr, ["function approve(address,uint256) returns (bool)"], signer);
-    await (await lpToken.approve(DEX_ROUTER, lpWei)).wait();
+    await (await lpToken.approve(DEX_ROUTER, lpWei, _GAS)).wait();
 
     toast('Step 2/2 — Remove liquidity in MetaMask…', 'info');
     const router = getRouter();
     await (await router.removeLiquidityETH(
-      addr, lpWei, minTok, minETH, walletAddress, deadline
+      addr, lpWei, minTok, minETH, walletAddress, deadline, _GAS
     )).wait();
 
     toast('Liquidity removed successfully!', 'success');
@@ -777,7 +777,7 @@ async function ownerWithdrawETH() {
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
     toast('Confirm in MetaMask…', 'info');
-    const tx = await contract.withdrawETH(amtWei);
+    const tx = await contract.withdrawETH(amtWei, _GAS);
     await tx.wait();
     toast('ETH withdrawn successfully.', 'success');
     document.getElementById('ownerWithdrawETHAmt').value = '';
@@ -801,7 +801,7 @@ async function ownerWithdrawToken() {
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
     toast('Confirm in MetaMask…', 'info');
-    const tx = await contract.withdrawToken(addr, amtWei);
+    const tx = await contract.withdrawToken(addr, amtWei, _GAS);
     await tx.wait();
     toast(`${_ownerWithdrawTokenSym} withdrawn successfully.`, 'success');
     document.getElementById('ownerWithdrawTokenAmt').value = '';

@@ -353,7 +353,7 @@ async function loadInvestments() {
               <span class="did-label">AVAILABLE</span>
               <span class="did-val">${myTokensInPool > 0 ? fmtNum(myTokensInPool)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+fmtNum(myETHInPool*USDT_PER_ETH)+' USDT' : '—'}</span>
             </div>
-            ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val" style="word-break:break-all;"><a href="https://sepolia.etherscan.io/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr} ↗</a></span></div>` : ''}
+            ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val" style="word-break:break-all;"><a href="https://amoy.polygonscan.com/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr} ↗</a></span></div>` : ''}
             <div class="did-row"><span class="did-label"></span><span class="did-val" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               ${isUnlocked ? `<button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i}, '${lock.token}', '${lpAmountHex}')" style="background:transparent;border:1px solid #f87171;color:#f87171;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:5px 12px;cursor:pointer;" onmouseover="this.style.background='rgba(248,113,113,0.12)'" onmouseout="this.style.background='transparent'">REMOVE LP</button>` : ''}
               ${removeLPBtn}
@@ -398,7 +398,7 @@ async function claimLP(lockIndex) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.claimLP(lockIndex);
+    const tx = await contract.claimLP(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -515,11 +515,11 @@ async function _execRemoveLP(lockIndex, tokenAddr, lpAmountHex) {
 
     toast('Step 1/2 — Approve LP tokens to platform in MetaMask…', 'info');
     const pairERC20 = new ethers.Contract(pairAddr, ['function approve(address spender, uint256 amount) returns (bool)'], signer);
-    const approveTx = await pairERC20.approve(CONTRACT_ADDRESS, lpAmount);
+    const approveTx = await pairERC20.approve(CONTRACT_ADDRESS, lpAmount, _GAS);
     await approveTx.wait();
 
     toast('Step 2/2 — Confirm Remove LP in MetaMask…', 'info');
-    const tx = await contract.removeLP(lockIndex);
+    const tx = await contract.removeLP(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -540,7 +540,7 @@ async function _execRemoveLPDirect(lockIndex) {
   _txBegin();
   try {
     toast('Confirm Remove LP in MetaMask…', 'info');
-    const tx = await contract.removeLPDirect(lockIndex);
+    const tx = await contract.removeLPDirect(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -661,7 +661,7 @@ async function confirmRestake() {
   _txBegin();
   try {
     toast(`Confirm stake for ${days} seconds in MetaMask…`, 'info');
-    const tx = await contract.restakeLP(lockIndex, days);
+    const tx = await contract.restakeLP(lockIndex, days, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -681,7 +681,7 @@ async function claimStakingRewardForLock(lockIndex) {
   _txBegin();
   try {
     toast('Confirm staking reward claim in MetaMask…', 'info');
-    const tx = await contract.claimStakingRewardForLock(lockIndex);
+    const tx = await contract.claimStakingRewardForLock(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -752,9 +752,9 @@ async function showLockHistory(lockIndex) {
     const _latestBN  = await provider.getBlockNumber();
     const _fromBlock = getFromBlock(_latestBN);
     const [investedEvs, restakedEvs, claimEvs] = await Promise.all([
-      contract.queryFilter(contract.filters.Invested(walletAddress, lock.token), _fromBlock, 'latest').catch(() => []),
-      contract.queryFilter(contract.filters.LPRestaked(walletAddress, lock.token), _fromBlock, 'latest').catch(() => []),
-      contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest').catch(() => []),
+      queryFilterBatched(contract, contract.filters.Invested(walletAddress, lock.token), _fromBlock, 'latest'),
+      queryFilterBatched(contract, contract.filters.LPRestaked(walletAddress, lock.token), _fromBlock, 'latest'),
+      queryFilterBatched(contract, contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest'),
     ]);
 
     investedEvs.sort((a, b) => a.blockNumber - b.blockNumber);

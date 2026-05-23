@@ -384,7 +384,7 @@ async function invest() {
     const totalWei = ethers.utils.parseEther(ethAmtStr);
 
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.invest(tokenAddr, { value: totalWei });
+    const tx = await contract.invest(tokenAddr, { value: totalWei, ..._GAS });
 
     toast('Transaction sent — waiting for confirmation…', 'info');
 

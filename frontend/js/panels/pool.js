@@ -17,8 +17,13 @@ const PAIR_ABI = [
   "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
   "function token0() view returns (address)",
   "function totalSupply() view returns (uint256)",
-  "event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)"
+  "event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)",
+  "event Sync(uint112 reserve0, uint112 reserve1)"
 ];
+// Uniswap V2 event topic hashes — used with provider.getLogs (more reliable than queryFilter on Amoy)
+const SYNC_TOPIC = '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1';
+const SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
+
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)",
@@ -43,6 +48,7 @@ window._poolUserTokenBal  = 0;   // user's token balance for hybrid buy logic
 window._poolMode          = 'buy'; // current buy/sell tab — controls trade history order
 window._poolTradeBuys     = [];  // last-fetched buy trades (most-recent first)
 window._poolTradeSells    = [];  // last-fetched sell trades (most-recent first)
+window._poolSessionTrades = [];  // direct swap trades this session, merged with chain history
 
 let _poolRefreshCount = 0;
 
@@ -114,49 +120,45 @@ async function _refreshPoolData() {
 }
 
 async function _updateChartData(pairAddr, isToken0, dec) {
-  const fromBlock = window._poolChartLastBlock + 1;
   try {
-    const pair     = getPairContract(pairAddr);
-    const newSwaps = await pair.queryFilter('Swap', fromBlock, 'latest').catch(() => []);
-    if (!newSwaps.length) return;
+    const tokenAddr = window._poolSelectedToken;
+    if (!tokenAddr) return;
+    const pair = getPairContract(pairAddr);
 
-    // Fetch timestamps only for unique new blocks
-    const uniqueBlocks = [...new Set(newSwaps.map(e => e.blockNumber))];
-    const blockMap = {};
-    await Promise.all(uniqueBlocks.map(async bn => {
-      try { const blk = await provider.getBlock(bn); blockMap[bn] = blk.timestamp * 1000; }
-      catch(_) { blockMap[bn] = Date.now(); }
-    }));
+    const [snapHistory, [r0, r1]] = await Promise.all([
+      contract.getPriceHistory(tokenAddr),
+      pair.getReserves(),
+    ]);
 
-    const newPoints = newSwaps.map(ev => {
-      const { amount0In, amount0Out, amount1In, amount1Out } = ev.args;
-      let isBuy, tokenAmt, ethAmt;
-      if (isToken0) {
-        if (!amount1In.isZero()) {
-          isBuy = true; tokenAmt = parseFloat(ethers.utils.formatUnits(amount0Out, dec)); ethAmt = parseFloat(ethers.utils.formatEther(amount1In));
-        } else {
-          isBuy = false; tokenAmt = parseFloat(ethers.utils.formatUnits(amount0In, dec)); ethAmt = parseFloat(ethers.utils.formatEther(amount1Out));
-        }
-      } else {
-        if (!amount0In.isZero()) {
-          isBuy = true; tokenAmt = parseFloat(ethers.utils.formatUnits(amount1Out, dec)); ethAmt = parseFloat(ethers.utils.formatEther(amount0In));
-        } else {
-          isBuy = false; tokenAmt = parseFloat(ethers.utils.formatUnits(amount1In, dec)); ethAmt = parseFloat(ethers.utils.formatEther(amount0Out));
-        }
+    const points = [];
+
+    for (const snap of snapHistory) {
+      const resETHF   = parseFloat(ethers.utils.formatEther(snap.resETH));
+      const resTokenF = parseFloat(ethers.utils.formatUnits(snap.resToken, dec));
+      if (!resTokenF || resTokenF <= 0) continue;
+      const price = ethToUSDT(resETHF / resTokenF);
+      if (!price || price <= 0) continue;
+      points.push({ time: snap.ts.toNumber() * 1000, price, isBuy: null, tokenVol: 0, usdtVol: 0 });
+    }
+
+    // Append live current-price point from getReserves()
+    const resTokenF = parseFloat(ethers.utils.formatUnits(isToken0 ? r0 : r1, dec));
+    const resETHF   = parseFloat(ethers.utils.formatEther(isToken0 ? r1 : r0));
+    if (resTokenF > 0) {
+      const curPrice = ethToUSDT(resETHF / resTokenF);
+      const now = Date.now();
+      const last = points[points.length - 1];
+      if (!last || Math.abs(last.price - curPrice) / curPrice > 0.0001 || now - last.time > 60000) {
+        points.push({ time: now, price: curPrice, isBuy: null, tokenVol: 0, usdtVol: 0 });
       }
-      if (!tokenAmt || tokenAmt <= 0 || !ethAmt) return null;
-      const usdtVol = ethToUSDT(ethAmt);
-      return { time: blockMap[ev.blockNumber], price: usdtVol / tokenAmt, isBuy, tokenVol: tokenAmt, usdtVol };
-    }).filter(Boolean);
+    }
 
-    if (!newPoints.length) return;
+    if (!points.length) return;
 
-    // Update last block and append to chart data
-    window._poolChartLastBlock = Math.max(...newSwaps.map(e => e.blockNumber));
-    window._poolChartData = [...window._poolChartData, ...newPoints]
-      .sort((a, b) => a.time - b.time);
+    if (points.length === 1) points.unshift({ ...points[0], time: points[0].time - 60000 });
+    points.sort((a, b) => a.time - b.time);
 
-    // Re-render with current timeframe
+    window._poolChartData = points;
     renderPriceChart(window._poolChartTimeframe);
   } catch(_) {}
 }
@@ -272,6 +274,7 @@ async function loadPoolPanel() {
 async function loadPoolInfo(tokenAddr) {
   if (!requireConnected()) return;
   _stopPoolPolling();
+  if (window._poolSelectedToken !== tokenAddr) window._poolSessionTrades = [];
   window._poolSelectedToken  = tokenAddr;
   window._poolLastPrice      = 0;
   window._poolCurPrice       = 0;
@@ -465,39 +468,17 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
   }
 
   try {
-    const pair        = getPairContract(pairAddr);
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock   = getFromBlock(latestBlock);
-    const swaps = await pair.queryFilter('Swap', fromBlock, 'latest').catch(() => []);
+    const tokenAddr   = window._poolSelectedToken;
+    const tradeSnaps  = await contract.getTradeHistory(tokenAddr);
 
-    const allTrades = [...swaps].reverse().map(ev => {
-      const { amount0In, amount0Out, amount1In, amount1Out } = ev.args;
-      let isBuy, tokenAmt, ethAmt;
-      if (isToken0) {
-        if (!amount1In.isZero()) {
-          isBuy = true;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount0Out, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount1In));
-        } else {
-          isBuy = false;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount0In, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount1Out));
-        }
-      } else {
-        if (!amount0In.isZero()) {
-          isBuy = true;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount1Out, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount0In));
-        } else {
-          isBuy = false;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount1In, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount0Out));
-        }
-      }
+    const chainTrades = [...tradeSnaps].reverse().map(snap => {
+      const ethAmt  = parseFloat(ethers.utils.formatEther(snap.ethAmt));
+      const tokAmt  = parseFloat(ethers.utils.formatUnits(snap.tokAmt, dec));
       const usdtAmt = ethToUSDT(ethAmt);
-      const price   = tokenAmt > 0 ? usdtAmt / tokenAmt : 0;
-      return { isBuy, tokenAmt, usdtAmt, price };
+      const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
+      return { isBuy: snap.isBuy, tokenAmt: tokAmt, usdtAmt, price };
     });
+    const allTrades = [...(window._poolSessionTrades || []), ...chainTrades];
 
     window._poolTradeBuys  = allTrades.filter(t =>  t.isBuy).slice(0, 5);
     window._poolTradeSells = allTrades.filter(t => !t.isBuy).slice(0, 5);
@@ -633,12 +614,30 @@ async function poolBuyTokens() {
     const deadline = (await provider.getBlock('latest')).timestamp + 86400;
     toast('Confirm transaction in MetaMask…', 'info');
     const tx = await router.swapExactETHForTokens(
-      minOut, [DEX_WETH, window._poolSelectedToken], walletAddress, deadline, { value: ethIn }
+      minOut, [DEX_WETH, window._poolSelectedToken], walletAddress, deadline, { value: ethIn, ..._GAS }
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
-    await tx.wait();
+    const receipt = await tx.wait();
     _txDone();
     toast('Buy successful!', 'success');
+    // Parse swap amounts from receipt and prepend to in-memory trade list
+    try {
+      const pairAddr = window._poolSelectedPair;
+      const isToken0 = window._poolIsToken0;
+      const dec      = window._poolTokenDecimals;
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() !== pairAddr.toLowerCase()) continue;
+        if (log.topics[0] !== SWAP_TOPIC) continue;
+        const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
+          ['uint256','uint256','uint256','uint256'], log.data);
+        const tokAmt  = parseFloat(ethers.utils.formatUnits(isToken0 ? a0out : a1out, dec));
+        const ethAmt  = parseFloat(ethers.utils.formatEther(isToken0 ? a1in : a0in));
+        const usdtAmt = ethToUSDT(ethAmt);
+        const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
+        window._poolSessionTrades.unshift({ isBuy: true, tokenAmt: tokAmt, usdtAmt, price });
+        break;
+      }
+    } catch(_) {}
     document.getElementById('poolBuyUSDT').value  = '';
     document.getElementById('poolBuyToken').value = '';
     const hintEl = document.getElementById('poolBuyHint');
@@ -673,17 +672,35 @@ async function poolSellTokens() {
     const allowance = await erc20.allowance(walletAddress, DEX_ROUTER);
     if (allowance.lt(amtIn)) {
       toast('Approve token spend in MetaMask…', 'info');
-      const approveTx = await erc20.approve(DEX_ROUTER, amtIn);
+      const approveTx = await erc20.approve(DEX_ROUTER, amtIn, _GAS);
       await approveTx.wait();
     }
     toast('Confirm swap in MetaMask…', 'info');
     const tx = await router.swapExactTokensForETH(
-      amtIn, minETH, [window._poolSelectedToken, DEX_WETH], walletAddress, deadline
+      amtIn, minETH, [window._poolSelectedToken, DEX_WETH], walletAddress, deadline, _GAS
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
-    await tx.wait();
+    const receipt = await tx.wait();
     _txDone();
     toast('Sell successful!', 'success');
+    // Parse swap amounts from receipt and prepend to in-memory trade list
+    try {
+      const pairAddr = window._poolSelectedPair;
+      const isToken0 = window._poolIsToken0;
+      const dec      = window._poolTokenDecimals;
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() !== pairAddr.toLowerCase()) continue;
+        if (log.topics[0] !== SWAP_TOPIC) continue;
+        const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
+          ['uint256','uint256','uint256','uint256'], log.data);
+        const tokAmt  = parseFloat(ethers.utils.formatUnits(isToken0 ? a0in : a1in, dec));
+        const ethAmt  = parseFloat(ethers.utils.formatEther(isToken0 ? a1out : a0out));
+        const usdtAmt = ethToUSDT(ethAmt);
+        const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
+        window._poolSessionTrades.unshift({ isBuy: false, tokenAmt: tokAmt, usdtAmt, price });
+        break;
+      }
+    } catch(_) {}
     document.getElementById('poolSellAmt').value  = '';
     document.getElementById('poolSellUSDT').value = '';
     loadPoolInfo(window._poolSelectedToken);
@@ -720,54 +737,46 @@ async function loadPriceChart(pairAddr, isToken0, dec) {
   _initChartHover(canvas);
 
   try {
-    const pair        = getPairContract(pairAddr);
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock   = getFromBlock(latestBlock);
-    const swaps = await pair.queryFilter('Swap', fromBlock, 'latest').catch(() => []);
-    if (!swaps.length) { window._poolChartData = []; renderPriceChart(window._poolChartTimeframe); return; }
+    const tokenAddr = window._poolSelectedToken;
+    const pair      = getPairContract(pairAddr);
 
-    const uniqueBlocks = [...new Set(swaps.map(e => e.blockNumber))];
-    const blockMap = {};
-    await Promise.all(uniqueBlocks.map(async bn => {
-      try { const blk = await provider.getBlock(bn); blockMap[bn] = blk.timestamp * 1000; }
-      catch(_) { blockMap[bn] = bn * 15000; } // fallback: estimate at 15s/block
-    }));
+    const [snapHistory, reserves] = await Promise.all([
+      contract.getPriceHistory(tokenAddr),
+      pair.getReserves(),
+    ]);
 
-    const points = swaps.map(ev => {
-      const { amount0In, amount0Out, amount1In, amount1Out } = ev.args;
-      let isBuy, tokenAmt, ethAmt;
-      if (isToken0) {
-        if (!amount1In.isZero()) {
-          isBuy    = true;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount0Out, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount1In));
-        } else {
-          isBuy    = false;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount0In, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount1Out));
-        }
-      } else {
-        if (!amount0In.isZero()) {
-          isBuy    = true;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount1Out, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount0In));
-        } else {
-          isBuy    = false;
-          tokenAmt = parseFloat(ethers.utils.formatUnits(amount1In, dec));
-          ethAmt   = parseFloat(ethers.utils.formatEther(amount0Out));
-        }
+    const points = [];
+
+    for (const snap of snapHistory) {
+      const resETHF   = parseFloat(ethers.utils.formatEther(snap.resETH));
+      const resTokenF = parseFloat(ethers.utils.formatUnits(snap.resToken, dec));
+      if (!resTokenF || resTokenF <= 0) continue;
+      const price = ethToUSDT(resETHF / resTokenF);
+      if (!price || price <= 0) continue;
+      points.push({ time: snap.ts.toNumber() * 1000, price, isBuy: null, tokenVol: 0, usdtVol: 0 });
+    }
+
+    // Always append current reserves as the most recent price point.
+    const [r0, r1] = reserves;
+    const resTokenF = parseFloat(ethers.utils.formatUnits(isToken0 ? r0 : r1, dec));
+    const resETHF   = parseFloat(ethers.utils.formatEther(isToken0 ? r1 : r0));
+    if (resTokenF > 0) {
+      const price = ethToUSDT(resETHF / resTokenF);
+      const now   = Date.now();
+      const last  = points[points.length - 1];
+      if (!last || now > last.time) {
+        points.push({ time: now, price, isBuy: null, tokenVol: 0, usdtVol: 0 });
       }
-      if (!tokenAmt || tokenAmt <= 0 || !ethAmt) return null;
-      const usdtVol = ethToUSDT(ethAmt);
-      return { time: blockMap[ev.blockNumber], price: usdtVol / tokenAmt, isBuy, tokenVol: tokenAmt, usdtVol };
-    }).filter(Boolean);
+    }
 
     points.sort((a, b) => a.time - b.time);
-    window._poolChartData = points;
-    // Record highest block so incremental updates know where to resume
-    if (swaps.length) {
-      window._poolChartLastBlock = Math.max(...swaps.map(e => e.blockNumber));
+
+    // A single point has no line segment — extend it into a flat line 60 s back.
+    if (points.length === 1) {
+      points.unshift({ ...points[0], time: points[0].time - 60000 });
     }
+
+    window._poolChartData = points;
   } catch(_) {
     window._poolChartData = [];
   }
@@ -1027,13 +1036,14 @@ function _initChartHover(canvas) {
       const dt      = new Date(p.time);
       const timeStr = dt.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
       const sym     = window._poolTokenSymbol || 'TOKEN';
-      const sideClr = p.isBuy ? '#4ade80' : '#f87171';
+      const sideClr = p.isBuy === null ? 'var(--muted)' : p.isBuy ? '#4ade80' : '#f87171';
+      const sideLabel = p.isBuy === null ? 'LP' : p.isBuy ? 'BUY' : 'SELL';
       tooltip.innerHTML =
         `<div style="color:rgba(201,168,76,0.9);margin-bottom:5px;font-size:10px;">${timeStr}</div>` +
         `<div>Price  <b>$${fmtNum(p.price)}</b></div>` +
-        `<div>Volume <b>$${p.usdtVol != null ? fmtNum(p.usdtVol) : '—'}</b></div>` +
-        `<div>Amount <b>${p.tokenVol != null ? fmtNum(p.tokenVol) : '—'} ${sym}</b></div>` +
-        `<div>Side   <b style="color:${sideClr}">${p.isBuy ? 'BUY' : 'SELL'}</b></div>`;
+        (p.usdtVol  ? `<div>Volume <b>$${fmtNum(p.usdtVol)}</b></div>` : '') +
+        (p.tokenVol ? `<div>Amount <b>${fmtNum(p.tokenVol)} ${sym}</b></div>` : '') +
+        `<div>Side   <b style="color:${sideClr}">${sideLabel}</b></div>`;
 
       const cRect = canvas.parentElement.getBoundingClientRect();
       let tipX = e.clientX - cRect.left + 16;

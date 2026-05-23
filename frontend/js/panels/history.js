@@ -24,21 +24,63 @@ async function loadHistory() {
   const el = document.getElementById('historyList');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock   = getFromBlock(latestBlock);
-    const filter = contract.filters.Invested(walletAddress);
-    const events = await contract.queryFilter(filter, fromBlock, 'latest');
-    if (events.length === 0) {
+    const records = await contract.getInvestRecords(walletAddress);
+    if (!records.length) {
       el.innerHTML = '<div class="empty-state">No investments found.</div>';
       return;
     }
     el.innerHTML = '';
-    for (const ev of [...events].reverse()) {
-      el.appendChild(await _buildHistoryItem(ev));
+    // Build token symbol cache in parallel for all unique tokens
+    const uniqueTokens = [...new Set(records.map(r => r.token.toLowerCase()))];
+    const symCache = {};
+    await Promise.all(uniqueTokens.map(async addr => {
+      try { symCache[addr] = (await contract.getToken(addr)).symbol; } catch(_) {}
+    }));
+    for (const rec of [...records].reverse()) {
+      el.appendChild(_buildHistoryItemFromRecord(rec, symCache));
     }
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
   }
+}
+
+function _buildHistoryItemFromRecord(rec, symCache) {
+  const tokenAddr = rec.token;
+  const ethAmount = rec.ethAmount;
+  const lpTokens  = rec.lpTokens;
+  const ts        = rec.ts.toNumber ? rec.ts.toNumber() : Number(rec.ts);
+  const date      = new Date(ts * 1000).toLocaleString();
+  const ethRaw    = parseFloat(ethers.utils.formatEther(ethAmount));
+  const ethFmt    = fmtNum(ethRaw * USDT_PER_ETH);
+  const lpFmt     = fmtNum(parseFloat(ethers.utils.formatEther(lpTokens)));
+  const sym       = (symCache && symCache[tokenAddr.toLowerCase()]) || tokenAddr.slice(0, 8) + '…';
+
+  const div = document.createElement('div');
+  div.className = 'history-item';
+  div.innerHTML = `
+    <div class="history-summary" onclick="toggleHistoryDetail(this)" style="cursor:pointer;">
+      <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;">
+        <div style="width:36px;height:36px;border-radius:50%;background:rgba(201,168,76,0.1);display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:18px;flex-shrink:0;">⊕</div>
+        <div style="min-width:0;">
+          <div style="font-size:13px;color:var(--cream);font-weight:500;">${ethFmt} USDT → ${sym}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${date}</div>
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;margin-right:12px;">
+        <div style="font-size:12px;color:var(--gold);">${lpFmt} LP</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px;font-family:var(--font-mono);">${tokenAddr.slice(0,10)}…</div>
+      </div>
+      <div class="history-chevron">›</div>
+    </div>
+    <div class="history-detail"
+      data-token="${tokenAddr}"
+      data-eth="${ethAmount.toString()}"
+      data-lp="${lpTokens.toString()}">
+      <div class="hd-body" style="padding:16px;color:var(--muted);font-size:12px;text-align:center;">
+        Loading details…
+      </div>
+    </div>`;
+  return div;
 }
 
 async function _buildHistoryItem(ev) {
@@ -157,43 +199,47 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     : { token: ethers.BigNumber.from(r1), eth: ethers.BigNumber.from(r0) };
 
   let resBefore = null, resAfter = null;
-  try { resBefore = toRes(await pairCt.getReserves({ blockTag: blockNum - 1 })); } catch(_) {}
-  try { resAfter  = toRes(await pairCt.getReserves({ blockTag: blockNum }));      } catch(_) {}
+  if (blockNum && !isNaN(blockNum)) {
+    try { resBefore = toRes(await pairCt.getReserves({ blockTag: blockNum - 1 })); } catch(_) {}
+    try { resAfter  = toRes(await pairCt.getReserves({ blockTag: blockNum }));      } catch(_) {}
+  }
 
   const SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
   const MINT_TOPIC = '0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f';
 
-  const receipt = await provider.getTransactionReceipt(txHash);
   let swapTokensOut = null, mintToken = null, mintETH = null;
-
-  for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== pairAddr.toLowerCase()) continue;
-    if (log.topics[0] === SWAP_TOPIC) {
-      const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
-        ['uint256','uint256','uint256','uint256'], log.data);
-      swapTokensOut = tokenIsToken0 ? a0out : a1out;
-    }
-    if (log.topics[0] === MINT_TOPIC) {
-      const [a0, a1] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-      mintToken = tokenIsToken0 ? a0 : a1;
-      mintETH   = tokenIsToken0 ? a1 : a0;
-    }
-  }
-
-  const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
-
-  let ownerAddr = '';
-  try { ownerAddr = (await contract.owner()).toLowerCase(); } catch(_) {}
-
   const refEvents = [];
-  for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) continue;
-    if (log.topics[0] !== PAID_TOPIC) continue;
-    const recipient = ethers.utils.defaultAbiCoder.decode(['address'], log.topics[1])[0];
-    const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-    refEvents.push({ recipient, amount, level: Number(level), isPlatform: recipient.toLowerCase() === ownerAddr });
+
+  if (txHash) {
+    const receipt = await provider.getTransactionReceipt(txHash);
+
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== pairAddr.toLowerCase()) continue;
+      if (log.topics[0] === SWAP_TOPIC) {
+        const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
+          ['uint256','uint256','uint256','uint256'], log.data);
+        swapTokensOut = tokenIsToken0 ? a0out : a1out;
+      }
+      if (log.topics[0] === MINT_TOPIC) {
+        const [a0, a1] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
+        mintToken = tokenIsToken0 ? a0 : a1;
+        mintETH   = tokenIsToken0 ? a1 : a0;
+      }
+    }
+
+    const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
+    let ownerAddr = '';
+    try { ownerAddr = (await contract.owner()).toLowerCase(); } catch(_) {}
+
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) continue;
+      if (log.topics[0] !== PAID_TOPIC) continue;
+      const recipient = ethers.utils.defaultAbiCoder.decode(['address'], log.topics[1])[0];
+      const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
+      refEvents.push({ recipient, amount, level: Number(level), isPlatform: recipient.toLowerCase() === ownerAddr });
+    }
+    refEvents.sort((a, b) => a.level - b.level);
   }
-  refEvents.sort((a, b) => a.level - b.level);
 
   // Pre-seeded tokens used = total deposited to pool minus what the swap produced.
   // The contract passes its entire token balance (swap tokens + owner-seeded supply) to addLiquidityETH.
@@ -230,7 +276,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
   const totalTokens = mintToken || null;
   const hdArrow = `<div style="text-align:center;color:rgba(255,255,255,0.15);font-size:9px;line-height:1;margin:0;">▼</div>`;
   const hdCell  = (clr, label, value, sub) => `<div style="border:1px solid rgba(${clr},0.4);border-radius:6px;background:rgba(${clr},0.04);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 10px;text-align:center;"><div style="font-size:8px;color:rgba(${clr},0.7);letter-spacing:1.4px;margin-bottom:7px;">${label}</div><div style="font-family:var(--font-display);font-size:18px;letter-spacing:1px;line-height:1.1;">${value}</div>${sub ? `<div style="font-size:9px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">${sub}</div>` : ''}</div>`;
-  const refSplitId = 'hdRef_' + txHash.slice(2, 10);
+  const refSplitId = txHash ? ('hdRef_' + txHash.slice(2, 10)) : ('hdRef_' + tokenAddr.slice(2, 10));
 
   return `<div class="hd-body">
 
@@ -272,8 +318,10 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     </div>
 
     <div class="hd-tx-row" style="flex-wrap:wrap;gap:8px;">
-      <span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TX</span>
-      <span style="font-family:var(--font-mono);font-size:11px;color:var(--cream);word-break:break-all;flex:1;">${txHash}</span>
+      ${txHash
+        ? `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TX</span>
+           <span style="font-family:var(--font-mono);font-size:11px;color:var(--cream);word-break:break-all;flex:1;">${txHash}</span>`
+        : `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;">TX hash not stored on-chain</span>`}
       <button onclick="openHistRefSplitPopup('${refSplitId}')" style="flex-shrink:0;padding:5px 12px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);border-radius:4px;color:var(--gold);font-family:var(--font-mono);font-size:10px;letter-spacing:1.2px;cursor:pointer;">REFERRAL SPLIT ›</button>
     </div>
 
@@ -283,7 +331,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
         <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;">Commissions split across eligible levels &nbsp;·&nbsp; ${fU3(A40)}</div>
         <div class="hd-ref-list" style="max-height:55vh;overflow-y:auto;margin-bottom:16px;">
           ${refEvents.length === 0
-            ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">No commission events found in this transaction.</div>`
+            ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">${txHash ? 'No commission events found in this transaction.' : 'Transaction hash not stored in invest records — referral split details unavailable.'}</div>`
             : refEvents.map(ev => {
                 const short = ev.recipient;
                 const poolFloat = parseFloat(ethers.utils.formatEther(A40));
@@ -317,130 +365,46 @@ async function loadPoolHistory() {
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
 
   try {
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock   = getFromBlock(latestBlock);
+    const lpEvents = await contract.getLPEventRecords(walletAddress);
 
-    const [claimedEvs, removedEvs] = await Promise.all([
-      contract.queryFilter(contract.filters.LPClaimed(walletAddress), fromBlock, 'latest'),
-      contract.queryFilter(contract.filters.LPRemoved(walletAddress), fromBlock, 'latest'),
-    ]);
-
-    const SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
-    const paddedUser = ethers.utils.hexZeroPad(walletAddress.toLowerCase(), 32);
-    const factoryAbi = ['function getPair(address,address) view returns (address)'];
-    const factoryCt  = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, provider);
-    const pairAbi    = ['function token0() view returns (address)'];
-
-    const tokenAddrs  = await contract.getRegisteredTokens();
-    const swapEntries = [];
-
-    for (const tokenAddr of tokenAddrs) {
-      const pairAddr = await factoryCt.getPair(tokenAddr, WETH_ADDRESS);
-      if (!pairAddr || pairAddr === ethers.constants.AddressZero) continue;
-
-      const logs = await provider.getLogs({
-        address: pairAddr,
-        topics:  [SWAP_TOPIC, null, paddedUser],
-        fromBlock,
-        toBlock: 'latest',
-      });
-      if (!logs.length) continue;
-
-      const pairCt = new ethers.Contract(pairAddr, pairAbi, provider);
-      const tok0   = (await pairCt.token0()).toLowerCase();
-      const tokenIsToken0 = tok0 === tokenAddr.toLowerCase();
-
-      let tokenSymbol = tokenAddr;
-      let tokenDecimals = 18;
-      try {
-        const t = await contract.getToken(tokenAddr);
-        tokenSymbol = t.symbol;
-        const erc20 = new ethers.Contract(tokenAddr, ['function decimals() view returns (uint8)'], provider);
-        tokenDecimals = Number(await erc20.decimals());
-      } catch(_) {}
-
-      for (const log of logs) {
-        const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
-          ['uint256','uint256','uint256','uint256'], log.data);
-        const tokenIn  = tokenIsToken0 ? a0in  : a1in;
-        const tokenOut = tokenIsToken0 ? a0out : a1out;
-        const ethIn    = tokenIsToken0 ? a1in  : a0in;
-        const ethOut   = tokenIsToken0 ? a1out : a0out;
-        const isBuy    = ethIn.gt(0) && tokenOut.gt(0);
-        swapEntries.push({
-          type: isBuy ? 'buy' : 'sell',
-          tokenAddr, tokenSymbol, tokenDecimals,
-          tokenAmt: isBuy ? tokenOut : tokenIn,
-          ethAmt:   isBuy ? ethIn    : ethOut,
-          blockNumber: log.blockNumber,
-          txHash: log.transactionHash,
-        });
-      }
-    }
-
-    const all = [
-      ...swapEntries,
-      ...claimedEvs.map(ev => ({
-        type: 'claim', tokenAddr: ev.args.token,
-        lpAmount: ev.args.lpAmount, blockNumber: ev.blockNumber, txHash: ev.transactionHash,
-      })),
-      ...removedEvs.map(ev => ({
-        type: 'remove', tokenAddr: ev.args.token,
-        ethReturned: ev.args.ethReturned, lpAmount: ev.args.lpAmount,
-        blockNumber: ev.blockNumber, txHash: ev.transactionHash,
-      })),
-    ].sort((a, b) => b.blockNumber - a.blockNumber);
-
-    if (!all.length) {
-      el.innerHTML = '<div class="empty-state">No pool activity found.</div>';
+    if (!lpEvents.length) {
+      el.innerHTML = '<div class="empty-state">No LP claims or removals yet. Claims appear after your lock expires; removals appear when you use Remove Liquidity.</div>';
       return;
     }
 
-    const blockNums = [...new Set(all.map(e => e.blockNumber))];
-    const blockMap  = {};
-    await Promise.all(blockNums.map(async n => {
-      const b = await provider.getBlock(n);
-      blockMap[n] = new Date(b.timestamp * 1000).toLocaleString();
+    // Build symbol cache for all unique tokens
+    const uniqueTokens = [...new Set(lpEvents.map(e => e.token.toLowerCase()))];
+    const symCache = {};
+    await Promise.all(uniqueTokens.map(async addr => {
+      try { symCache[addr] = (await contract.getToken(addr)).symbol; } catch(_) {}
     }));
 
-    for (const e of all) {
-      if (!e.tokenSymbol) {
-        try { e.tokenSymbol = (await contract.getToken(e.tokenAddr)).symbol; }
-        catch(_) { e.tokenSymbol = e.tokenAddr; }
-      }
-    }
+    const sorted = [...lpEvents].sort((a, b) => {
+      const ta = a.ts.toNumber ? a.ts.toNumber() : Number(a.ts);
+      const tb = b.ts.toNumber ? b.ts.toNumber() : Number(b.ts);
+      return tb - ta;
+    });
 
-    el.innerHTML = all.map(e => {
-      const date = blockMap[e.blockNumber] || '';
-      const tx   = e.txHash.slice(0,10) + '…';
-      const fE   = bn => fmtNum(parseFloat(ethers.utils.formatEther(bn)));
-      const fT   = (bn, dec) => fmtNum(parseFloat(ethers.utils.formatUnits(bn, dec || 18)));
-      const fEU = bn => fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT';
-      if (e.type === 'buy') return `
-        <div class="ph-row">
-          <div class="ph-badge buy">BUY</div>
-          <div class="ph-main"><div class="ph-title">${fEU(e.ethAmt)} → ${fT(e.tokenAmt, e.tokenDecimals)} ${e.tokenSymbol}</div><div class="ph-sub">Uniswap swap — USDT in, ${e.tokenSymbol} out</div></div>
-          <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
-        </div>`;
-      if (e.type === 'sell') return `
-        <div class="ph-row">
-          <div class="ph-badge sell">SELL</div>
-          <div class="ph-main"><div class="ph-title">${fT(e.tokenAmt, e.tokenDecimals)} ${e.tokenSymbol} → ${fEU(e.ethAmt)}</div><div class="ph-sub">Uniswap swap — ${e.tokenSymbol} in, USDT out</div></div>
-          <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
-        </div>`;
-      if (e.type === 'claim') return `
+    const fEU = bn => fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT';
+
+    el.innerHTML = sorted.map(e => {
+      const ts   = e.ts.toNumber ? e.ts.toNumber() : Number(e.ts);
+      const date = new Date(ts * 1000).toLocaleString();
+      const sym  = symCache[e.token.toLowerCase()] || e.token.slice(0, 10) + '…';
+      const lp   = fmtNum(parseFloat(ethers.utils.formatEther(e.lpAmount)));
+
+      if (e.isClaim) return `
         <div class="ph-row">
           <div class="ph-badge claim">LP CLAIM</div>
-          <div class="ph-main"><div class="ph-title">${fmtNum(parseFloat(ethers.utils.formatEther(e.lpAmount)))} LP — ${e.tokenSymbol}</div><div class="ph-sub">LP tokens transferred to your wallet (lock expired)</div></div>
-          <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
+          <div class="ph-main"><div class="ph-title">${lp} LP — ${sym}</div><div class="ph-sub">LP tokens transferred to your wallet (lock expired)</div></div>
+          <div class="ph-meta"><div class="ph-date">${date}</div></div>
         </div>`;
-      if (e.type === 'remove') return `
+      return `
         <div class="ph-row">
           <div class="ph-badge remove">LP REMOVE</div>
-          <div class="ph-main"><div class="ph-title">${fmtNum(parseFloat(ethers.utils.formatEther(e.lpAmount)))} LP removed — ${e.tokenSymbol}</div><div class="ph-sub">Received ${fEU(e.ethReturned)} + tokens back from pool</div></div>
-          <div class="ph-meta"><div class="ph-date">${date}</div><div class="ph-tx">${tx}</div></div>
+          <div class="ph-main"><div class="ph-title">${lp} LP removed — ${sym}</div><div class="ph-sub">Received ${fEU(e.ethReturned)} + tokens back from pool</div></div>
+          <div class="ph-meta"><div class="ph-date">${date}</div></div>
         </div>`;
-      return '';
     }).join('');
 
   } catch(e) {
@@ -455,120 +419,44 @@ async function loadRewardHistory() {
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
 
   try {
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock   = getFromBlock(latestBlock);
-    const events = await contract.queryFilter(contract.filters.StakingRewardClaimed(walletAddress), fromBlock, 'latest');
+    const claims = await contract.getClaimRecords(walletAddress);
 
-    if (!events.length) {
-      el.innerHTML = '<div class="empty-state">No reward claims found.</div>';
+    if (!claims.length) {
+      el.innerHTML = '<div class="empty-state">No staking reward claims yet. Claim rewards from your active investments to see history here.</div>';
       return;
     }
 
-    const sorted = [...events].sort((a, b) => b.blockNumber - a.blockNumber);
-
-    // Fetch block timestamps in parallel
-    const blockNums = [...new Set(sorted.map(e => e.blockNumber))];
-    const blockMap  = {};
-    await Promise.all(blockNums.map(async n => {
-      const b = await provider.getBlock(n);
-      blockMap[n] = b.timestamp;
-    }));
-
-    // Fetch all user locks for position details
-    let locks = [];
-    try { locks = await contract.getUserLPLocks(walletAddress); } catch(_) {}
-
-    // Build token symbol cache
-    const symCache = {};
-    for (const lock of locks) {
-      if (!symCache[lock.token]) {
-        try { symCache[lock.token] = (await contract.getToken(lock.token)).symbol; }
-        catch(_) { symCache[lock.token] = lock.token; }
-      }
-    }
-
-    // Platform token symbol (for the reward token itself)
     let platformSym = 'TOKEN';
     try {
       const erc20 = new ethers.Contract(TOKEN_ADDRESS, ['function symbol() view returns (string)'], provider);
       platformSym = await erc20.symbol();
     } catch(_) {}
 
-    // Function selectors used to detect which lock triggered the claim
-    const SEL_CLAIM_ALL  = ethers.utils.id('claimStakingReward()').slice(0, 10);
-    const SEL_CLAIM_LOCK = ethers.utils.id('claimStakingRewardForLock(uint256)').slice(0, 10);
-    const SEL_REMOVE_LP  = ethers.utils.id('removeLP(uint256)').slice(0, 10);
-    const SEL_REMOVE_DIR = ethers.utils.id('removeLPDirect(uint256)').slice(0, 10);
-
-    // Fetch tx input data for each unique tx hash
-    const txDataMap = {};
-    await Promise.all([...new Set(sorted.map(e => e.transactionHash))].map(async hash => {
-      try {
-        const tx = await provider.getTransaction(hash);
-        txDataMap[hash] = tx ? tx.data : null;
-      } catch(_) { txDataMap[hash] = null; }
-    }));
+    const sorted = [...claims].sort((a, b) => {
+      const ta = a.ts.toNumber ? a.ts.toNumber() : Number(a.ts);
+      const tb = b.ts.toNumber ? b.ts.toNumber() : Number(b.ts);
+      return tb - ta;
+    });
 
     const fEth = bn => parseFloat(ethers.utils.formatEther(bn));
 
     el.innerHTML = sorted.map(ev => {
-      const ts      = blockMap[ev.blockNumber];
-      const date    = ts ? new Date(ts * 1000).toLocaleString() : '';
-      const tokens  = fEth(ev.args.tokensAmount);
-      const ethEq   = fEth(ev.args.ethEquivalent);
-      const usdtVal = fmtNum(ethEq * USDT_PER_ETH);
+      const ts        = ev.ts.toNumber ? ev.ts.toNumber() : Number(ev.ts);
+      const date      = ts ? new Date(ts * 1000).toLocaleString() : '';
+      const tokens    = fEth(ev.tokensAmount);
+      const ethEq     = fEth(ev.ethEquivalent);
+      const usdtVal   = fmtNum(ethEq * USDT_PER_ETH);
       const tokensFmt = fmtNum(tokens);
-      const txHash  = ev.transactionHash;
-      const txShort = txHash.slice(0, 10) + '…';
-
-      // Decode which lock was involved from the triggering function
-      const data = txDataMap[txHash];
-      let claimLabel = 'All locks';
-      let positionDetail = '';
-
-      if (data && data.length >= 10) {
-        const sel = data.slice(0, 10);
-        let lockIdx = null;
-        let trigger = '';
-
-        if (sel === SEL_CLAIM_LOCK) {
-          try { [lockIdx] = ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10)); }
-          catch(_) {}
-          trigger = '';
-        } else if (sel === SEL_REMOVE_LP) {
-          try { [lockIdx] = ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10)); }
-          catch(_) {}
-          trigger = ' · settled on LP removal';
-        } else if (sel === SEL_REMOVE_DIR) {
-          try { [lockIdx] = ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10)); }
-          catch(_) {}
-          trigger = ' · settled on direct removal';
-        }
-        // SEL_CLAIM_ALL falls through with lockIdx = null → "All locks"
-
-        if (lockIdx !== null) {
-          const idx = lockIdx.toNumber();
-          claimLabel = 'Lock #' + idx + trigger;
-          const lock = locks[idx];
-          if (lock) {
-            const sym     = symCache[lock.token] || lock.token;
-            const invested = fmtNum(fEth(lock.ethInvested) * USDT_PER_ETH);
-            const lp      = fmtNum(fEth(lock.lpAmount));
-            positionDetail = `${sym} position · $${invested} invested · ${lp} LP`;
-          }
-        }
-      }
 
       return `
         <div class="ph-row">
           <div class="ph-badge reward-claim">REWARD</div>
           <div class="ph-main">
             <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT equivalent</div>
-            <div class="ph-sub">${claimLabel}${positionDetail ? ' — ' + positionDetail : ''}</div>
+            <div class="ph-sub">Staking reward claimed</div>
           </div>
           <div class="ph-meta">
             <div class="ph-date">${date}</div>
-            <div class="ph-tx">${txShort}</div>
           </div>
         </div>`;
     }).join('');

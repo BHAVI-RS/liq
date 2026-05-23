@@ -41,6 +41,14 @@ function getMeta(addr) {
   return getAllMeta()[addr.toLowerCase()] || {};
 }
 
+// ── POLYGON AMOY GAS OVERRIDES ──
+// Public Amoy RPC requires a minimum tip cap of 25 Gwei.
+// MetaMask's automatic estimate is often ~1.5 Gwei, causing RejectedTx errors.
+const _GAS = {
+  maxFeePerGas:         ethers.utils.parseUnits("60", "gwei"),
+  maxPriorityFeePerGas: ethers.utils.parseUnits("30", "gwei"),
+};
+
 // ── TRANSACTION IN-FLIGHT GUARD ──
 let _txInFlight = 0;
 
@@ -120,6 +128,58 @@ function getFromBlock(latestBlock) {
   return (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0)
     ? DEPLOY_BLOCK
     : Math.max(0, latestBlock - 300);
+}
+
+// Queries events over potentially large block ranges by splitting into chunks.
+// Resolves 'latest' upfront so the range is known. For ranges larger than
+// batchSize the full-range call is skipped entirely — some RPCs (including
+// the public Polygon Amoy endpoint) silently return [] for oversized ranges
+// instead of throwing, which would prevent the batching fallback from running.
+async function queryFilterBatched(contractInstance, filterOrEvent, fromBlock, toBlock, batchSize = 200) {
+  // Resolve 'latest' to a concrete block number so we know the range size.
+  let to = (toBlock === 'latest' || toBlock === undefined)
+    ? (await provider.getBlockNumber().catch(() => fromBlock + batchSize))
+    : toBlock;
+
+  if (to <= fromBlock) return [];
+
+  // Small range: try the single call first (fast path).
+  if (to - fromBlock < batchSize) {
+    const result = await contractInstance.queryFilter(filterOrEvent, fromBlock, to).catch(() => null);
+    if (result !== null) return result;
+    // If the small call failed, the loop below will retry as a single batch.
+  }
+
+  // Large range (or failed small call): always batch to avoid silent truncation.
+  const all = [];
+  for (let start = fromBlock; start <= to; start += batchSize) {
+    const end   = Math.min(start + batchSize - 1, to);
+    const batch = await contractInstance.queryFilter(filterOrEvent, start, end).catch(() => []);
+    all.push(...batch);
+  }
+  return all;
+}
+
+// Same but for provider.getLogs (used in _computeMissedWei / history).
+async function getLogsBatched(filter, fromBlock, toBlock, batchSize = 100) {
+  let to = (toBlock === 'latest' || toBlock === undefined)
+    ? (await provider.getBlockNumber().catch(() => fromBlock + batchSize))
+    : toBlock;
+
+  if (to <= fromBlock) return [];
+
+  if (to - fromBlock < batchSize) {
+    const result = await provider.getLogs({ ...filter, fromBlock, toBlock: to }).catch(() => null);
+    if (result !== null) return result;
+  }
+
+  const all = [];
+  for (let start = fromBlock; start <= to; start += batchSize) {
+    const end   = Math.min(start + batchSize - 1, to);
+    const batch = await provider.getLogs({ ...filter, fromBlock: start, toBlock: end }).catch(() => []);
+    all.push(...batch);
+  }
+  return all;
 }
 
 // ── GLOBAL MODAL BODY LOCK ──

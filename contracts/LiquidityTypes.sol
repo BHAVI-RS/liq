@@ -58,3 +58,51 @@ struct WealthParams {
     uint256            lpLockDuration;
     WealthLockParam[]  locks;
 }
+
+// On-chain price snapshot written by seedPool() and invest() for frontend charting.
+// Avoids unreliable eth_getLogs on public RPCs.
+struct PriceSnap {
+    uint64  ts;       // block.timestamp
+    uint112 resETH;   // WETH reserve after the operation
+    uint112 resToken; // token reserve after the operation
+}
+
+// On-chain trade snapshot written by invest() for frontend trade history.
+struct TradeSnap {
+    uint64  ts;
+    bool    isBuy;   // always true for invest() swaps
+    uint128 ethAmt;  // ETH spent in the swap
+    uint128 tokAmt;  // tokens received from the swap
+}
+
+// On-chain commission record (avoids unreliable eth_getLogs on Amoy RPC).
+struct CommissionRecord {
+    address from;     // slot 0: 160 bits
+    uint64  ts;       //         +64  = 224 bits
+    uint8   level;    //         +8   = 232 bits
+    uint128 amount;   // slot 1: 128 bits
+}
+
+// On-chain invest record for frontend history tab.
+struct InvestRecord {
+    address token;    // slot 0: 160 bits
+    uint64  ts;       //         +64  = 224 bits
+    uint128 ethAmount;// slot 1: 128 bits
+    uint128 lpTokens; //         +128 = 256 bits
+}
+
+// On-chain staking claim record for frontend history tab.
+struct ClaimRecord {
+    uint128 tokensAmount;   // slot 0: 128 bits
+    uint128 ethEquivalent;  //         +128 = 256 bits
+    uint64  ts;             // slot 1: 64 bits
+}
+
+// On-chain LP event record (claim or remove) for frontend history tab.
+struct LPEventRecord {
+    address token;      // slot 0: 160 bits
+    uint64  ts;         //         +64  = 224 bits
+    bool    isClaim;    //         +8   = 232 bits
+    uint128 lpAmount;   // slot 1: 128 bits
+    uint128 ethReturned;//         +128 = 256 bits
+}

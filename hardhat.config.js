@@ -10,11 +10,25 @@ const MAINNET_RPC = process.env.MAINNET_RPC_URL
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: "0.8.28",
-    settings: {
-      optimizer: { enabled: true, runs: 1 },
-      viaIR: true,
-    },
+    compilers: [
+      {
+        version: "0.8.28",
+        settings: {
+          optimizer: { enabled: true, runs: 1 },
+          viaIR: true,
+        },
+      },
+      {
+        // UniswapV2Router02.sol
+        version: "0.6.6",
+        settings: { optimizer: { enabled: true, runs: 1 } },
+      },
+      {
+        // UniswapV2Factory.sol (includes Pair, ERC20, libraries)
+        version: "0.5.16",
+        settings: { optimizer: { enabled: true, runs: 1 } },
+      },
+    ],
   },
   networks: {
     hardhat: {
@@ -37,6 +51,14 @@ module.exports = {
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
       chainId: 11155111,
+      accounts: (process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length === 64)
+        ? [process.env.PRIVATE_KEY]
+        : [],
+    },
+    polygonAmoy: {
+      url: process.env.POLYGON_AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
+      chainId: 80002,
+      timeout: 120000,       // 2 min — prevents HeadersTimeoutError on slow RPC
       accounts: (process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length === 64)
         ? [process.env.PRIVATE_KEY]
         : [],

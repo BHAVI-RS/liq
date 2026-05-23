@@ -129,8 +129,9 @@ function _rwRefSorted() {
       va = Number(a.args.level);
       vb = Number(b.args.level);
     } else {
-      va = a.blockNumber;
-      vb = b.blockNumber;
+      // Use _ts (on-chain timestamp) preferentially; fall back to blockNumber for live-appended events
+      va = a._ts || a.blockNumber || 0;
+      vb = b._ts || b.blockNumber || 0;
     }
     return _rwRefSortDir * (va - vb);
   });
@@ -158,14 +159,15 @@ function _rwRefHistHtml() {
 
   let rows = '';
   for (const ev of slice) {
-    const ts          = _rwRefBlockTsMap.get(ev.blockNumber);
-    const date        = ts ? _fmtTsFull(ts) : `Block #${ev.blockNumber}`;
+    // _ts is set for on-chain records; blockNumber fallback for live-appended events
+    const tsVal       = ev._ts || _rwRefBlockTsMap.get(ev.blockNumber);
+    const date        = tsVal ? _fmtTsFull(tsVal) : (ev.blockNumber ? `Block #${ev.blockNumber}` : '—');
     const from        = ev.args.from;
     const fromDisplay = (typeof _labelCache !== 'undefined' && _labelCache.get(from.toLowerCase())) || from;
     const amt     = parseFloat(ethers.utils.formatEther(ev.args.amount));
     const level   = Number(ev.args.level);
     const ratePct = (RATES[level - 1] || 0) / 500;
-    const txUrl   = `https://sepolia.etherscan.io/tx/${ev.transactionHash}`;
+    const txUrl   = ev.transactionHash ? `https://amoy.polygonscan.com/tx/${ev.transactionHash}` : null;
 
     if (ev._missed) {
       const tipText = ev._missedReason === 'cap' ? 'Referral cap over!' : 'Investment not locked!';
@@ -173,7 +175,7 @@ function _rwRefHistHtml() {
         <td style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
         <td style="padding:7px 8px;">
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-            <a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
+            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
             <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
           </div>
         </td>
@@ -181,7 +183,7 @@ function _rwRefHistHtml() {
         <td style="padding:7px 8px;text-align:center;color:rgba(248,113,113,0.6);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
         <td style="padding:7px 8px;text-align:right;">
           <div class="rw-missed-tip">
-            <a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;">⚠ −${fmtNum(ethToUSDT(amt))} USDT ↗</a>
+            ${txUrl ? `<a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;">⚠ −${fmtNum(ethToUSDT(amt))} USDT ↗</a>` : `<span style="color:#f87171;">⚠ −${fmtNum(ethToUSDT(amt))} USDT</span>`}
             <div class="rw-missed-tip-box">${tipText}</div>
           </div>
         </td>
@@ -191,13 +193,13 @@ function _rwRefHistHtml() {
         <td style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
         <td style="padding:7px 8px;">
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-            <a href="https://sepolia.etherscan.io/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
+            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
             <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
           </div>
         </td>
         <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
         <td style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
-        <td style="padding:7px 8px;text-align:right;"><a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${fmtNum(ethToUSDT(amt))} USDT ↗</a></td>
+        <td style="padding:7px 8px;text-align:right;">${txUrl ? `<a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${fmtNum(ethToUSDT(amt))} USDT ↗</a>` : `<span style="color:#4ade80;">+${fmtNum(ethToUSDT(amt))} USDT</span>`}</td>
       </tr>`;
     }
   }
@@ -353,14 +355,17 @@ async function loadRwReferral() {
   const el = document.getElementById('rwRefContent');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock   = getFromBlock(latestBlock);
-    const [commStats, commEvents, activeCountRaw, minInvRaw, missedResult] = await Promise.all([
-      contract.getUserCommissionStats(walletAddress),
-      contract.queryFilter(contract.filters.CommissionPaid(walletAddress), fromBlock, 'latest').catch(() => []),
+    const _zeroStats = { earned: ethers.BigNumber.from(0), totalCap: ethers.BigNumber.from(0), remainingCap: ethers.BigNumber.from(0) };
+    const [commStats, commRecords, activeCountRaw, minInvRaw, missedResult] = await Promise.all([
+      contract.getUserCommissionStats(walletAddress).catch(() => _zeroStats),
+      contract.getCommissionRecords(walletAddress).catch(() => []),
       contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
-      _computeMissedWei(fromBlock).catch(() => ({ total: ethers.BigNumber.from(0), entries: [] })),
+      // _computeMissedWei may fail silently on Amoy RPC — catch and default to empty
+      (async () => {
+        const lb = await provider.getBlockNumber().catch(() => 0);
+        return _computeMissedWei(getFromBlock(lb)).catch(() => ({ total: ethers.BigNumber.from(0), entries: [] }));
+      })(),
     ]);
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
@@ -370,28 +375,38 @@ async function loadRwReferral() {
     const missed    = parseFloat(ethers.utils.formatEther(missedResult.total));
     const remaining = parseFloat(ethers.utils.formatEther(commStats.remainingCap));
 
-    // Collect all block numbers (received + missed) for timestamp lookup
-    const allBlockNums = [...new Set([
-      ...commEvents.map(e => e.blockNumber),
-      ...missedResult.entries.map(e => e.blockNumber),
-    ])];
-    _rwRefBlockTsMap = new Map();
-    await Promise.all(allBlockNums.map(async bn => {
-      const blk = await provider.getBlock(bn).catch(() => null);
-      if (blk) _rwRefBlockTsMap.set(bn, blk.timestamp);
+    // Normalise on-chain CommissionRecord into the shape the rest of the code expects.
+    // _ts is the on-chain timestamp; blockNumber/transactionHash are not stored on-chain.
+    const receivedEvs = commRecords.map(r => ({
+      _missed: false,
+      _ts:     r.ts.toNumber ? r.ts.toNumber() : Number(r.ts),
+      args:    { from: r.from, amount: r.amount, level: ethers.BigNumber.from(r.level) },
+      blockNumber:     null,
+      transactionHash: null,
     }));
 
-    // Normalise received events and append synthetic missed entries
-    const receivedEvs = commEvents.map(e => ({ ...e, _missed: false }));
-    const missedEvs   = missedResult.entries.map(e => ({
+    const missedEvs = missedResult.entries.map(e => ({
       _missed: true,
       _missedReason: (e.received && !e.received.isZero()) ? 'cap' : 'no-lock',
+      _ts: null,
       args: { from: e.from, level: e.level, amount: e.amount },
       blockNumber: e.blockNumber,
       transactionHash: e.transactionHash,
     }));
 
-    _rwRefAllEvents = [...receivedEvs, ...missedEvs].sort((a, b) => b.blockNumber - a.blockNumber);
+    // Fetch block timestamps only for missed entries (which have real blockNumbers)
+    _rwRefBlockTsMap = new Map();
+    const blockNums = [...new Set(missedEvs.map(e => e.blockNumber).filter(Boolean))];
+    await Promise.all(blockNums.map(async bn => {
+      const blk = await provider.getBlock(bn).catch(() => null);
+      if (blk) _rwRefBlockTsMap.set(bn, blk.timestamp);
+    }));
+
+    _rwRefAllEvents = [...receivedEvs, ...missedEvs].sort((a, b) => {
+      const ta = a._ts || _rwRefBlockTsMap.get(a.blockNumber) || 0;
+      const tb = b._ts || _rwRefBlockTsMap.get(b.blockNumber) || 0;
+      return tb - ta;
+    });
     _rwRefPage = 1;
 
     if (typeof _batchGetRefLabels === 'function') {
@@ -444,9 +459,10 @@ async function loadRwStaking(silent = false) {
     el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   }
   try {
+    const _zeroStaking = { totalAccumulated: ethers.BigNumber.from(0), previewNewTokens: ethers.BigNumber.from(0), lifetimeClaimed: ethers.BigNumber.from(0) };
     const [stakingData, lpLocks, latestBlock] = await Promise.all([
-      contract.getStakingReward(walletAddress),
-      contract.getUserLPLocks(walletAddress),
+      contract.getStakingReward(walletAddress).catch(() => _zeroStaking),
+      contract.getUserLPLocks(walletAddress).catch(() => []),
       provider.getBlock('latest')
     ]);
 
@@ -610,7 +626,7 @@ async function claimStakingReward() {
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
   try {
     toast('Confirm staking claim in MetaMask…', 'info');
-    const tx = await contract.claimStakingReward();
+    const tx = await contract.claimStakingReward(_GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     toast('Staking rewards claimed!', 'success');

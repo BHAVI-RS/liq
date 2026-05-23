@@ -37,12 +37,10 @@ async function _computeMissedWei(fromBlock = 0) {
     if (membersAtDepth.length === 0) break;
 
     await Promise.all(membersAtDepth.map(async (member) => {
-      const logs = await provider.getLogs({
+      const logs = await getLogsBatched({
         address: contract.address,
         topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
-        fromBlock,
-        toBlock: 'latest',
-      });
+      }, fromBlock, 'latest');
 
       // Group by transaction — each tx is one invest() call with one level-d pool.
       const byTx = new Map();
@@ -181,7 +179,7 @@ function waitForEthereum(timeout = 3000) {
   });
 }
 
-const REQUIRED_CHAIN_ID = 31337; // Hardhat localhost
+const REQUIRED_CHAIN_ID = 80002; // Polygon Amoy
 
 async function ensureCorrectNetwork(eth) {
   const chainId = parseInt(await eth.request({ method: 'eth_chainId' }), 16);
@@ -189,7 +187,7 @@ async function ensureCorrectNetwork(eth) {
   try {
     await eth.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: '0x7a69' }]  // 31337
+      params: [{ chainId: '0x13882' }]  // 80002
     });
     return true;
   } catch(switchErr) {
@@ -198,16 +196,16 @@ async function ensureCorrectNetwork(eth) {
         await eth.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: '0x7a69',
-            chainName: 'Hardhat Localhost',
-            nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-            rpcUrls: ['http://127.0.0.1:8545']
+            chainId: '0x13882',
+            chainName: 'Polygon Amoy',
+            nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+            rpcUrls: ['https://rpc-amoy.polygon.technology']
           }]
         });
         return true;
       } catch(_) {}
     }
-    toast('Please switch MetaMask to Hardhat Localhost (127.0.0.1:8545, chain ID 31337).', 'error');
+    toast('Please switch MetaMask to Polygon Amoy (chain ID 80002).', 'error');
     return false;
   }
 }
@@ -228,7 +226,7 @@ function registerEthereumListeners(eth) {
   eth.on('chainChanged', (chainIdHex) => {
     updateNetPill(chainIdHex);
     if (parseInt(chainIdHex, 16) !== REQUIRED_CHAIN_ID) {
-      toast('Wrong network — please switch back to Hardhat Localhost.', 'error');
+      toast('Wrong network — please switch back to Polygon Amoy.', 'error');
       return;
     }
     if (_txInFlight === 0 && App.walletAddress) {
@@ -305,7 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (el && typeof CONTRACT_ADDRESS !== 'undefined') el.textContent = CONTRACT_ADDRESS;
   const footerLink = document.getElementById('footerContractLink');
   if (footerLink && typeof CONTRACT_ADDRESS !== 'undefined') {
-    footerLink.href = `https://etherscan.io/address/${CONTRACT_ADDRESS}`;
+    footerLink.href = `https://amoy.polygonscan.com/address/${CONTRACT_ADDRESS}`;
     footerLink.textContent = CONTRACT_ADDRESS;
   }
 });
@@ -762,7 +760,7 @@ async function registerNewUser() {
   document.getElementById('newUserRegisterBtn').disabled = true;
   _txBegin();
   try {
-    const tx = await App.contract.register(_pendingReferrer);
+    const tx = await App.contract.register(_pendingReferrer, _GAS);
     btn.textContent = 'Waiting for confirmation...';
     await tx.wait();
     _txDone();
@@ -842,7 +840,7 @@ function updateNetPill(chainIdHex) {
   if (!pill) return;
   const id = parseInt(chainIdHex, 16);
   if (id === REQUIRED_CHAIN_ID) {
-    pill.textContent = 'HARDHAT';
+    pill.textContent = 'AMOY';
     pill.className = 'net-pill sepolia';
   } else {
     pill.textContent = 'WRONG NETWORK';
