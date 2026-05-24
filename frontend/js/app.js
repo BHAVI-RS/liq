@@ -1,6 +1,10 @@
 // ── CONFIG ──
 const contractAddress = CONTRACT_ADDRESS;
 
+// Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
+// Transactions still go through the wallet signer; only eth_call goes here.
+const ALCHEMY_AMOY_URL = 'https://polygon-amoy.g.alchemy.com/v2/_0p-lkCP0DWUV-Z-BQYCL';
+
 // Returns { total: BigNumber, entries: Array } for the connected wallet.
 // "Missed" covers fully bypassed commissions (user ineligible) and partial-cap
 // spills (user received some, excess went upline).
@@ -230,8 +234,9 @@ function registerEthereumListeners(eth) {
       return;
     }
     if (_txInFlight === 0 && App.walletAddress) {
-      App.provider = new ethers.providers.Web3Provider(eth);
-      App.signer   = App.provider.getSigner();
+      App.walletProvider = new ethers.providers.Web3Provider(eth);
+      App.signer         = App.walletProvider.getSigner();
+      App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
       if (contractAddress) {
         App.contract = new ethers.Contract(contractAddress, CONTRACT_ABI, App.signer);
         _stopChainListeners();
@@ -254,16 +259,21 @@ async function connectWallet() {
     }
 
     eth.autoRefreshOnNetworkChange = false;
-    App.provider = new ethers.providers.Web3Provider(eth);
+    App.walletProvider = new ethers.providers.Web3Provider(eth);
     if (App.wasDisconnected || sessionStorage.getItem('hordex_force_prompt') === '1') {
-      await App.provider.send("wallet_requestPermissions", [{ eth_accounts: {} }]);
+      try {
+        await App.walletProvider.send("wallet_requestPermissions", [{ eth_accounts: {} }]);
+      } catch (_) {
+        await App.walletProvider.send("eth_requestAccounts", []);
+      }
       App.wasDisconnected = false;
       sessionStorage.removeItem('hordex_force_prompt');
     } else {
-      await App.provider.send("eth_requestAccounts", []);
+      await App.walletProvider.send("eth_requestAccounts", []);
     }
-    App.signer = App.provider.getSigner();
+    App.signer        = App.walletProvider.getSigner();
     App.walletAddress = await App.signer.getAddress();
+    App.provider      = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
 
     document.getElementById('connectBtn').textContent = App.walletAddress.slice(0,6) + '...' + App.walletAddress.slice(-4);
     document.getElementById('connectBtn').classList.add('connected');
@@ -307,6 +317,138 @@ document.addEventListener('DOMContentLoaded', () => {
     footerLink.textContent = CONTRACT_ADDRESS;
   }
 });
+
+// ── Brochures & Links ──────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', loadBrochures);
+
+async function loadBrochures() {
+  const grid = document.getElementById('bro-grid');
+  if (!grid) return;
+  try {
+    const res = await fetch('brochures/manifest.json');
+    if (!res.ok) throw new Error('no manifest');
+    const files = await res.json();
+    if (!Array.isArray(files) || files.length === 0) {
+      grid.innerHTML = '<div class="bro-empty">No documents published yet.</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    for (const filename of files) {
+      if (typeof filename !== 'string') continue;
+      const ext = filename.split('.').pop().toLowerCase();
+      if (ext === 'pdf') {
+        grid.appendChild(_makePdfCard(filename));
+      } else if (ext === 'txt') {
+        const card = _makeLinkCardSkeleton(filename);
+        grid.appendChild(card);
+        _hydrateLinkCard(card, filename);
+      }
+    }
+  } catch (_) {
+    grid.innerHTML = '<div class="bro-empty">Documents will be available soon.</div>';
+  }
+}
+
+function _broFileTitle(filename) {
+  return filename
+    .replace(/\.[^.]+$/, '')
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _makePdfCard(filename) {
+  const a = document.createElement('a');
+  a.className = 'bro-card bro-pdf';
+  a.href = 'brochures/' + filename;
+  a.setAttribute('download', '');
+  a.innerHTML =
+    '<div class="bro-pdf-icon">📄</div>' +
+    '<div class="bro-info">' +
+      '<div class="bro-title">' + _broFileTitle(filename) + '</div>' +
+      '<div class="bro-badge">PDF · Download</div>' +
+    '</div>';
+  return a;
+}
+
+function _makeLinkCardSkeleton(filename) {
+  const a = document.createElement('a');
+  a.className = 'bro-card bro-link bro-link-loading';
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.innerHTML =
+    '<div class="bro-thumb"><div class="bro-thumb-icon">🔗</div></div>' +
+    '<div class="bro-info">' +
+      '<div class="bro-title" style="color:var(--muted);">' + _broFileTitle(filename) + '</div>' +
+    '</div>';
+  return a;
+}
+
+function _broYouTubeId(url) {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function _broGDriveId(url) {
+  const m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
+async function _hydrateLinkCard(card, filename) {
+  try {
+    const txtRes = await fetch('brochures/' + filename);
+    if (!txtRes.ok) throw new Error('txt missing');
+    const url = (await txtRes.text()).split('\n')[0].trim();
+    if (!url || !url.startsWith('http')) throw new Error('bad url');
+    card.href = url;
+
+    let domain = url;
+    try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch (_) {}
+
+    const thumbEl = card.querySelector('.bro-thumb');
+    const titleEl = card.querySelector('.bro-title');
+
+    const gdId = _broGDriveId(url);
+    const ytId = _broYouTubeId(url);
+    if (gdId) {
+      thumbEl.style.backgroundImage = 'url(https://drive.google.com/thumbnail?id=' + gdId + '&sz=w400)';
+      thumbEl.innerHTML = '';
+      try {
+        const ml = await fetch('https://api.microlink.io/?url=' + encodeURIComponent(url));
+        const { status, data } = await ml.json();
+        if (status === 'success' && data.title) {
+          titleEl.textContent = data.title.replace(/\s*[-–|]\s*google drive\s*$/i, '').trim();
+        } else { titleEl.textContent = 'Google Drive Document'; }
+      } catch (_) { titleEl.textContent = 'Google Drive Document'; }
+      titleEl.style.color = '';
+    } else if (ytId) {
+      thumbEl.style.backgroundImage = 'url(https://img.youtube.com/vi/' + ytId + '/hqdefault.jpg)';
+      thumbEl.innerHTML = '';
+      try {
+        const oe = await fetch('https://www.youtube.com/oembed?url=' + encodeURIComponent(url) + '&format=json');
+        const { title } = await oe.json();
+        if (title) { titleEl.textContent = title; titleEl.style.color = ''; }
+      } catch (_) {}
+    } else {
+      try {
+        const ml = await fetch('https://api.microlink.io/?url=' + encodeURIComponent(url));
+        const { status, data } = await ml.json();
+        if (status !== 'success') throw new Error('ml failed');
+        const imgUrl = data.image?.url || data.logo?.url || '';
+        if (imgUrl) { thumbEl.style.backgroundImage = 'url(' + imgUrl + ')'; thumbEl.innerHTML = ''; }
+        if (data.title) { titleEl.textContent = data.title; titleEl.style.color = ''; }
+      } catch (_) {
+        titleEl.style.color = '';
+      }
+    }
+
+    if (!card.querySelector('.bro-domain')) {
+      titleEl.insertAdjacentHTML('afterend', '<div class="bro-domain">' + domain + ' ↗</div>');
+    }
+    card.classList.remove('bro-link-loading');
+  } catch (_) {
+    card.classList.remove('bro-link-loading');
+  }
+}
 
 // Close mobile nav on ESC
 document.addEventListener('keydown', (e) => {
@@ -368,17 +510,46 @@ document.addEventListener('click', (e) => {
 
 // ── LANDING PAGE STATS ──
 let _landingStatsPollInterval = null;
+
+function _computeWealthLanding(params) {
+  if (!params || !params.locks) return 0;
+  const now = Math.floor(Date.now() / 1000);
+  const refEarningsETH = parseFloat(ethers.utils.formatEther(params.refEarnings));
+  const tokenPriceEth  = parseFloat(ethers.utils.formatEther(params.platformTokenPriceEth));
+  const defaultLockDur = params.lpLockDuration ? Number(params.lpLockDuration) : 7776000;
+  let totalInvestedETH = 0, totalCurrentLP = 0, stakingETH = 0;
+  for (const lock of params.locks) {
+    const ethInv = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+    totalInvestedETH += ethInv;
+    if (!lock.removed) {
+      const lpAmt      = parseFloat(ethers.utils.formatEther(lock.lpAmount));
+      const totalLPSup = parseFloat(ethers.utils.formatEther(lock.totalLPSupply));
+      const resETH     = parseFloat(ethers.utils.formatEther(lock.reserveETH));
+      if (totalLPSup > 0 && lpAmt > 0) totalCurrentLP += (lpAmt / totalLPSup) * resETH * 2;
+      const lockedAt   = Number(lock.lockedAt);
+      const unlockTime = Number(lock.unlockTime);
+      const lockDur    = unlockTime > lockedAt ? unlockTime - lockedAt : defaultLockDur;
+      const elapsed    = Math.min(lockDur, Math.max(0, now - lockedAt));
+      const ratePPM    = Number(lock.rewardRatePPM);
+      if (ratePPM > 0 && lockDur > 0) stakingETH += ethInv * ratePPM * elapsed / (1_000_000 * lockDur);
+      const tokAcc = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated));
+      if (tokAcc > 0 && tokenPriceEth > 0) stakingETH += tokAcc * tokenPriceEth;
+    }
+  }
+  const lpFees = Math.max(0, totalCurrentLP - totalInvestedETH);
+  return refEarningsETH + lpFees + totalInvestedETH + stakingETH;
+}
 const _LANDING_STATS_CACHE_KEY = 'hordex_landing_stats_v2';
 
 function _applyLandingStats(stats) {
   const $ = id => document.getElementById(id);
   if ($('ls-total-users'))     $('ls-total-users').textContent     = stats.totalUsers;
-  if ($('ls-active-users'))    $('ls-active-users').textContent    = stats.activeUsers;
+  if ($('ls-wealth-built'))    $('ls-wealth-built').textContent    = stats.wealthBuilt;
   if ($('ls-total-funding'))   $('ls-total-funding').textContent   = stats.totalFunding;
   if ($('ls-staking-rewards')) $('ls-staking-rewards').textContent = stats.stakingRewards;
 }
 
-async function loadLandingStats(eth) {
+async function loadLandingStats() {
   if (typeof CONTRACT_ADDRESS === 'undefined' || typeof CONTRACT_ABI === 'undefined') return;
 
   // ── Show cached stats instantly (< 1 ms) ──
@@ -387,54 +558,48 @@ async function loadLandingStats(eth) {
     if (cached) _applyLandingStats(cached);
   } catch(_) {}
 
+  const readProvider = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
+  const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
+
+  // ── Fast path: single view call — shows 3 stats with no event scanning ──
   try {
-    const readProvider = new ethers.providers.Web3Provider(eth);
-    const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
+    const platformStats = await readContract.getPlatformStats();
+    const totalUsers    = Number(platformStats._totalUsers);
+    const totalETH      = parseFloat(ethers.utils.formatEther(platformStats._totalEthInvested));
+    const stakingETH    = parseFloat(ethers.utils.formatEther(platformStats._totalStakingRewardsPaidETH));
 
-    // ── Single view call for 3 of 4 stats — near-instant, no event scanning ──
-    const fromBlock = (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0) ? DEPLOY_BLOCK : 0;
-    const [platformStats, investEvents, removeEvents] = await Promise.all([
-      readContract.getPlatformStats().catch(() => null),
-      readContract.queryFilter(readContract.filters.Invested(), fromBlock, 'latest'),
-      readContract.queryFilter(readContract.filters.LPRemoved(), fromBlock, 'latest'),
-    ]);
-
-    // Active investors: count users who have more invests than removes
-    const investCount = {}, removeCount = {};
-    for (const e of investEvents) {
-      const u = e.args.user.toLowerCase();
-      investCount[u] = (investCount[u] || 0) + 1;
-    }
-    for (const e of removeEvents) {
-      const u = e.args.user.toLowerCase();
-      removeCount[u] = (removeCount[u] || 0) + 1;
-    }
-    let activeUsers = 0;
-    for (const u of Object.keys(investCount)) {
-      if ((investCount[u] || 0) > (removeCount[u] || 0)) activeUsers++;
-    }
-
-    const totalUsers    = platformStats ? Number(platformStats._totalUsers) : (investEvents.length + 1);
-    const totalEthWei   = platformStats ? platformStats._totalEthInvested : ethers.BigNumber.from(0);
-    const stakingEthWei = platformStats ? platformStats._totalStakingRewardsPaidETH : ethers.BigNumber.from(0);
-    const totalETH      = parseFloat(ethers.utils.formatEther(totalEthWei));
-    const stakingETH    = parseFloat(ethers.utils.formatEther(stakingEthWei));
-
-    const stats = {
+    const partial = {
       totalUsers:     totalUsers.toLocaleString(),
-      activeUsers:    activeUsers.toLocaleString(),
-      totalFunding:   totalETH > 0     ? ethToUSDT(totalETH).toLocaleString(undefined,  { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT',
-      stakingRewards: stakingETH > 0   ? ethToUSDT(stakingETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT',
+      wealthBuilt:    '—',
+      totalFunding:   totalETH > 0   ? ethToUSDT(totalETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT',
+      stakingRewards: stakingETH > 0 ? ethToUSDT(stakingETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT' : '0 USDT',
     };
+    _applyLandingStats(partial);
 
-    _applyLandingStats(stats);
+    const lcfEl = document.getElementById('lcf-contract-addr');
+    if (lcfEl && typeof CONTRACT_ADDRESS !== 'undefined') lcfEl.textContent = CONTRACT_ADDRESS;
 
-    const $ = id => document.getElementById(id);
-    if ($('lcf-contract-addr') && typeof CONTRACT_ADDRESS !== 'undefined')
-      $('lcf-contract-addr').textContent = CONTRACT_ADDRESS;
+    try { localStorage.setItem(_LANDING_STATS_CACHE_KEY, JSON.stringify(partial)); } catch(_) {}
 
-    try { localStorage.setItem(_LANDING_STATS_CACHE_KEY, JSON.stringify(stats)); } catch(_) {}
-  } catch (_) {}
+    // ── Slow path: wealth built = sum of all users' current wealth (best-effort) ──
+    try {
+      const allUsers = await readContract.getAllRegisteredUsers();
+      const wealthParams = await Promise.all(
+        allUsers.map(a => readContract.getWealthParams(a).catch(() => null))
+      );
+      let totalWealthETH = 0;
+      for (const p of wealthParams) totalWealthETH += _computeWealthLanding(p);
+      const full = {
+        ...partial,
+        wealthBuilt: totalWealthETH > 0
+          ? ethToUSDT(totalWealthETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT'
+          : '0 USDT',
+      };
+      _applyLandingStats(full);
+      try { localStorage.setItem(_LANDING_STATS_CACHE_KEY, JSON.stringify(full)); } catch(_) {}
+    } catch (_) { /* wealth computation failed — keep showing '—' */ }
+
+  } catch (_) { /* getPlatformStats failed — cached data already shown above */ }
 
   // Poll every 30 s while landing overlay is visible — avoids overlapping scans
   if (!_landingStatsPollInterval) {
@@ -445,7 +610,7 @@ async function loadLandingStats(eth) {
         _landingStatsPollInterval = null;
         return;
       }
-      loadLandingStats(eth);
+      loadLandingStats();
     }, 30000);
   }
 }
@@ -460,7 +625,7 @@ window.addEventListener('load', async () => {
     return;
   }
 
-  loadLandingStats(eth); // fire-and-forget
+  loadLandingStats(); // fire-and-forget
 
   history.replaceState(null, '', window.location.pathname);
 
@@ -489,7 +654,8 @@ window.addEventListener('load', async () => {
   // ── Step 2: Background verification ──
   try {
     eth.autoRefreshOnNetworkChange = false;
-    App.provider = new ethers.providers.Web3Provider(eth);
+    App.walletProvider = new ethers.providers.Web3Provider(eth);
+    App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
     const accounts = await eth.request({ method: 'eth_accounts' });
 
     if (!accounts || accounts.length === 0 ||
@@ -502,7 +668,7 @@ window.addEventListener('load', async () => {
       return;
     }
 
-    App.signer = App.provider.getSigner();
+    App.signer = App.walletProvider.getSigner();
     updateNetPill(await eth.request({ method: 'eth_chainId' }));
 
     if (contractAddress) await initContract();
@@ -577,10 +743,11 @@ function mobileNavSwitch(name) {
 
 function disconnectWallet() {
   _stopChainListeners();
-  App.walletAddress = null;
-  App.provider = null;
-  App.signer = null;
-  App.contract = null;
+  App.walletAddress  = null;
+  App.provider       = null;
+  App.walletProvider = null;
+  App.signer         = null;
+  App.contract       = null;
   App.wasDisconnected = true;
   localStorage.removeItem('hordex_wallet');
   _userSelectedToken = false;
@@ -622,7 +789,7 @@ document.addEventListener('click', (e) => {
 });
 
 async function initContract() {
-  App.contract = new ethers.Contract(contractAddress, CONTRACT_ABI, App.signer);
+  App.contract = new ethers.Contract(contractAddress, CONTRACT_ABI, App.provider);
   await checkOwner();
 }
 
@@ -641,11 +808,8 @@ async function checkOwner() {
 
 let _pendingReferrer = null;
 
-// Runs once after every login.  Fetches LP locks + latest block, determines
-// each lock's status using the sessionStorage-restored effectiveNow so the
-// correct state is visible even right after a page reload on a frozen Hardhat
-// fork.  Pre-populates the investments panel and shows a toast when locks are
-// ready to claim / remove.
+// Runs ~4s after login (delayed so dashboard's RPC calls get clear bandwidth first).
+// Shows a toast when LP positions are unlocked or still locked.
 async function _onLoginCheckInvestments() {
   if (!App.contract || !App.walletAddress) return;
   try {
@@ -658,8 +822,6 @@ async function _onLoginCheckInvestments() {
     const blockNow = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
     const wallNow  = Math.floor(Date.now() / 1000);
 
-    // Mirror the sessionStorage restore from loadInvestments() so we use the
-    // same effectiveNow reference even before loadInvestments() has been called.
     let effectiveNow = blockNow;
     try {
       const _rawEff = localStorage.getItem('hordex_eff_time') || sessionStorage.getItem('hordex_eff_time');
@@ -690,10 +852,6 @@ async function _onLoginCheckInvestments() {
         'info'
       );
     }
-
-    // Pre-populate the investments panel so correct state is shown immediately
-    // when the user navigates there, without an extra loading flash.
-    loadInvestments();
   } catch(e) {
     console.warn('_onLoginCheckInvestments:', e);
   }
@@ -708,7 +866,9 @@ async function checkRegistration() {
       setTimeout(() => {
         switchTabByName('dashboard');
         loadInvestTokens();
-        _onLoginCheckInvestments();
+        _prefetchAllTabs();
+        // Delay the investments check so dashboard's RPC calls get clear bandwidth first
+        setTimeout(_onLoginCheckInvestments, 4000);
       }, 600);
     } else {
       const params = new URLSearchParams(window.location.search);
@@ -760,7 +920,7 @@ async function registerNewUser() {
   document.getElementById('newUserRegisterBtn').disabled = true;
   _txBegin();
   try {
-    const tx = await App.contract.register(_pendingReferrer, _GAS);
+    const tx = await App.contract.connect(App.signer).register(_pendingReferrer, _GAS);
     btn.textContent = 'Waiting for confirmation...';
     await tx.wait();
     _txDone();
@@ -940,9 +1100,9 @@ function switchTabByName(name) {
   if (name === 'owner')  { loadOwnerStats(); ownerPopulateLiqDropdowns(); loadTokenBalances(); }
   if (name === 'dashboard')   { _tabLoaded.add('dashboard');   loadDashboard();   if (window._dashStartPoll) window._dashStartPoll(); }
   if (name === 'investments') { _tabLoaded.add('investments'); loadInvestments(); if (window._invStartPoll)  window._invStartPoll();  }
-  if (name === 'myinfo'      && !_tabLoaded.has('myinfo'))      { _tabLoaded.add('myinfo');      loadMyInfo(); }
-  if (name === 'history'     && !_tabLoaded.has('history'))     { _tabLoaded.add('history');     switchHistoryTab(_activeHistTab); }
-  if (name === 'genealogy'   && !_tabLoaded.has('genealogy'))   { _tabLoaded.add('genealogy');   loadGenealogy(); }
+  if (name === 'myinfo')    { _tabLoaded.add('myinfo');    loadMyInfo(); }
+  if (name === 'history')   { _tabLoaded.add('history');   switchHistoryTab(_activeHistTab); }
+  if (name === 'genealogy') { _tabLoaded.add('genealogy'); loadGenealogy(); }
   if (name === 'rewards')     { _tabLoaded.add('rewards');     loadRewards();     if (window._rwStartPoll)   window._rwStartPoll();   }
 }
 
@@ -952,11 +1112,46 @@ function switchTabByName(name) {
 
 const _refreshDebounce = {};
 
+function _prefetchAllTabs() {
+  // Background-load tabs after login so first visit feels instant.
+  // Pollers are intentionally NOT started — they only activate when the user
+  // actually navigates to that tab. The _tabLoaded.has() guards below prevent
+  // a redundant background fetch if the user already navigated there first.
+  const ok = () => !!(contract && walletAddress);
+
+  // Rewards (referral + staking + LP fees) — skip if user already navigated there
+  setTimeout(() => {
+    if (!ok() || _tabLoaded.has('rewards')) return;
+    if (window.loadRewards) window.loadRewards();
+  }, 3000);
+
+  // My Info — light call, start sooner
+  setTimeout(() => {
+    if (!ok() || _tabLoaded.has('myinfo')) return;
+    if (window.loadMyInfo) window.loadMyInfo();
+  }, 5000);
+
+  // Genealogy — tree traversal, give dashboard + rewards time to settle first
+  setTimeout(() => {
+    if (!ok() || _tabLoaded.has('genealogy')) return;
+    if (window.loadGenealogy) window.loadGenealogy();
+  }, 9000);
+
+  // History — defer furthest to avoid RPC contention
+  setTimeout(() => {
+    if (!ok() || _tabLoaded.has('history')) return;
+    if (window.switchHistoryTab) window.switchHistoryTab('invest');
+  }, 13000);
+}
+
 function _triggerRefresh(panels, delay = 600) {
   for (const panel of panels) {
     clearTimeout(_refreshDebounce[panel]);
     _refreshDebounce[panel] = setTimeout(() => {
       delete _refreshDebounce[panel];
+      // Bust event log + graph caches so on-chain events from other wallets show up immediately
+      if (typeof _evLogCache !== 'undefined') _evLogCache.clear();
+      if (typeof _graphCache !== 'undefined') _graphCache = null;
       _doRefresh(panel);
     }, delay);
   }

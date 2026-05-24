@@ -1,4 +1,5 @@
 let _geneView      = 'list';
+let _geneLoading   = false;
 let _geneTree      = null;
 let _geneInvestedMap = new Map();
 let _geneStatsMap    = new Map();  // addr.toLowerCase() → { teamCount, teamBusiness }
@@ -18,8 +19,7 @@ async function fetchGeneTree(addr, depth) {
   if (depth > 10) return { addr, children: [] };
   let refs = [];
   try { refs = await contract.getReferrals(addr); } catch(_) {}
-  const children = [];
-  for (const r of refs) children.push(await fetchGeneTree(r, depth + 1));
+  const children = await Promise.all(refs.map(r => fetchGeneTree(r, depth + 1)));
   return { addr, children };
 }
 
@@ -189,7 +189,8 @@ function geneNodeClick(nid) {
 
 async function loadGenealogy() {
   if (!requireConnected()) return;
-  _tabLoaded.add('genealogy');
+  if (_geneLoading) return;
+  _geneLoading = true;
   const listEl = document.getElementById('geneListView');
   const treeEl = document.getElementById('geneTreeView');
   listEl.innerHTML = '<div class="empty-state">Loading genealogy<span class="ld"><span></span><span></span><span></span></span></div>';
@@ -319,6 +320,8 @@ async function loadGenealogy() {
     switchGeneView(_geneView);
   } catch(e) {
     listEl.innerHTML = '<div class="empty-state">Failed to load genealogy: ' + (e.errorName || e.reason || e?.error?.message || e.message) + '</div>';
+  } finally {
+    _geneLoading = false;
   }
 }
 

@@ -118,6 +118,7 @@ contract Liquidity {
     uint256 private totalEthInvested;
     uint256 private totalStakingRewardsPaidETH;
     address[] private registeredTokens;
+    address[] private allRegisteredUsers;
     mapping(uint256 => bool) private validPackageAmounts;
 
     // Immutables (not called by frontend; used internally and passed to libraries)
@@ -126,7 +127,7 @@ contract Liquidity {
     address private immutable WETH;
 
     // Constants (not exposed to frontend; inlined by optimizer)
-    uint256 private constant LP_LOCK_DURATION  = 90;
+    uint256 private constant LP_LOCK_DURATION  = 90 days;
     uint256 private constant USDT_PER_ETH      = 1000;
     uint256 private constant TWAP_PERIOD       = 30 seconds; // testing — change to 30 minutes for mainnet
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
@@ -161,6 +162,7 @@ contract Liquidity {
     event UserRegistered(address indexed user, address indexed referrer);
     event CommissionPaid(address indexed recipient, address indexed from, uint256 amount, uint256 level);
     event TokenRegistered(address indexed tokenAddress, string name, string symbol);
+    event TokenUpdated(address indexed tokenAddress, string name, string symbol);
     event TokenRemoved(address indexed tokenAddress);
     event TokenFeatured(address indexed tokenAddress);
     event TokenInProgressSet(address indexed tokenAddress, string label);
@@ -199,6 +201,7 @@ contract Liquidity {
         users[owner].userAddress = owner;
         users[owner].isRegistered = true;
         users[owner].registeredAt = block.timestamp;
+        allRegisteredUsers.push(owner);
         UNISWAP_ROUTER  = _router;
         UNISWAP_FACTORY = _factory;
         WETH            = _weth;
@@ -266,6 +269,7 @@ contract Liquidity {
         users[_referrer].referrals.push(msg.sender);
 
         totalRegisteredUsers++;
+        allRegisteredUsers.push(msg.sender);
         emit UserRegistered(msg.sender, _referrer);
     }
 
@@ -348,6 +352,13 @@ contract Liquidity {
         if (tokens[_tokenAddress].removed) revert TokenDelisted();
         tokens[_tokenAddress].inProgressLabel = _label;
         emit TokenInProgressSet(_tokenAddress, _label);
+    }
+
+    function updateToken(address _tokenAddress, string calldata _name, string calldata _symbol) external onlyOwner {
+        if (tokens[_tokenAddress].tokenAddress == address(0)) revert TokenNotRegistered();
+        tokens[_tokenAddress].name   = _name;
+        tokens[_tokenAddress].symbol = _symbol;
+        emit TokenUpdated(_tokenAddress, _name, _symbol);
     }
 
 
@@ -476,10 +487,12 @@ contract Liquidity {
         }));
 
         _investRecords[msg.sender].push(InvestRecord({
-            token:     _token,
-            ts:        uint64(block.timestamp),
-            ethAmount: uint128(T),
-            lpTokens:  uint128(lpReceived)
+            token:         _token,
+            ts:            uint64(block.timestamp),
+            ethAmount:     uint128(T),
+            lpTokens:      uint128(lpReceived),
+            poolBuyTokens: uint128(poolBuyTokens),
+            totalTokens:   uint128(totalTokens)
         }));
 
         bool wasQualifying = _qualifies(msg.sender);
@@ -599,10 +612,10 @@ contract Liquidity {
         _removeLPCore(_lockIndex, true);
     }
 
-    function restakeLP(uint256 _lockIndex, uint256 _durationSecs) external nonReentrant {
+    function restakeLP(uint256 _lockIndex, uint256 _durationDays) external nonReentrant {
         if (
-            _durationSecs != 7 && _durationSecs != 30 && _durationSecs != 60 &&
-            _durationSecs != 90 && _durationSecs != 180 && _durationSecs != 360
+            _durationDays != 7 && _durationDays != 30 && _durationDays != 60 &&
+            _durationDays != 90 && _durationDays != 180 && _durationDays != 360
         ) revert InvalidDuration();
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
         if (lock.claimed) revert LPAlreadyClaimed();
@@ -618,7 +631,7 @@ contract Liquidity {
         );
         if (pendingETH > 0) lock.tokensAccumulated += (pendingETH * 1e18) / price;
 
-        uint256 dIdx = LiquidityMath.getDurationIndex(stakingDurations, _durationSecs);
+        uint256 dIdx = LiquidityMath.getDurationIndex(stakingDurations, _durationDays);
 
         if (lock.streakBaseEth != 0 && lock.ethInvested != lock.streakBaseEth) {
             for (uint256 i = 0; i < 6; ) {
@@ -628,8 +641,8 @@ contract Liquidity {
             lock.streakBaseEth = lock.ethInvested;
         }
 
-        uint256 prevDurSecs = lock.unlockTime > lock.lockedAt ? lock.unlockTime - lock.lockedAt : LP_LOCK_DURATION;
-        uint256 prevDIdx    = LiquidityMath.getDurationIndex(stakingDurations, prevDurSecs);
+        uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / 1 days : 90;
+        uint256 prevDIdx    = LiquidityMath.getDurationIndex(stakingDurations, prevDurDays);
         uint256 sIdx;
         if (dIdx == prevDIdx) {
             lock.restakeCounts[dIdx] += 1;
@@ -640,11 +653,11 @@ contract Liquidity {
             sIdx = 0;
         }
         lock.lockedAt         = block.timestamp;
-        lock.unlockTime       = block.timestamp + _durationSecs;
+        lock.unlockTime       = block.timestamp + _durationDays * 1 days;
         lock.rewardClaimedETH = 0;
-        lock.rewardRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationSecs, sIdx);
+        lock.rewardRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationDays, sIdx);
 
-        emit LPRestaked(msg.sender, lock.token, lock.lpAmount, lock.unlockTime, _durationSecs);
+        emit LPRestaked(msg.sender, lock.token, lock.lpAmount, lock.unlockTime, _durationDays);
     }
 
 
@@ -934,6 +947,10 @@ contract Liquidity {
         return (totalRegisteredUsers + 1, totalEthInvested, totalStakingRewardsPaidETH);
     }
 
+    function getAllRegisteredUsers() external view returns (address[] memory) {
+        return allRegisteredUsers;
+    }
+
     function getUserLPLocks(address _user) external view returns (LPLock[] memory) {
         return userLPLocks[_user];
     }
@@ -948,6 +965,27 @@ contract Liquidity {
 
     function getReferrals(address _user) external view returns (address[] memory) {
         return users[_user].referrals;
+    }
+
+    // Batch getter: returns stats for all direct referrals of `user` in one call.
+    // Replaces N×3 individual calls (userTotalInvested, getReferrals, getUserCommissionStats)
+    // with a single view call, dramatically reducing RPC pressure on the dashboard.
+    function getDirectRefsInfo(address user) external view returns (DirectRefInfo[] memory result) {
+        address[] memory refs = users[user].referrals;
+        uint256 len = refs.length;
+        result = new DirectRefInfo[](len);
+        for (uint256 i = 0; i < len; ) {
+            address ref = refs[i];
+            result[i].addr = ref;
+            result[i].totalInvested = userTotalInvested[ref];
+            result[i].directRefCount = users[ref].referrals.length;
+            (,, uint256 tc, uint256 rc,) = LiquidityViewLib.computeCommissionStats(
+                userLPLocks[ref], userCommissionsEarned[ref], userTotalInvested[ref], block.timestamp
+            );
+            result[i].remainingCap = rc;
+            result[i].totalCap     = tc;
+            unchecked { i++; }
+        }
     }
 
     function getReferrer(address _user) external view returns (address) {

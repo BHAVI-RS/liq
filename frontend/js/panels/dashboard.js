@@ -15,7 +15,7 @@ function _dashStartPoll() {
     const panel = document.getElementById('panel-dashboard');
     if (!panel || !panel.classList.contains('active')) { _dashStopPoll(); return; }
     loadDashboard(true);
-  }, 10000);
+  }, 30000);
 }
 
 // ── Dashboard staking live ticker ──
@@ -37,16 +37,37 @@ var _dashWallRef   = 0;
 var _dashLpLocks = [];
 var _dashEffNow  = 0;
 
+// ── Shared team-tree cache ──
+// Both _loadDashTeamStats and _loadDashTeamWealth need the same fetchGeneTree result.
+// Caching it avoids two separate full traversals on every dashboard load.
+// The pending-promise dedup means simultaneous callers share a single in-flight request.
+let _dashTeamTreeCache   = null;
+let _dashTeamTreeCacheTs = 0;
+let _dashTeamTreePending = null;
+
+async function _fetchDashTeamTree() {
+  if (_dashTeamTreeCache && Date.now() - _dashTeamTreeCacheTs < 60_000) return _dashTeamTreeCache;
+  if (_dashTeamTreePending) return _dashTeamTreePending;
+  _dashTeamTreePending = fetchGeneTree(walletAddress, 1)
+    .then(tree => {
+      _dashTeamTreeCache   = tree;
+      _dashTeamTreeCacheTs = Date.now();
+      _dashTeamTreePending = null;
+      return tree;
+    })
+    .catch(e => { _dashTeamTreePending = null; throw e; });
+  return _dashTeamTreePending;
+}
+
 // ── Team Wealth real-time ticker ──
+// Params are fetched once per dashboard load (or after a user transaction via loadDashboard).
+// The 1s ticker recomputes staking accumulation from wall clock — no periodic chain polling.
 var _dashTeamWealthTicker    = null;
-var _dashTeamWealthFetcher   = null;
-var _dashTeamWealthParams    = [];  // wealthParams for each downline member
-var _dashTeamWealthAddrs     = [];  // downline addresses (set once per load)
+var _dashTeamWealthParams    = [];  // wealthParams for each downline member (cached until next load)
 var _dashTeamWealthLastFetch = 0;
 
 function _dashStopTeamWealth() {
-  if (_dashTeamWealthTicker)  { clearInterval(_dashTeamWealthTicker);  _dashTeamWealthTicker  = null; }
-  if (_dashTeamWealthFetcher) { clearInterval(_dashTeamWealthFetcher); _dashTeamWealthFetcher = null; }
+  if (_dashTeamWealthTicker) { clearInterval(_dashTeamWealthTicker); _dashTeamWealthTicker = null; }
 }
 
 function _dashUpdateTeamWealthDisplay() {
@@ -61,13 +82,12 @@ function _dashUpdateTeamWealthDisplay() {
 
 async function _loadDashTeamWealth() {
   const _tsNow = Date.now();
-  if (_tsNow - _dashTeamWealthLastFetch < 25000) return;
+  if (_tsNow - _dashTeamWealthLastFetch < 60000) return;
   _dashTeamWealthLastFetch = _tsNow;
   _dashStopTeamWealth();
   try {
-    const treeData = await fetchGeneTree(walletAddress, 1);
+    const treeData = await _fetchDashTeamTree();
     const allAddrs = _geneCollectAddrs(treeData).slice(1); // exclude self
-    _dashTeamWealthAddrs = allAddrs;
     if (allAddrs.length === 0) {
       _dashTeamWealthParams = [];
       _dashUpdateTeamWealthDisplay();
@@ -78,19 +98,9 @@ async function _loadDashTeamWealth() {
     );
     _dashTeamWealthParams = paramsList.filter(p => p !== null);
     _dashUpdateTeamWealthDisplay();
-    // Update display every 1s via wall-clock advancement
+    // Tick every 1s: recomputes staking accumulation from wall clock (no chain calls).
+    // Params stay cached until the next loadDashboard() call (e.g. after a transaction).
     _dashTeamWealthTicker = setInterval(_dashUpdateTeamWealthDisplay, 1000);
-    // Re-fetch params from chain every 10s
-    _dashTeamWealthFetcher = setInterval(async () => {
-      const el = document.getElementById('dashTeamWealth');
-      if (!el) { _dashStopTeamWealth(); return; }
-      try {
-        const fresh = await Promise.all(
-          _dashTeamWealthAddrs.map(a => contract.getWealthParams(a).catch(() => null))
-        );
-        _dashTeamWealthParams = fresh.filter(p => p !== null);
-      } catch(e) {}
-    }, 10000);
   } catch(e) {
     console.error('_loadDashTeamWealth', e);
   }
@@ -182,17 +192,7 @@ function _dashTickCountdowns() {
       if (activeBar)  { activeBar.style.left = claimedPct.toFixed(3) + '%'; activeBar.style.width = pendingPct.toFixed(3) + '%'; }
     }
 
-    // Reward label.
-    const accumulatedUSDT = tokensAccumulated * priceEth * USDT_PER_ETH;
-    const liveUSDT = pendingETH * USDT_PER_ETH + accumulatedUSDT;
-    const rewardEl = el.querySelector('.dis-sl-reward');
-    if (rewardEl) {
-      rewardEl.textContent = perSecUSDT > 0 || accumulatedUSDT > 0
-        ? '$' + fmtNum(liveUSDT, 3) + ' USDT'
-        : '— USDT';
-    }
-
-    // Claim footer.
+    // Claim footer. (reward label is owned exclusively by _invTickStakingRewards at 100ms resolution)
     const claimTokens = (priceEth > 0 ? pendingETH / priceEth : 0) + tokensAccumulated;
     const canClaim    = claimTokens > 0;
     const footerEl    = el.querySelector('.dis-staking-footer');
@@ -272,9 +272,15 @@ function _dashStartStakingTicker() {
     if (totalETH > _dashStakingHWM) _dashStakingHWM = totalETH;
     const displayETH = Math.max(totalETH, _dashStakingHWM);
 
-    el.innerHTML = displayETH > 0.000001
-      ? `<span style="color:var(--gold);">${fmtUSDT(displayETH, {decimals:3})}</span>`
-      : '<span style="color:var(--muted);">—</span>';
+    if (displayETH > 0.000001) {
+      const raw   = (displayETH * 1000).toFixed(5);
+      const dot   = raw.indexOf('.');
+      const whole = raw.slice(0, dot);
+      const frac  = raw.slice(dot);     // ".XXXXX"
+      el.innerHTML = `<span style="color:var(--gold);">${whole}${frac} USDT</span>`;
+    } else {
+      el.innerHTML = '<span style="color:var(--muted);">—</span>';
+    }
 
     const wealthEl = document.getElementById('dashPnL');
     if (wealthEl) {
@@ -382,8 +388,8 @@ async function fetchGraphData() {
     const fromBlock      = getFromBlock(latestBlockNum);
     const [userInfo, investEvents, refEvents] = await Promise.all([
       contract.users(walletAddress),
-      queryFilterBatched(contract, contract.filters.Invested(walletAddress), fromBlock, 'latest'),
-      queryFilterBatched(contract, contract.filters.CommissionPaid(walletAddress), fromBlock, 'latest'),
+      cachedQueryFilter(contract.filters.Invested(walletAddress), 'Invested', fromBlock),
+      cachedQueryFilter(contract.filters.CommissionPaid(walletAddress), 'CommissionPaid', fromBlock),
     ]);
     const regTime = Number(userInfo.registeredAt);
 
@@ -796,10 +802,10 @@ async function _loadDashTeamStats() {
   const bizEl = document.getElementById('dashTeamBusiness');
   if (!volEl || !bizEl) return;
   const _tsNow = Date.now();
-  if (_tsNow - _dashTeamStatsLastFetch < 25000) return;
+  if (_tsNow - _dashTeamStatsLastFetch < 60000) return;
   _dashTeamStatsLastFetch = _tsNow;
   try {
-    const treeData  = await fetchGeneTree(walletAddress, 1);
+    const treeData  = await _fetchDashTeamTree();
     const allAddrs  = _geneCollectAddrs(treeData).slice(1); // exclude self (index 0)
     if (allAddrs.length === 0) {
       volEl.textContent = '0';
@@ -847,20 +853,33 @@ async function loadDashboard(silent = false) {
     _labelKeyPromise = null;
     _dashTeamStatsLastFetch  = 0;
     _dashTeamWealthLastFetch = 0;
+    _dashTeamTreeCache   = null;
+    _dashTeamTreeCacheTs = 0;
+    _dashTeamTreePending = null;
     _dashStopTeamWealth();
   }
 
   try {
     const _latestBlockNum = await provider.getBlockNumber();
     const _fromBlock      = getFromBlock(_latestBlockNum);
-    const [lpLocks, commStats, stakingReward, platformToken, stakingEvents, latestBlock] = await Promise.all([
+    const [lpLocks, commStats, stakingReward, platformToken, latestBlock] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
       contract.platformToken(),
-      queryFilterBatched(contract, contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest'),
       provider.getBlock('latest').catch(() => null),
     ]);
+    // Fetch staking-claim events in the background — they are only needed to add
+    // historical claimed ETH from past restake periods. The display renders immediately
+    // from lock struct data (fast path); the events-base correction arrives shortly after.
+    _dashStakingEventsBase = 0;
+    cachedQueryFilter(contract.filters.StakingRewardClaimed(walletAddress), 'StakingRewardClaimed', _fromBlock)
+      .then(evs => {
+        _dashStakingEventsBase = evs.reduce((s, ev) => {
+          try { return s + parseFloat(ethers.utils.formatEther(ev.args.ethEquivalent)); } catch(_) { return s; }
+        }, 0);
+      })
+      .catch(() => {});
 
     const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned)) : 0;
     // Cap state assigned after _effNow is established below.
@@ -943,12 +962,6 @@ async function loadDashboard(silent = false) {
     _dashStakingTickBase   = _effNow;
     _dashStakingTickWall   = _wallNow;
 
-    // Sum ethEquivalent from every StakingRewardClaimed event — this persists across
-    // restakes even though rewardClaimedETH on each lock resets to 0 at restake time.
-    _dashStakingEventsBase = stakingEvents.reduce((s, ev) => {
-      try { return s + parseFloat(ethers.utils.formatEther(ev.args.ethEquivalent)); } catch(_) { return s; }
-    }, 0);
-
     // Reset HWM to zero each load so the display starts from the live computed value
     // and visibly accumulates. The in-memory HWM still prevents same-session regressions
     // from token price dips, but a stale localStorage HWM from a previous restake period
@@ -996,9 +1009,9 @@ async function loadDashboard(silent = false) {
     document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH, {decimals: 3});
     document.getElementById('dashRefEarningsUSD').innerHTML    =
       isEligible
-        ? `<span style="color:var(--muted);">Cap: ${fmtUSDT(capRemETH, {decimals:2})} remaining</span>`
+        ? `<span style="color:var(--muted);">Cap: ${(capRemETH * USDT_PER_ETH).toFixed(2)} USDT remaining</span>`
         : isPaused
-          ? `<span style="color:rgba(234,179,8,0.7);">Cap: ${fmtUSDT(pausedCapETH, {decimals:2})} paused</span>`
+          ? `<span style="color:rgba(234,179,8,0.7);">Cap: ${(pausedCapETH * USDT_PER_ETH).toFixed(2)} USDT paused</span>`
           : '';
 
     const eligBadge = isEligible
@@ -1006,8 +1019,18 @@ async function loadDashboard(silent = false) {
       : isPaused
         ? '<span style="cursor:pointer;font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="showPausedLocksPopup(event)">PAUSED</span>'
         : '<span style="cursor:pointer;font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="showIneligiblePopup(event)">INELIGIBLE</span>';
-    document.getElementById('dashStakingRewards').innerHTML = _initDisplayETH > 0.000001
-      ? `<span style="color:var(--gold);">${fmtUSDT(_initDisplayETH, {decimals:3})}</span>` : '<span style="color:var(--muted);">—</span>';
+    {
+      const _sEl = document.getElementById('dashStakingRewards');
+      if (_initDisplayETH > 0.000001) {
+        const _raw   = (_initDisplayETH * 1000).toFixed(5);
+        const _dot   = _raw.indexOf('.');
+        const _whole = _raw.slice(0, _dot);
+        const _frac  = _raw.slice(_dot);
+        _sEl.innerHTML = `<span style="color:var(--gold);">${_whole}${_frac} USDT</span>`;
+      } else {
+        _sEl.innerHTML = '<span style="color:var(--muted);">—</span>';
+      }
+    }
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');
     if (stakingSubEl) stakingSubEl.textContent = _initAnyActive
       ? 'accumulating'
@@ -1023,8 +1046,10 @@ async function loadDashboard(silent = false) {
     pnlPctEl.style.color  = pnlCls;
 
 
-    _graphCache = null;
-    fetchGraphData().then(data => { _graphCache = data; });
+    if (!silent || !_graphCache) {
+      _graphCache = null;
+      fetchGraphData().then(data => { _graphCache = data; });
+    }
 
     // Load team stats, team wealth, and direct referrals asynchronously
     _loadDashTeamStats();
@@ -1155,7 +1180,7 @@ async function saveRefLabel(addr) {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'SAVING…'; }
   try {
     const encBytes = val ? await _encryptLabel(val) : new Uint8Array(0);
-    const tx = await contract.setRefLabel(addr, encBytes);
+    const tx = await contract.connect(signer).setRefLabel(addr, encBytes);
     if (saveBtn) saveBtn.textContent = 'CONFIRMING…';
     await tx.wait();
 
@@ -1217,29 +1242,45 @@ function _computeCapState(locks) {
   return 'ineligible';
 }
 
+function _computeCapStateFromStats(commStats) {
+  // null means the RPC call failed — don't apply a glow color in that case
+  if (!commStats) return 'unknown';
+  // remainingCap = activeCap only (locks still within unlock window)
+  // totalCap     = activeCap + pausedCap
+  const rc = commStats.remainingCap ?? commStats[3];
+  const tc = commStats.totalCap     ?? commStats[2];
+  if (rc && rc.gt(0)) return 'eligible';
+  if (tc && tc.gt(0)) return 'paused';
+  return 'ineligible';
+}
+
 async function _refreshDashDirectRefStats() {
   const listEl = document.getElementById('dashDirectRefsList');
   if (!listEl) return;
   const cards = [...listEl.querySelectorAll('.dash-dref-card[id^="drefCard_"]')];
   if (!cards.length) return;
-  const addrs = cards.map(c => c.id.slice('drefCard_'.length));
   try {
-    const [investedAmts, refCounts, refLocks] = await Promise.all([
-      Promise.all(addrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
-      Promise.all(addrs.map(a => contract.getReferrals(a).catch(() => []).then(r => r.length))),
-      Promise.all(addrs.map(a => contract.getUserLPLocks(a).catch(() => []))),
-    ]);
-    for (let i = 0; i < cards.length; i++) {
-      const card     = cards[i];
-      const addr     = addrs[i];
-      const invested = parseFloat(ethers.utils.formatEther(investedAmts[i]));
-      const dirCount = refCounts[i];
-      const capState = _computeCapState(refLocks[i]);
-      const invEl    = card.querySelector('.dash-dref-invested');
+    // Single batch call replaces N×3 individual calls
+    const batch = await contract.getDirectRefsInfo(walletAddress).catch(() => null);
+    if (!batch) return;
+    // Build a lookup by lowercase address for O(1) card updates
+    const byAddr = new Map(batch.map(r => [r.addr.toLowerCase(), r]));
+    for (const card of cards) {
+      const addr = card.id.slice('drefCard_'.length);
+      const r    = byAddr.get(addr);
+      if (!r) continue;
+      const invested  = parseFloat(ethers.utils.formatEther(r.totalInvested));
+      const dirCount  = Number(r.directRefCount);
+      const capState  = r.remainingCap.gt(0) ? 'eligible'
+                      : r.totalCap.gt(0)     ? 'paused'
+                      :                        'ineligible';
+      const invEl = card.querySelector('.dash-dref-invested');
       if (invEl) invEl.innerHTML = `${invested > 0 ? fmtUSDT(invested, {decimals:2}) + ' invested' : 'No active investment'} &nbsp;·&nbsp; ${dirCount} direct ref${dirCount !== 1 ? 's' : ''}`;
       card.classList.remove('cap-paused', 'cap-ineligible', 'dref-no-invest');
-      if (capState === 'paused')      card.classList.add('cap-paused');
-      else if (capState === 'ineligible') card.classList.add('cap-ineligible');
+      if (invested > 0) {
+        if (capState === 'paused')          card.classList.add('cap-paused');
+        else if (capState === 'ineligible') card.classList.add('cap-ineligible');
+      }
       if (invested === 0) {
         card.classList.add('dref-no-invest');
         card.removeAttribute('onclick');
@@ -1260,29 +1301,30 @@ async function _loadDashDirectRefs(force = false) {
     return;
   }
   try {
-    const refs = await contract.getReferrals(walletAddress).catch(() => []);
-    if (!refs || refs.length === 0) { section.style.display = 'none'; return; }
+    // Single batch call: returns addr + totalInvested + directRefCount + remainingCap + totalCap
+    const batch = await contract.getDirectRefsInfo(walletAddress).catch(() => null);
+    if (!batch || batch.length === 0) { section.style.display = 'none'; return; }
 
     section.style.display = '';
     listEl.innerHTML = '<div style="color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:8px 0;">Loading…</div>';
 
-    const [investedAmts, refCounts, refLocks] = await Promise.all([
-      Promise.all(refs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
-      Promise.all(refs.map(a => contract.getReferrals(a).catch(() => []).then(r => r.length))),
-      Promise.all(refs.map(a => contract.getUserLPLocks(a).catch(() => []))),
-    ]);
+    // Fetch labels in parallel (only extra call needed)
+    const refs = batch.map(r => r.addr);
+    await _batchGetRefLabels(refs).catch(() => {});
 
-    // Fetch labels from chain and decrypt (errors caught inside _getRefLabel)
-    await _batchGetRefLabels(refs);
-
-    listEl.innerHTML = refs.map((addr, i) => {
-      const invested  = parseFloat(ethers.utils.formatEther(investedAmts[i]));
-      const dirCount  = refCounts[i];
+    listEl.innerHTML = batch.map(r => {
+      const addr      = r.addr;
+      const invested  = parseFloat(ethers.utils.formatEther(r.totalInvested));
+      const dirCount  = Number(r.directRefCount);
       const label     = _labelCache.get(addr.toLowerCase()) || '';
       const display   = label || addr;
       const initial   = addr.slice(2, 4).toUpperCase();
-      const capState  = _computeCapState(refLocks[i]);
-      const capClass  = capState === 'paused' ? ' cap-paused' : capState === 'ineligible' ? ' cap-ineligible' : '';
+      const capState  = r.remainingCap.gt(0) ? 'eligible'
+                      : r.totalCap.gt(0)     ? 'paused'
+                      :                        'ineligible';
+      const capClass  = invested > 0 && capState === 'paused'     ? ' cap-paused'
+                      : invested > 0 && capState === 'ineligible' ? ' cap-ineligible'
+                      : '';
       const noInvest  = invested === 0;
       return `
         <div class="dash-dref-card${capClass}${noInvest ? ' dref-no-invest' : ''}" id="drefCard_${addr.toLowerCase()}"${noInvest ? '' : ` onclick="openRefPopup('${addr}')"`}>

@@ -20,7 +20,6 @@ function _refreshHistoryTab() {
 
 async function loadHistory() {
   if (!requireConnected()) return;
-  _tabLoaded.add('history');
   const el = document.getElementById('historyList');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
@@ -75,7 +74,10 @@ function _buildHistoryItemFromRecord(rec, symCache) {
     <div class="history-detail"
       data-token="${tokenAddr}"
       data-eth="${ethAmount.toString()}"
-      data-lp="${lpTokens.toString()}">
+      data-lp="${lpTokens.toString()}"
+      data-poolbuy="${rec.poolBuyTokens.toString()}"
+      data-totaltokens="${rec.totalTokens.toString()}"
+      data-investor="${walletAddress}">
       <div class="hd-body" style="padding:16px;color:var(--muted);font-size:12px;text-align:center;">
         Loading details…
       </div>
@@ -159,14 +161,17 @@ async function toggleHistoryDetail(summaryEl) {
       parseInt(detail.dataset.block),
       detail.dataset.token,
       ethers.BigNumber.from(detail.dataset.eth),
-      ethers.BigNumber.from(detail.dataset.lp)
+      ethers.BigNumber.from(detail.dataset.lp),
+      detail.dataset.investor   || null,
+      detail.dataset.poolbuy    ? ethers.BigNumber.from(detail.dataset.poolbuy)    : null,
+      detail.dataset.totaltokens? ethers.BigNumber.from(detail.dataset.totaltokens): null
     );
   } catch(e) {
     detail.innerHTML = `<div style="padding:14px;color:var(--danger);font-size:12px;">Failed to load details: ${e.message}</div>`;
   }
 }
 
-async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTokens) {
+async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTokens, investorAddr, poolBuyStored, totalTokensStored) {
   const halfETH = ethAmount.div(2);
   const A60     = halfETH.mul(60).div(100);
   const A40     = halfETH.sub(A60);
@@ -209,8 +214,10 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
 
   let swapTokensOut = null, mintToken = null, mintETH = null;
   const refEvents = [];
+  let refEventsEstimated = false;
 
   if (txHash) {
+    // ── Receipt-based path (event-logged investments) ──
     const receipt = await provider.getTransactionReceipt(txHash);
 
     for (const log of receipt.logs) {
@@ -239,6 +246,30 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
       refEvents.push({ recipient, amount, level: Number(level), isPlatform: recipient.toLowerCase() === ownerAddr });
     }
     refEvents.sort((a, b) => a.level - b.level);
+
+  } else {
+    // ── On-chain record path (no txHash stored) ──
+    // Use stored token amounts from InvestRecord fields.
+    if (poolBuyStored)    swapTokensOut = poolBuyStored;
+    if (totalTokensStored) mintToken    = totalTokensStored;
+
+    // Traverse referrer chain and compute theoretical commission split.
+    if (investorAddr) {
+      try {
+        refEventsEstimated = true;
+        const ownerAddr = (await contract.owner()).toLowerCase();
+        let cur = investorAddr;
+        for (let lvl = 1; lvl <= 5; lvl++) {
+          const ref = await contract.getReferrer(cur).catch(() => ethers.constants.AddressZero);
+          if (!ref || ref === ethers.constants.AddressZero) break;
+          const rateBN = await contract.referralCommissionRates(lvl).catch(() => ethers.BigNumber.from(0));
+          const amt = A40.mul(rateBN).div(10000);
+          if (amt.isZero()) { cur = ref; continue; }
+          refEvents.push({ recipient: ref, amount: amt, level: lvl, isPlatform: ref.toLowerCase() === ownerAddr });
+          cur = ref;
+        }
+      } catch(_) {}
+    }
   }
 
   // Pre-seeded tokens used = total deposited to pool minus what the swap produced.
@@ -321,17 +352,18 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
       ${txHash
         ? `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TX</span>
            <span style="font-family:var(--font-mono);font-size:11px;color:var(--cream);word-break:break-all;flex:1;">${txHash}</span>`
-        : `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;">TX hash not stored on-chain</span>`}
+        : `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TOKEN</span>
+           <a href="https://amoy.polygonscan.com/address/${tokenAddr}" target="_blank" style="font-family:var(--font-mono);font-size:11px;color:var(--gold);word-break:break-all;flex:1;">${tokenAddr}</a>`}
       <button onclick="openHistRefSplitPopup('${refSplitId}')" style="flex-shrink:0;padding:5px 12px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);border-radius:4px;color:var(--gold);font-family:var(--font-mono);font-size:10px;letter-spacing:1.2px;cursor:pointer;">REFERRAL SPLIT ›</button>
     </div>
 
     <div id="${refSplitId}_pop" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;pointer-events:all;" onclick="if(event.target===this)closeHistRefSplitPopup('${refSplitId}')">
       <div class="hd-ref-popup-body" style="background:var(--panel);border:1px solid rgba(201,168,76,0.3);border-radius:12px;max-width:680px;width:94%;padding:22px;">
         <div style="font-family:var(--font-display);font-size:18px;letter-spacing:2px;color:var(--gold);margin-bottom:4px;">REFERRAL SPLIT</div>
-        <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;">Commissions split across eligible levels &nbsp;·&nbsp; ${fU3(A40)}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:18px;">${refEventsEstimated ? 'Estimated split based on current referrer chain' : 'Commissions split across eligible levels'} &nbsp;·&nbsp; ${fU3(A40)}</div>
         <div class="hd-ref-list" style="max-height:55vh;overflow-y:auto;margin-bottom:16px;">
           ${refEvents.length === 0
-            ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">${txHash ? 'No commission events found in this transaction.' : 'Transaction hash not stored in invest records — referral split details unavailable.'}</div>`
+            ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">${txHash ? 'No commission events found in this transaction.' : 'No referrers found in the referral chain for this wallet.'}</div>`
             : refEvents.map(ev => {
                 const short = ev.recipient;
                 const poolFloat = parseFloat(ethers.utils.formatEther(A40));
@@ -414,7 +446,6 @@ async function loadPoolHistory() {
 
 async function loadRewardHistory() {
   if (!requireConnected()) return;
-  _tabLoaded.add('history');
   const el = document.getElementById('rewardHistoryList');
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
 

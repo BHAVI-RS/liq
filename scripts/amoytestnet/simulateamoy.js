@@ -50,28 +50,51 @@ const COMM_RATES_BPS = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+function isTransient(e) {
+  return e.code === "ECONNRESET"  ||
+         e.code === "ETIMEDOUT"   ||
+         e.code === "UND_ERR_SOCKET" ||
+         e.message?.includes("ECONNRESET") ||
+         e.message?.includes("ETIMEDOUT")  ||
+         e.message?.includes("timeout")    ||
+         e.message?.includes("network");
+}
+
 // Send a transaction and wait until it is mined.
-// Retries the receipt poll on transient network errors (ECONNRESET, timeout).
-async function mine(txPromise) {
-  const tx = await txPromise;
-  while (true) {
+// Accepts a thunk (() => txPromise) so the entire send+wait can be retried
+// on transient RPC errors (ECONNRESET, timeout).
+async function mine(txFn, maxRetries = 6) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let tx;
     try {
-      const receipt = await tx.wait();
-      await sleep(500); // brief pause so the RPC isn't slammed back-to-back
-      return receipt;
+      tx = await txFn();
     } catch (e) {
-      const transient = e.code === "ECONNRESET" ||
-                        e.code === "ETIMEDOUT"  ||
-                        e.message?.includes("ECONNRESET") ||
-                        e.message?.includes("timeout");
-      if (transient) {
-        process.stdout.write("\r  Network hiccup — retrying wait…          ");
-        await sleep(3000);
+      if (isTransient(e) && attempt < maxRetries - 1) {
+        const delay = 4000 * (attempt + 1);
+        process.stdout.write(`\r  ECONNRESET on send — retry ${attempt + 1}/${maxRetries - 1} in ${delay / 1000}s…   `);
+        await sleep(delay);
         continue;
       }
       throw e;
     }
+
+    // tx sent — now wait for receipt, retrying on transient poll errors
+    while (true) {
+      try {
+        const receipt = await tx.wait();
+        await sleep(600); // brief pause so the RPC isn't slammed back-to-back
+        return receipt;
+      } catch (e) {
+        if (isTransient(e)) {
+          process.stdout.write("\r  Network hiccup — retrying wait…          ");
+          await sleep(3000);
+          continue;
+        }
+        throw e;
+      }
+    }
   }
+  throw new Error("mine(): exceeded max retries");
 }
 
 function toUSDT(wei) {
@@ -205,13 +228,13 @@ async function main() {
 
   for (const t of deployedTokens) {
     const supply = await t.contract.totalSupply();
-    await mine(t.contract.transfer(liquidityAddress, supply, TX_OVERRIDES));
+    await mine(() => t.contract.transfer(liquidityAddress, supply, TX_OVERRIDES));
     console.log(`  Token supply (${hre.ethers.formatEther(supply)} ${t.symbol}) → Liquidity ✓`);
 
-    await mine(liquidity.addToken(t.address, t.name, t.symbol, TX_OVERRIDES));
+    await mine(() => liquidity.addToken(t.address, t.name, t.symbol, TX_OVERRIDES));
     console.log(`  ${t.symbol} registered in platform ✓`);
 
-    await mine(liquidity.seedPool(t.address, seedTokens, { value: seedETH, ...DEPLOY_OVERRIDES }));
+    await mine(() => liquidity.seedPool(t.address, seedTokens, { value: seedETH, ...DEPLOY_OVERRIDES }));
     console.log(`  Uniswap pool seeded: 100 MATIC + 100,000 ${t.symbol}  (1 ${t.symbol} = 0.001 MATIC = $1.00) ✓`);
   }
 
@@ -224,7 +247,7 @@ async function main() {
   console.log("  TWAP WARM-UP");
   console.log(sep());
 
-  const obs0Receipt = await mine(liquidity.updateTWAP(TX_OVERRIDES));
+  const obs0Receipt = await mine(() => liquidity.updateTWAP(TX_OVERRIDES));
   const obs0Block   = await provider.getBlock(obs0Receipt.blockNumber);
   console.log(
     `  Observation 0 recorded ✓  (block ${obs0Receipt.blockNumber}, ` +
@@ -234,7 +257,7 @@ async function main() {
 
   await waitForTwap(provider, obs0Block.timestamp);
 
-  await mine(liquidity.updateTWAP(TX_OVERRIDES));
+  await mine(() => liquidity.updateTWAP(TX_OVERRIDES));
   console.log("  Observation 1 recorded ✓");
   console.log("  TWAP ready — staking rewards are claimable ✓\n");
 
@@ -322,7 +345,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
     );
     for (const idx of g.children) {
       const ct = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[idx]);
-      await mine(ct.register(signers[g.referrer].address, TX_OVERRIDES));
+      await mine(() => ct.register(signers[g.referrer].address, TX_OVERRIDES));
       console.log(
         `    [${String(idx).padStart(2)}] ${signers[idx].address}` +
         `  ← [${String(g.referrer).padStart(2)}] ✓`
@@ -353,7 +376,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
     const account = signers[idx];
     const ct      = new hre.ethers.Contract(liquidityAddress, artifact.abi, account);
 
-    const receipt = await mine(ct.invest(tokenAddress, { value: PACKAGE_ETH, ...TX_OVERRIDES }));
+    const receipt = await mine(() => ct.invest(tokenAddress, { value: PACKAGE_ETH, ...TX_OVERRIDES }));
 
     totalInvested += PACKAGE_ETH;
 

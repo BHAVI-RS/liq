@@ -384,7 +384,7 @@ async function invest() {
     const totalWei = ethers.utils.parseEther(ethAmtStr);
 
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.invest(tokenAddr, { value: totalWei, ..._GAS });
+    const tx = await contract.connect(signer).invest(tokenAddr, { value: totalWei, ..._GAS });
 
     toast('Transaction sent — waiting for confirmation…', 'info');
 
@@ -429,8 +429,11 @@ async function invest() {
   }
 }
 
+let _loadInvestTokensGen = 0;
+
 async function loadInvestTokens() {
   if (!requireConnected()) return;
+  const myGen = ++_loadInvestTokensGen;  // any older in-flight call will see myGen !== _loadInvestTokensGen and bail
   const list   = document.getElementById('investTokenList');
   const select = document.getElementById('investTokenSelect');
   const menu   = document.getElementById('investDropdownMenu');
@@ -443,41 +446,47 @@ async function loadInvestTokens() {
   if (provCard) provCard.style.display = 'none';
   try {
     const addrs = await contract.getRegisteredTokens();
+    if (myGen !== _loadInvestTokensGen) return;
     if (addrs.length === 0) {
       list.innerHTML = '<div class="empty-state">No tokens registered yet.</div>';
       return;
     }
-    list.innerHTML = '';
+    // Fetch all token data in parallel instead of sequential awaits
     const sortedAddrs = [...addrs].reverse();
-    const activeAddrs = [];
-    for (const addr of sortedAddrs) {
-      const t = await contract.getToken(addr);
-      if (!t.removed) activeAddrs.push(addr);
-    }
+    const allTokens   = await Promise.all(sortedAddrs.map(a => contract.getToken(a)));
+    if (myGen !== _loadInvestTokensGen) return;
+
+    const activeAddrs = sortedAddrs.filter((_, i) => !allTokens[i].removed);
+    const activeTokens = activeAddrs.map(a => allTokens[sortedAddrs.indexOf(a)]);
+
     if (activeAddrs.length === 0) {
       list.innerHTML = '<div class="empty-state">No tokens available for investment.</div>';
       return;
     }
     let featuredAddr = '';
     try { featuredAddr = (await contract.featuredToken()).toLowerCase(); } catch(_) {}
-    const featuredIdx = activeAddrs.findIndex(a => a.toLowerCase() === featuredAddr);
-    if (featuredIdx > 0) activeAddrs.unshift(activeAddrs.splice(featuredIdx, 1)[0]);
+    if (myGen !== _loadInvestTokensGen) return;
 
-    // fetch inProgress flags once, then sink those tokens to the bottom
-    const inProgressLabels = new Map();
-    for (const addr of activeAddrs) {
-      const t = await contract.getToken(addr);
-      inProgressLabels.set(addr.toLowerCase(), t.inProgressLabel || '');
+    const featuredIdx = activeAddrs.findIndex(a => a.toLowerCase() === featuredAddr);
+    if (featuredIdx > 0) {
+      activeAddrs.unshift(activeAddrs.splice(featuredIdx, 1)[0]);
+      activeTokens.unshift(activeTokens.splice(featuredIdx, 1)[0]);
     }
-    activeAddrs.sort((a, b) => {
-      const aIP = inProgressLabels.get(a.toLowerCase()) ? 1 : 0;
-      const bIP = inProgressLabels.get(b.toLowerCase()) ? 1 : 0;
-      return aIP - bIP;
+
+    // Sort: inProgress tokens to the bottom (all data already in activeTokens)
+    const inProgressLabels = new Map(activeAddrs.map((a, i) => [a.toLowerCase(), activeTokens[i].inProgressLabel || '']));
+    const order = activeAddrs.map((a, i) => i).sort((a, b) => {
+      return (inProgressLabels.get(activeAddrs[a].toLowerCase()) ? 1 : 0) - (inProgressLabels.get(activeAddrs[b].toLowerCase()) ? 1 : 0);
     });
-    for (let i = 0; i < activeAddrs.length; i++) {
-      const addr         = activeAddrs[i];
+    const sortedActive = order.map(i => activeAddrs[i]);
+    const sortedTokens = order.map(i => activeTokens[i]);
+
+    list.innerHTML = '';
+    for (let i = 0; i < sortedActive.length; i++) {
+      if (myGen !== _loadInvestTokensGen) return;
+      const addr         = sortedActive[i];
+      const t            = sortedTokens[i];
       const isFeatured   = featuredAddr !== '' ? addr.toLowerCase() === featuredAddr : i === 0;
-      const t            = await contract.getToken(addr);
       const inProgressLabel = inProgressLabels.get(addr.toLowerCase()) || '';
       const isInProgress    = inProgressLabel.length > 0;
       const meta         = getMeta(addr);

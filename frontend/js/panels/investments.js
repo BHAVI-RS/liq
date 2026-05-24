@@ -1,5 +1,20 @@
 
 var _invPollInterval = null;
+var _invStakingFastInterval = null;
+var _invLoadInProgress = false;
+var _invLoadRetries = 0;
+
+function _fmtContractError(e) {
+  const raw = e.errorName || e.reason || e?.error?.message || e.message || '';
+  if (
+    raw.includes('missing revert data') ||
+    raw.includes('Transaction reverted without a reason') ||
+    raw.includes('call exception')
+  ) {
+    return 'Contract call failed — please check your network or try again shortly.';
+  }
+  return raw || 'Unknown error';
+}
 
 var _invLPLocks = [];
 var _invTokenMetaMap = new Map();
@@ -7,6 +22,7 @@ var _invPoolCacheMap = new Map();
 
 function _invStopPoll() {
   if (_invPollInterval) { clearInterval(_invPollInterval); _invPollInterval = null; }
+  if (_invStakingFastInterval) { clearInterval(_invStakingFastInterval); _invStakingFastInterval = null; }
 }
 
 function _invStartPoll() {
@@ -15,7 +31,35 @@ function _invStartPoll() {
     const panel = document.getElementById('panel-investments');
     if (!panel || !panel.classList.contains('active')) { _invStopPoll(); return; }
     loadInvestments();
-  }, 5000);
+  }, 15000);
+}
+
+function _invTickStakingRewards() {
+  // Use fractional seconds so the 7th decimal ticks smoothly between whole seconds
+  const nowFrac = _dashRefNow + (Date.now() / 1000 - _dashWallRef);
+  document.querySelectorAll('#investmentsContent .dash-inv-staking').forEach(el => {
+    const lockedAt          = Number(el.dataset.stakingLockedAt);
+    const lockDurSecs       = Number(el.dataset.lockDurSecs || '60');
+    const rewardTotalEth    = parseFloat(el.dataset.rewardTotalEth || '0');
+    const rewardClaimedEth  = parseFloat(el.dataset.rewardClaimedEth || '0');
+    const priceEth          = parseFloat(el.dataset.priceEth || '0');
+    const tokensAccumulated = parseFloat(el.dataset.tokensAccumulated || '0');
+    const perSecUSDT        = parseFloat(el.dataset.perSecUsdt || '0');
+    if (!lockedAt) return;
+
+    const elapsed       = Math.min(lockDurSecs, Math.max(0, nowFrac - lockedAt));
+    const earnedETH     = lockDurSecs > 0 ? rewardTotalEth * elapsed / lockDurSecs : 0;
+    const pendingETH    = Math.max(0, earnedETH - rewardClaimedEth);
+    const accumulatedUSDT = tokensAccumulated * priceEth * USDT_PER_ETH;
+    const liveUSDT      = pendingETH * USDT_PER_ETH + accumulatedUSDT;
+
+    const rewardText = perSecUSDT > 0 || accumulatedUSDT > 0
+      ? '$' + liveUSDT.toFixed(5) + ' USDT'
+      : '— USDT';
+    el.querySelectorAll('.dis-sl-reward').forEach(rewardEl => {
+      rewardEl.textContent = rewardText;
+    });
+  });
 }
 
 function toggleInvDetails(btn) {
@@ -33,11 +77,14 @@ async function loadInvestments() {
       '<div class="empty-state">Connect wallet to view your investments.</div>';
     return;
   }
+  if (_invLoadInProgress) return;
+  _invLoadInProgress = true;
   _tabLoaded.add('investments');
 
   const el = document.getElementById('investmentsContent');
 
   if (_invCountdownInterval) { clearInterval(_invCountdownInterval); _invCountdownInterval = null; }
+  if (_invStakingFastInterval) { clearInterval(_invStakingFastInterval); _invStakingFastInterval = null; }
   if (el.querySelectorAll('.dash-inv-card[data-lock-index]').length === 0) {
     el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   }
@@ -94,6 +141,8 @@ async function loadInvestments() {
       sessionStorage.setItem('hordex_eff_time', _effTimeStr);
       localStorage.setItem('hordex_eff_time', _effTimeStr);
     } catch(_) {}
+
+    _invLoadRetries = 0;
 
     if (!lpLocks.length) {
       el.innerHTML = '<div class="empty-state">No investments yet. Go to the INVEST tab to get started.</div>';
@@ -216,13 +265,16 @@ async function loadInvestments() {
       // Progress bar: claimed portion + pending (earned but not yet claimed).
       const claimedPct  = rewardTotalETH > 0 ? Math.min(100, rewardClaimedETH / rewardTotalETH * 100) : 0;
       const pendingPct  = rewardTotalETH > 0 ? Math.min(100 - claimedPct, pendingETH / rewardTotalETH * 100) : 0;
-      const initialSlotHtml = `<div class="dis-bar-track">
-        <div class="dis-bar-claimed" style="width:${claimedPct.toFixed(3)}%"></div>
-        <div class="dis-bar-active" style="left:${claimedPct.toFixed(3)}%; width:${pendingPct.toFixed(3)}%"></div>
-      </div>`;
       const initialRewardStr = liveUSDTNow > 0
-        ? '$' + fmtNum(liveUSDTNow) + ' USDT'
+        ? '$' + liveUSDTNow.toFixed(5) + ' USDT'
         : '— USDT';
+      const initialSlotHtml = `<div class="dis-bar-row">
+        <div class="dis-bar-track">
+          <div class="dis-bar-claimed" style="width:${claimedPct.toFixed(3)}%"></div>
+          <div class="dis-bar-active" style="left:${claimedPct.toFixed(3)}%; width:${pendingPct.toFixed(3)}%"></div>
+        </div>
+        <span class="dis-sl-reward dis-sl-reward-mobile">${initialRewardStr}</span>
+      </div>`;
 
       let stakingFooterHtml = '';
       if (canClaimStaking) {
@@ -293,8 +345,8 @@ async function loadInvestments() {
         const dot = cnt >= 3 ? `<span style="color:var(--gold)">●</span>` : cnt > 0 ? `<span style="color:var(--cream)">●</span>` : `<span style="color:var(--muted)">○</span>`;
         return `${dot}&nbsp;${lbl}:${cnt >= 3 ? '<span style="color:var(--gold)">MAX</span>' : cnt}`;
       };
-      const _sRow1 = [[0,'7s'],[1,'30s'],[2,'60s']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
-      const _sRow2 = [[3,'90s'],[4,'180s'],[5,'360s']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
+      const _sRow1 = [[0,'7d'],[1,'30d'],[2,'60d']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
+      const _sRow2 = [[3,'90d'],[4,'180d'],[5,'360d']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
       const streakLabel = `<div class="inv-streak-wrap"><span>${_sRow1}</span><span>${_sRow2}</span></div>`;
 
       cards.push(`
@@ -385,8 +437,29 @@ async function loadInvestments() {
     if (hasCountdowns || hasActiveStaking) {
       _invCountdownInterval = setInterval(_dashTickCountdowns, 1000);
     }
+    if (hasActiveStaking) {
+      _invStakingFastInterval = setInterval(_invTickStakingRewards, 100);
+    }
   } catch(e) {
-    el.innerHTML = `<div class="empty-state">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+    const hasCards = el.querySelectorAll('.dash-inv-card[data-lock-index]').length > 0;
+    if (!hasCards && _invLoadRetries < 2) {
+      // Transient network failure on first load — retry silently before showing an error
+      _invLoadRetries++;
+      el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+      setTimeout(() => loadInvestments(), 2500);
+    } else if (!hasCards) {
+      // Exhausted retries — show error with manual retry button
+      _invLoadRetries = 0;
+      el.innerHTML = `<div class="empty-state" style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <span style="color:#f87171;">${_fmtContractError(e)}</span>
+        <button onclick="loadInvestments()" style="background:transparent;border:1px solid rgba(255,255,255,0.2);color:var(--muted);border-radius:4px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:6px 16px;cursor:pointer;">RETRY</button>
+      </div>`;
+    } else {
+      // Cards already visible — keep them, no toast needed
+      _invLoadRetries = 0;
+    }
+  } finally {
+    _invLoadInProgress = false;
   }
 }
 
@@ -398,7 +471,7 @@ async function claimLP(lockIndex) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.claimLP(lockIndex, _GAS);
+    const tx = await contract.connect(signer).claimLP(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -408,7 +481,7 @@ async function claimLP(lockIndex) {
   } catch(e) {
     _txDone();
     if (btn) { btn.disabled = false; btn.textContent = 'CLAIM LP TOKENS'; }
-    toast('Claim failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    toast('Claim failed: ' + _fmtContractError(e), 'error');
   }
 }
 
@@ -519,7 +592,7 @@ async function _execRemoveLP(lockIndex, tokenAddr, lpAmountHex) {
     await approveTx.wait();
 
     toast('Step 2/2 — Confirm Remove LP in MetaMask…', 'info');
-    const tx = await contract.removeLP(lockIndex, _GAS);
+    const tx = await contract.connect(signer).removeLP(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -530,7 +603,7 @@ async function _execRemoveLP(lockIndex, tokenAddr, lpAmountHex) {
   } catch(e) {
     _txDone();
     if (btn) { btn.disabled = false; btn.textContent = 'REMOVE LP'; }
-    toast('Remove LP failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    toast('Remove LP failed: ' + _fmtContractError(e), 'error');
   }
 }
 
@@ -540,7 +613,7 @@ async function _execRemoveLPDirect(lockIndex) {
   _txBegin();
   try {
     toast('Confirm Remove LP in MetaMask…', 'info');
-    const tx = await contract.removeLPDirect(lockIndex, _GAS);
+    const tx = await contract.connect(signer).removeLPDirect(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -551,7 +624,7 @@ async function _execRemoveLPDirect(lockIndex) {
   } catch(e) {
     _txDone();
     if (btn) { btn.disabled = false; btn.textContent = 'REMOVE LP'; }
-    toast('Remove LP failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    toast('Remove LP failed: ' + _fmtContractError(e), 'error');
   }
 }
 
@@ -572,9 +645,9 @@ async function openStakeModal(lockIndex) {
 
   // Per-duration restake counts and the current lock's own duration
   let restakeCounts = [0,0,0,0,0,0];
-  let lockDurSecs   = 90; // default to 90s if not stored
+  let lockDurDays   = 90; // default to 90 days if not stored
   try { if (card && card.dataset.restakeCounts) restakeCounts = JSON.parse(card.dataset.restakeCounts); } catch(_) {}
-  try { if (card && card.dataset.lockDurSecs)   lockDurSecs   = Number(card.dataset.lockDurSecs); } catch(_) {}
+  try { if (card && card.dataset.lockDurSecs)   lockDurDays   = Math.round(Number(card.dataset.lockDurSecs) / 86400); } catch(_) {}
 
   // Reset buttons to loading state
   document.querySelectorAll('.stake-day-btn').forEach(b => {
@@ -607,7 +680,7 @@ async function openStakeModal(lockIndex) {
 
       // Streak bonus only applies when continuing the SAME duration as the current lock,
       // AND only when a base reward rate exists (packages below $100 earn no staking reward).
-      const isSameDur   = secs === lockDurSecs;
+      const isSameDur   = secs === lockDurDays;
       const baseRatePPM = Number(ratesPPM[cIdx]);
       let streakBonusPPM = 0;
       let streakLabel    = 'BASE';
@@ -638,9 +711,9 @@ function selectStakeDays(days) {
   document.querySelectorAll('.stake-day-btn').forEach(b =>
     b.classList.toggle('selected', Number(b.dataset.days) === days)
   );
-  const unlockDate = new Date(Date.now() + days * 1000);
+  const unlockDate = new Date(Date.now() + days * 86400 * 1000);
   document.getElementById('stakeUnlockInfo').innerHTML =
-    `Unlocks: <span>${unlockDate.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</span>`;
+    `Unlocks: <span>${unlockDate.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' })}</span>`;
   document.getElementById('stakeConfirmBtn').disabled = false;
 }
 
@@ -660,28 +733,86 @@ async function confirmRestake() {
 
   _txBegin();
   try {
-    toast(`Confirm stake for ${days} seconds in MetaMask…`, 'info');
-    const tx = await contract.restakeLP(lockIndex, days, _GAS);
+    toast(`Confirm stake for ${days} days in MetaMask…`, 'info');
+    const tx = await contract.connect(signer).restakeLP(lockIndex, days, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
-    toast(`LP staked for ${days} seconds! Timer restarted.`, 'success');
+    toast(`LP staked for ${days} days! Timer restarted.`, 'success');
     invalidateTabs('dashboard', 'investments');
     loadInvestments();
   } catch(e) {
     _txDone();
-    toast('Stake failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    toast('Stake failed: ' + _fmtContractError(e), 'error');
   }
+}
+
+function _confirmLowClaimValue(usdAmount) {
+  return new Promise(resolve => {
+    const existing = document.getElementById('lowClaimWarnModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'lowClaimWarnModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;pointer-events:all;';
+    modal.innerHTML = `
+      <div style="background:var(--panel);border:1px solid rgba(234,179,8,0.45);border-radius:12px;max-width:380px;width:92%;padding:28px;box-shadow:0 0 32px rgba(234,179,8,0.12);" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <span style="font-size:22px;line-height:1;">⚠</span>
+          <span style="font-family:var(--font-display);font-size:16px;letter-spacing:2px;color:#eab308;">LOW REWARD VALUE</span>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--cream);line-height:1.7;margin-bottom:8px;">
+          Claimable reward is only <span style="color:#eab308;">$${usdAmount.toFixed(5)}</span> — less than $1.
+        </div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:22px;">
+          Gas fee is the same regardless of how much you claim. Consider waiting for rewards to accumulate further.
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="lowClaimCancel" style="background:transparent;border:1px solid rgba(255,255,255,0.15);color:var(--muted);border-radius:5px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;padding:9px 18px;cursor:pointer;">CANCEL</button>
+          <button id="lowClaimConfirm" style="background:rgba(234,179,8,0.15);border:1px solid rgba(234,179,8,0.5);color:#eab308;border-radius:5px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;padding:9px 18px;cursor:pointer;">CLAIM ANYWAY</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+
+    const cleanup = (result) => { modal.remove(); resolve(result); };
+    document.getElementById('lowClaimCancel').onclick  = () => cleanup(false);
+    document.getElementById('lowClaimConfirm').onclick = () => cleanup(true);
+    modal.onclick = (e) => { if (e.target === modal) cleanup(false); };
+  });
 }
 
 async function claimStakingRewardForLock(lockIndex) {
   if (!requireConnected()) return;
+
+  const stakingEl = document.querySelector(`.dash-inv-staking[data-inv-index="${lockIndex}"]`);
+  if (stakingEl) {
+    const nowSec           = _dashRefNow + Math.floor(Date.now() / 1000 - _dashWallRef);
+    const lockedAt         = Number(stakingEl.dataset.stakingLockedAt || '0');
+    const lockDurSecs      = Number(stakingEl.dataset.lockDurSecs || '60');
+    const rewardTotalEth   = parseFloat(stakingEl.dataset.rewardTotalEth || '0');
+    const rewardClaimedEth = parseFloat(stakingEl.dataset.rewardClaimedEth || '0');
+    const priceEth         = parseFloat(stakingEl.dataset.priceEth || '0');
+    const tokensAccumulated = parseFloat(stakingEl.dataset.tokensAccumulated || '0');
+
+    const elapsed      = Math.min(lockDurSecs, Math.max(0, nowSec - lockedAt));
+    const earnedETH    = lockDurSecs > 0 ? rewardTotalEth * elapsed / lockDurSecs : 0;
+    const pendingETH   = Math.max(0, earnedETH - rewardClaimedEth);
+    const claimTokens  = (priceEth > 0 ? pendingETH / priceEth : 0) + tokensAccumulated;
+    const claimableUSD = claimTokens * priceEth * USDT_PER_ETH;
+
+    if (claimableUSD > 0 && claimableUSD < 1) {
+      const proceed = await _confirmLowClaimValue(claimableUSD);
+      if (!proceed) return;
+    }
+  }
+
   const btn = document.getElementById('claimStakingBtn-' + lockIndex);
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
   _txBegin();
   try {
     toast('Confirm staking reward claim in MetaMask…', 'info');
-    const tx = await contract.claimStakingRewardForLock(lockIndex, _GAS);
+    const tx = await contract.connect(signer).claimStakingRewardForLock(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
@@ -691,7 +822,7 @@ async function claimStakingRewardForLock(lockIndex) {
   } catch(e) {
     _txDone();
     if (btn) { btn.disabled = false; btn.textContent = 'CLAIM REWARDS'; }
-    toast('Claim failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    toast('Claim failed: ' + _fmtContractError(e), 'error');
   }
 }
 
@@ -870,7 +1001,7 @@ async function showLockHistory(lockIndex) {
     </div>`;
 
   } catch(e) {
-    if (body) body.innerHTML = `<div style="color:#f87171;padding:16px 0;">${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+    if (body) body.innerHTML = `<div style="color:#f87171;padding:16px 0;">${_fmtContractError(e)}</div>`;
   }
 }
 

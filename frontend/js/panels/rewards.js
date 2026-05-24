@@ -58,7 +58,8 @@ function _rwComputeLiveUsdt(now) {
     const claimableTokens = (priceEth > 0 ? pendingEth / priceEth : 0) + tokensAcc;
     const claimedPct  = rwEth > 0 ? Math.min(100, claimedEth / rwEth * 100) : 0;
     const pendingPct  = rwEth > 0 ? Math.min(100 - claimedPct, pendingEth / rwEth * 100) : 0;
-    const elapsedPct  = dur  > 0 ? (elapsed / dur * 100).toFixed(1) : '0.0';
+    const _ePctNum    = dur  > 0 ? elapsed / dur * 100 : 0;
+    const elapsedPct  = _ePctNum >= 100 ? '100' : _ePctNum.toFixed(5);
     if (isActive) anyActive = true;
     live    += lockLive;
     pending += lockPending;
@@ -335,6 +336,8 @@ async function _rwAppendCommission(ev, from, amount, level) {
 
 // ─── loadRewards ──────────────────────────────────────────────────────────────
 
+let _rwLoadTime = 0;
+
 async function loadRewards() {
   if (!contract || !walletAddress) {
     ['rwRefContent','rwStakingContent','rwLPFeesContent'].forEach(id => {
@@ -343,6 +346,9 @@ async function loadRewards() {
     });
     return;
   }
+  const _now = Date.now();
+  if (_now - _rwLoadTime < 3000) return;
+  _rwLoadTime = _now;
   _tabLoaded.add('rewards');
   loadRwReferral();
   loadRwStaking();
@@ -538,7 +544,7 @@ async function loadRwStaking(silent = false) {
         ? `full period earned`
         : isPeriodComplete
           ? `<span id="rwLockPct-${i}" style="color:var(--gold);">100% · period complete</span>`
-          : `<span id="rwLockPct-${i}">${fmtNum(elapsed / lockDurSecs * 100, 1)}% of period</span>`;
+          : `<span id="rwLockPct-${i}">${((_p => _p >= 100 ? '100' : _p.toFixed(5))(elapsed / lockDurSecs * 100))}% of period</span>`;
       const claimedCell   = totalClaimed > 0 ? `<span style="color:#4ade80;">✓ ${fmtNum(totalClaimed)} ${tokenSym} claimed</span>` : '';
       const statusCell    = isRemoved
         ? `<span style="color:var(--muted);">LP REMOVED</span>`
@@ -622,11 +628,23 @@ async function loadRwStaking(silent = false) {
 }
 
 async function claimStakingReward() {
+  // Warn if the claimable value is less than $1 — gas cost likely exceeds the reward.
+  if (_rwStakingLocks.length) {
+    const _now = _rwStakingBaseTime + (Math.floor(Date.now() / 1000) - _rwStakingWallBase);
+    const { pending: _claimableUSDT } = _rwComputeLiveUsdt(_now);
+    if (_claimableUSDT < 1) {
+      const ok = window.confirm(
+        `Your claimable staking reward is $${_claimableUSDT.toFixed(6)} USDT — less than $1.\n` +
+        `Gas fees may exceed this amount.\n\nClaim anyway?`
+      );
+      if (!ok) return;
+    }
+  }
   const btn = document.getElementById('claimStakingBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
   try {
     toast('Confirm staking claim in MetaMask…', 'info');
-    const tx = await contract.claimStakingReward(_GAS);
+    const tx = await contract.connect(signer).claimStakingReward(_GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     toast('Staking rewards claimed!', 'success');

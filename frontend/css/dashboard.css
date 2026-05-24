@@ -223,6 +223,17 @@
   background: var(--gold);
   transition: left 0.9s linear, width 0.9s linear;
 }
+.dis-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dis-bar-row .dis-bar-track {
+  flex: 1;
+}
+.dis-sl-reward-mobile {
+  display: none;
+}
 
 @keyframes rewardSmoke {
   0%   { opacity: 0.35; filter: blur(4px); transform: translateY(-4px); }
@@ -347,8 +358,15 @@
   .dis-col-action .dis-label { margin-bottom: 0; white-space: nowrap; }
   .dis-timer-val { font-size: 15px; }
 
-  /* Staking section: hide label text and reward amount above button */
-  .dis-sl-label, .dis-sl-reward { display: none; }
+  /* Staking section: hide label and header reward; show reward inline next to bar */
+  .dis-sl-label { display: none; }
+  .dis-staking-header .dis-sl-reward { display: none; }
+  .dis-sl-reward-mobile {
+    display: inline;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .dis-bar-track { height: 4px; }
 
   /* Ref cap: hide used/total detail, show only remaining */
   .refcap-detail { display: none; }

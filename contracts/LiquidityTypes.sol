@@ -85,10 +85,12 @@ struct CommissionRecord {
 
 // On-chain invest record for frontend history tab.
 struct InvestRecord {
-    address token;    // slot 0: 160 bits
-    uint64  ts;       //         +64  = 224 bits
-    uint128 ethAmount;// slot 1: 128 bits
-    uint128 lpTokens; //         +128 = 256 bits
+    address token;         // slot 0: 160 bits
+    uint64  ts;            //         +64  = 224 bits
+    uint128 ethAmount;     // slot 1: 128 bits
+    uint128 lpTokens;      //         +128 = 256 bits
+    uint128 poolBuyTokens; // slot 2: tokens bought from pool (A60 swap leg)
+    uint128 totalTokens;   //         +128 = 256 bits  (poolBuyTokens + platform supply → sent to addLiquidityETH)
 }
 
 // On-chain staking claim record for frontend history tab.
@@ -105,4 +107,14 @@ struct LPEventRecord {
     bool    isClaim;    //         +8   = 232 bits
     uint128 lpAmount;   // slot 1: 128 bits
     uint128 ethReturned;//         +128 = 256 bits
+}
+
+// Compact per-referral info for the dashboard's Direct Referral Performance section.
+// Returned by getDirectRefsInfo() to replace N×3 individual RPC calls with one batch call.
+struct DirectRefInfo {
+    address addr;
+    uint256 totalInvested;
+    uint256 directRefCount;
+    uint256 remainingCap;   // activeCap: cap from locks still within unlock window
+    uint256 totalCap;       // activeCap + pausedCap
 }

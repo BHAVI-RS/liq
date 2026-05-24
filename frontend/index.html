@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1779552407259"></script>
+  <script src="contract-config.js?v=1779625549648"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -72,8 +72,8 @@
           <div class="landing-stat-label">Total Users</div>
         </div>
         <div class="landing-stat">
-          <div class="landing-stat-val" id="ls-active-users">—</div>
-          <div class="landing-stat-label">Active Investors</div>
+          <div class="landing-stat-val" id="ls-wealth-built">—</div>
+          <div class="landing-stat-label">Wealth Built</div>
         </div>
         <div class="landing-stat">
           <div class="landing-stat-val" id="ls-total-funding">—</div>
@@ -144,7 +144,9 @@
       <!-- ── Brochures & Links section ── -->
       <section class="landing-section" id="landing-brochures">
         <div class="landing-section-label">Brochures &amp; Links</div>
-        <p style="color:var(--muted);font-style:italic;">Platform documents and resource links will be published here.</p>
+        <div id="bro-grid" class="bro-grid">
+          <div class="bro-loading">Loading…</div>
+        </div>
       </section>
 
       <!-- ── How Does It Work section ── -->
@@ -467,7 +469,7 @@
     </div>
 
     <div id="dashLoadingState">
-      <div class="empty-state" style="margin-top:20px;">Connect wallet to load your dashboard.</div>
+      <div class="empty-state" style="margin-top:20px;">Loading<span class="ld"><span></span><span></span><span></span></span></div>
     </div>
 
   </div>
@@ -574,6 +576,7 @@
             <div id="poolHeaderPrice" class="pool-header-price" style="color:var(--muted);">—</div>
             <div id="poolHeaderChange" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:2px;transition:color .4s;">—</div>
           </div>
+          <button id="poolUpdateTwapBtn" onclick="poolUpdateTWAP()" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">UPDATE TWAP</button>
           <button onclick="loadPoolInfo(window._poolSelectedToken)" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">↻</button>
         </div>
       </div>
@@ -766,17 +769,6 @@
       </div>
       <div id="ownerStatsContent">
         <div class="empty-state">Loading platform stats…</div>
-      </div>
-    </div>
-
-    <!-- Token Approval Status Card -->
-    <div class="card" id="ownerApprovalCard">
-      <div class="card-title">TOKEN APPROVAL STATUS</div>
-      <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:14px;line-height:1.6;">
-        Remaining staking allowance you have approved for the contract. If low, approve more tokens to avoid failed reward claims.
-      </div>
-      <div id="ownerApprovalContent">
-        <div class="empty-state">Loading allowance status…</div>
       </div>
     </div>
 
@@ -1115,12 +1107,12 @@
     <div class="stake-modal-title">STAKE LP</div>
     <div class="stake-modal-sub">SELECT LOCK DURATION</div>
     <div class="stake-days-grid">
-      <button class="stake-day-btn" data-days="7"   onclick="selectStakeDays(7)"><span class="sdb-num">7</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
-      <button class="stake-day-btn" data-days="30"  onclick="selectStakeDays(30)"><span class="sdb-num">30</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
-      <button class="stake-day-btn" data-days="60"  onclick="selectStakeDays(60)"><span class="sdb-num">60</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
-      <button class="stake-day-btn" data-days="90"  onclick="selectStakeDays(90)"><span class="sdb-num">90</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
-      <button class="stake-day-btn" data-days="180" onclick="selectStakeDays(180)"><span class="sdb-num">180</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
-      <button class="stake-day-btn" data-days="360" onclick="selectStakeDays(360)"><span class="sdb-num">360</span><span class="sdb-lbl">SECS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="7"   onclick="selectStakeDays(7)"><span class="sdb-num">7</span><span class="sdb-lbl">DAYS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="30"  onclick="selectStakeDays(30)"><span class="sdb-num">30</span><span class="sdb-lbl">DAYS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="60"  onclick="selectStakeDays(60)"><span class="sdb-num">60</span><span class="sdb-lbl">DAYS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="90"  onclick="selectStakeDays(90)"><span class="sdb-num">90</span><span class="sdb-lbl">DAYS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="180" onclick="selectStakeDays(180)"><span class="sdb-num">180</span><span class="sdb-lbl">DAYS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
+      <button class="stake-day-btn" data-days="360" onclick="selectStakeDays(360)"><span class="sdb-num">360</span><span class="sdb-lbl">DAYS</span><span class="sdb-streak"></span><span class="sdb-reward"></span><span class="sdb-pct"></span></button>
     </div>
     <div class="stake-unlock-info" id="stakeUnlockInfo">&nbsp;</div>
     <div id="stakeStreakInfo" style="display:none;margin:0 0 10px;padding:7px 12px;border-radius:5px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.25);font-family:var(--font-mono);font-size:11px;letter-spacing:.8px;color:var(--gold);text-align:center;"></div>

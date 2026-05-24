@@ -48,7 +48,16 @@ window._poolUserTokenBal  = 0;   // user's token balance for hybrid buy logic
 window._poolMode          = 'buy'; // current buy/sell tab — controls trade history order
 window._poolTradeBuys     = [];  // last-fetched buy trades (most-recent first)
 window._poolTradeSells    = [];  // last-fetched sell trades (most-recent first)
-window._poolSessionTrades = [];  // direct swap trades this session, merged with chain history
+window._poolSessionTrades = [];  // direct swap trades (persisted in localStorage), merged with chain history
+
+function _loadLocalSwaps(tokenAddr) {
+  try { return JSON.parse(localStorage.getItem('hordex_swaps_' + tokenAddr.toLowerCase()) || '[]'); }
+  catch(_) { return []; }
+}
+function _saveLocalSwaps(tokenAddr, trades) {
+  try { localStorage.setItem('hordex_swaps_' + tokenAddr.toLowerCase(), JSON.stringify(trades.slice(0, 30))); }
+  catch(_) {}
+}
 
 let _poolRefreshCount = 0;
 
@@ -274,7 +283,7 @@ async function loadPoolPanel() {
 async function loadPoolInfo(tokenAddr) {
   if (!requireConnected()) return;
   _stopPoolPolling();
-  if (window._poolSelectedToken !== tokenAddr) window._poolSessionTrades = [];
+  if (window._poolSelectedToken !== tokenAddr) window._poolSessionTrades = _loadLocalSwaps(tokenAddr);
   window._poolSelectedToken  = tokenAddr;
   window._poolLastPrice      = 0;
   window._poolCurPrice       = 0;
@@ -635,6 +644,7 @@ async function poolBuyTokens() {
         const usdtAmt = ethToUSDT(ethAmt);
         const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
         window._poolSessionTrades.unshift({ isBuy: true, tokenAmt: tokAmt, usdtAmt, price });
+        _saveLocalSwaps(window._poolSelectedToken, window._poolSessionTrades);
         break;
       }
     } catch(_) {}
@@ -698,6 +708,7 @@ async function poolSellTokens() {
         const usdtAmt = ethToUSDT(ethAmt);
         const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
         window._poolSessionTrades.unshift({ isBuy: false, tokenAmt: tokAmt, usdtAmt, price });
+        _saveLocalSwaps(window._poolSelectedToken, window._poolSessionTrades);
         break;
       }
     } catch(_) {}
@@ -1068,6 +1079,25 @@ function _initChartHover(canvas) {
   });
 }
 
+async function poolUpdateTWAP() {
+  if (!requireConnected()) return;
+  const tokenAddr = window._poolSelectedToken;
+  const btn = document.getElementById('poolUpdateTwapBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'UPDATING…'; }
+  try {
+    toast('Confirm TWAP update in MetaMask…', 'info');
+    const calls = [contract.updateTWAP(_GAS)];
+    if (tokenAddr) calls.push(contract.updateTokenTWAP(tokenAddr, _GAS));
+    const txs = await Promise.all(calls);
+    await Promise.all(txs.map(tx => tx.wait()));
+    toast('TWAP updated successfully!', 'success');
+  } catch(e) {
+    toast('TWAP update failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'UPDATE TWAP'; }
+  }
+}
+
 window.loadPoolPanel     = loadPoolPanel;
 window.loadPoolInfo      = loadPoolInfo;
 window.switchPoolMode    = switchPoolMode;
@@ -1083,3 +1113,4 @@ window.poolBuyTokens     = poolBuyTokens;
 window.poolSellTokens    = poolSellTokens;
 window.switchPriceChart  = switchPriceChart;
 window.togglePoolStats   = togglePoolStats;
+window.poolUpdateTWAP    = poolUpdateTWAP;

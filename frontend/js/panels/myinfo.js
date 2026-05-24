@@ -1,6 +1,5 @@
 async function loadMyInfo() {
   if (!requireConnected()) return;
-  _tabLoaded.add('myinfo');
   try {
     const user      = await contract.users(walletAddress);
     const referrer  = user.referrer;

@@ -72,10 +72,27 @@ const _tabLoaded = new Set();
 
 function invalidateTabs(...names) {
   names.forEach(n => _tabLoaded.delete(n));
+  _evLogCache.clear(); // event logs only change after a confirmed tx
 }
 
 function _resetTabLoaded() {
   _tabLoaded.clear();
+  _evLogCache.clear();
+}
+
+// ── EVENT LOG CACHE ──
+// Caches queryFilterBatched results by wallet + filter name.
+// Cleared by invalidateTabs() (called after every confirmed tx) and on wallet change.
+// 5-min TTL guards against events arriving from other wallets' txs.
+const _evLogCache = new Map();
+
+async function cachedQueryFilter(filter, filterName, fromBlock) {
+  const key = (walletAddress || '').toLowerCase() + ':' + filterName;
+  const hit = _evLogCache.get(key);
+  if (hit && Date.now() - hit.ts < 300_000) return hit.events;
+  const events = await queryFilterBatched(contract, filter, fromBlock, 'latest');
+  _evLogCache.set(key, { events, ts: Date.now() });
+  return events;
 }
 
 // ── ADDRESS COPY HELPER ──

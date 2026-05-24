@@ -87,7 +87,7 @@ async function addToken() {
   _txBegin();
   try {
     toast('Sending transaction...', 'info');
-    const tx = await contract.addToken(addr, name, symbol, _GAS);
+    const tx = await contract.connect(signer).addToken(addr, name, symbol, _GAS);
     await tx.wait();
 
     saveMeta(addr, {
@@ -186,6 +186,11 @@ async function loadTokenBalances() {
             onmouseover="this.style.background='rgba(201,168,76,0.18)'" onmouseout="this.style.background='rgba(201,168,76,0.08)'">
             SET FEATURED
           </button>` : ''}
+          <button onclick="editToken('${addr}')"
+            style="padding:6px 14px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid rgba(99,179,237,0.4);border-radius:4px;background:rgba(99,179,237,0.08);color:#63b3ed;cursor:pointer;transition:all 0.15s;"
+            onmouseover="this.style.background='rgba(99,179,237,0.18)'" onmouseout="this.style.background='rgba(99,179,237,0.08)'">
+            EDIT
+          </button>
           <button onclick="toggleTokenInProgress('${addr}')"
             style="padding:6px 14px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid rgba(234,179,8,0.4);border-radius:4px;background:${isInProgress ? 'rgba(234,179,8,0.18)' : 'rgba(234,179,8,0.08)'};color:#eab308;cursor:pointer;transition:all 0.15s;"
             onmouseover="this.style.background='rgba(234,179,8,0.22)'" onmouseout="this.style.background='${isInProgress ? 'rgba(234,179,8,0.18)' : 'rgba(234,179,8,0.08)'}'">
@@ -196,6 +201,31 @@ async function loadTokenBalances() {
             onmouseover="this.style.background='rgba(224,80,80,0.18)'" onmouseout="this.style.background='rgba(224,80,80,0.08)'">
             DELIST
           </button>
+        </div>
+        <div id="editForm_${addr}" style="display:none;margin-top:12px;padding:14px;background:rgba(99,179,237,0.05);border:1px solid rgba(99,179,237,0.2);border-radius:6px;">
+          <div style="font-size:10px;color:#63b3ed;letter-spacing:.08em;margin-bottom:10px;">EDIT TOKEN DETAILS</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <div>
+              <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">NAME</div>
+              <input id="editName_${addr}" type="text" value="${t.name}"
+                style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--cream);outline:none;"/>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">SYMBOL</div>
+              <input id="editSymbol_${addr}" type="text" value="${t.symbol}"
+                style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--cream);outline:none;"/>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="saveTokenEdit('${addr}')"
+              style="padding:6px 16px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid rgba(99,179,237,0.5);border-radius:4px;background:rgba(99,179,237,0.15);color:#63b3ed;cursor:pointer;">
+              SAVE ON-CHAIN
+            </button>
+            <button onclick="document.getElementById('editForm_${addr}').style.display='none'"
+              style="padding:6px 14px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;">
+              CANCEL
+            </button>
+          </div>
         </div>`;
 
       div.innerHTML = `
@@ -234,7 +264,7 @@ async function setFeaturedToken(addr) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.setFeaturedToken(addr, _GAS);
+    const tx = await contract.connect(signer).setFeaturedToken(addr, _GAS);
     await tx.wait();
     _txDone();
     toast('Featured token updated on-chain.', 'success');
@@ -252,7 +282,7 @@ async function delistToken(addr) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.removeToken(addr, _GAS);
+    const tx = await contract.connect(signer).removeToken(addr, _GAS);
     await tx.wait();
     _txDone();
     toast('Token delisted successfully.', 'success');
@@ -282,7 +312,7 @@ async function toggleTokenInProgress(addr) {
   _txBegin();
   try {
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.setTokenInProgress(addr, label, _GAS);
+    const tx = await contract.connect(signer).setTokenInProgress(addr, label, _GAS);
     await tx.wait();
     _txDone();
     toast(label ? `Tag "${label}" set on token.` : 'Tag cleared.', 'success');
@@ -297,67 +327,33 @@ async function toggleTokenInProgress(addr) {
 async function loadOwnerStats() {
   if (!requireConnected()) return;
 
-  const statsEl    = document.getElementById('ownerStatsContent');
-  const approvalEl = document.getElementById('ownerApprovalContent');
-  statsEl.innerHTML    = '<div class="empty-state">Loading…</div>';
-  approvalEl.innerHTML = '<div class="empty-state">Loading…</div>';
+  const statsEl = document.getElementById('ownerStatsContent');
+  statsEl.innerHTML = '<div class="empty-state">Loading…</div>';
 
   try {
-    const ownerAddr = await contract.owner();
-
-    const userFilter = contract.filters.UserRegistered();
-    const userEvents = await contract.queryFilter(userFilter);
-    const uniqueUsers = new Set(userEvents.map(e => e.args.user.toLowerCase()));
-    const totalUsers  = uniqueUsers.size;
-
-    const invFilter = contract.filters.Invested();
-    const invEvents = await contract.queryFilter(invFilter);
-    let totalInvestedWei = ethers.BigNumber.from(0);
-    for (const ev of invEvents) totalInvestedWei = totalInvestedWei.add(ev.args.ethAmount);
+    const [totalUsersBN, totalInvestedWei] = await contract.getPlatformStats();
+    const totalUsers        = totalUsersBN.toNumber();
     const totalInvestedETH  = parseFloat(ethers.utils.formatEther(totalInvestedWei));
     const totalInvestedUSDT = totalInvestedETH * 1000;
 
     const tokenAddrs = await contract.getRegisteredTokens();
     let totalPoolUSDT = 0;
-    const poolRows   = [];
-    const tokenInfos = [];
+    const poolRows = [];
 
     await Promise.all(tokenAddrs.map(async addr => {
       try {
         const t    = await contract.getToken(addr);
         const pool = await _dashGetPoolPrice(addr);
-        const poolUSDT = pool ? pool.resETH * 2 * 1000 : 0;
-        totalPoolUSDT += poolUSDT;
-        poolRows.push({ symbol: t.symbol, addr, poolUSDT, hasPool: !!pool });
-        tokenInfos.push({ symbol: t.symbol, addr });
+        const usdtSide  = pool ? pool.resETH   * 1000 : 0;
+        const tokenSide = pool ? pool.resToken         : 0;
+        totalPoolUSDT  += pool ? pool.resETH * 2 * 1000 : 0;
+        poolRows.push({ symbol: t.symbol, addr, usdtSide, tokenSide, hasPool: !!pool });
       } catch(_) {
-        poolRows.push({ symbol: addr, addr, poolUSDT: 0, hasPool: false });
-        tokenInfos.push({ symbol: addr, addr });
+        poolRows.push({ symbol: addr, addr, usdtSide: 0, tokenSide: 0, hasPool: false });
       }
     }));
 
-    const SHORTAGE_THRESHOLD = 100;
-    const shortageTokens = [];
-    const allowanceRows  = [];
-
-    await Promise.all(tokenInfos.map(async ({ symbol, addr }) => {
-      try {
-        const erc20 = new ethers.Contract(addr, [
-          'function allowance(address,address) view returns (uint256)',
-          'function decimals() view returns (uint8)'
-        ], provider);
-        const [rawAllow, dec] = await Promise.all([
-          erc20.allowance(ownerAddr, CONTRACT_ADDRESS),
-          erc20.decimals().catch(() => 18)
-        ]);
-        const allowFloat = parseFloat(ethers.utils.formatUnits(rawAllow, dec));
-        const isShort    = allowFloat < SHORTAGE_THRESHOLD;
-        if (isShort) shortageTokens.push({ symbol, addr, allowFloat });
-        allowanceRows.push({ symbol, addr, allowFloat, dec, isShort });
-      } catch(_) {
-        allowanceRows.push({ symbol, addr, allowFloat: null, isShort: false });
-      }
-    }));
+    const totalUSDTSide  = poolRows.reduce((s, r) => s + r.usdtSide,  0);
 
     statsEl.innerHTML = `
       <div class="info-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:12px;">
@@ -370,60 +366,47 @@ async function loadOwnerStats() {
           <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalInvestedUSDT)}</div>
         </div>
         <div class="info-cell">
-          <div class="info-cell-label">POOL LIQUIDITY (USDT)</div>
-          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalPoolUSDT)}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px;">${tokenAddrs.length} pool${tokenAddrs.length!==1?'s':''}</div>
+          <div class="info-cell-label">USDT IN POOLS</div>
+          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalUSDTSide)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px;">${tokenAddrs.length} pool${tokenAddrs.length!==1?'s':''} · ETH side only</div>
         </div>
         <div class="info-cell">
-          <div class="info-cell-label">TOKENS IN SHORTAGE</div>
-          <div class="info-cell-value" style="color:${shortageTokens.length>0?'var(--danger)':'var(--success)'};font-size:22px;">${shortageTokens.length}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px;">${shortageTokens.length>0?'<span style="color:var(--danger);">↓ See below</span>':'All OK'}</div>
+          <div class="info-cell-label">TOTAL POOL VALUE</div>
+          <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalPoolUSDT)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px;">both sides combined</div>
         </div>
       </div>
-      ${poolRows.length ? `
       <div style="margin-top:20px;">
-        <div class="section-header" style="margin-bottom:10px;">POOL BREAKDOWN</div>
+        <div class="section-header" style="margin-bottom:10px;">ALL POOLS</div>
         <div style="display:flex;flex-direction:column;gap:6px;">
-          ${poolRows.map(r => `
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg);border-radius:4px;border:1px solid var(--border);">
-              <div style="font-size:12px;font-family:var(--font-mono);color:var(--text);">
-                <span style="color:var(--gold);letter-spacing:1px;">${r.symbol}</span>
-                <span style="color:var(--muted);font-size:10px;margin-left:8px;word-break:break-all;">${r.addr}</span>
-              </div>
-              <div style="text-align:right;">
-                ${r.hasPool
-                  ? `<div style="font-size:13px;color:var(--cream);">$${fmtNum(r.poolUSDT)}</div>`
-                  : `<div style="font-size:11px;color:var(--muted);">No pool</div>`
-                }
+          ${poolRows.length ? poolRows.map(r => `
+            <div style="padding:10px 14px;background:var(--bg);border-radius:4px;border:1px solid var(--border);">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                <div style="font-size:12px;font-family:var(--font-mono);">
+                  <span style="color:var(--gold);letter-spacing:1px;">${r.symbol}</span>
+                  <span style="color:var(--muted);font-size:10px;margin-left:8px;word-break:break-all;">${r.addr}</span>
+                </div>
+                ${r.hasPool ? `
+                <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+                  <div style="text-align:right;">
+                    <div style="font-size:10px;color:var(--muted);letter-spacing:.06em;margin-bottom:2px;">TOKEN SIDE</div>
+                    <div style="font-size:13px;color:var(--cream);font-family:var(--font-mono);">${fmtNum(r.tokenSide)} ${r.symbol}</div>
+                  </div>
+                  <div style="width:1px;height:28px;background:var(--border);"></div>
+                  <div style="text-align:right;">
+                    <div style="font-size:10px;color:var(--muted);letter-spacing:.06em;margin-bottom:2px;">USDT SIDE</div>
+                    <div style="font-size:13px;color:var(--cream);font-family:var(--font-mono);">$${fmtNum(r.usdtSide)}</div>
+                  </div>
+                </div>` : `<div style="font-size:11px;color:var(--muted);">No pool</div>`}
               </div>
             </div>
-          `).join('')}
+          `).join('') : '<div class="empty-state">No pools registered.</div>'}
         </div>
-      </div>` : ''}
+      </div>
     `;
 
-    approvalEl.innerHTML = allowanceRows.length ? `
-      <div style="display:flex;flex-direction:column;gap:6px;">
-        ${allowanceRows.map(r => `
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg);border-radius:4px;border:1px solid ${r.isShort?'rgba(224,80,80,0.3)':'var(--border)'};">
-            <div>
-              <span style="color:var(--gold);font-size:12px;letter-spacing:1px;">${r.symbol}</span>
-              <span style="color:var(--muted);font-size:10px;margin-left:8px;">${r.addr.slice(0,10)}…</span>
-            </div>
-            <div style="text-align:right;">
-              ${r.allowFloat === null
-                ? `<span style="font-size:11px;color:var(--muted);">Unable to read</span>`
-                : `<span style="font-size:13px;color:${r.isShort?'var(--danger)':'var(--success)'};">${r.isShort?'⚠ ':''} ${fmtNum(r.allowFloat)} tokens</span>`
-              }
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    ` : '<div class="empty-state">No tokens registered.</div>';
-
   } catch(e) {
-    statsEl.innerHTML    = `<div style="color:var(--danger);font-size:12px;">Error loading stats: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
-    approvalEl.innerHTML = `<div style="color:var(--danger);font-size:12px;">Error loading allowances.</div>`;
+    statsEl.innerHTML = `<div style="color:var(--danger);font-size:12px;">Error loading stats: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
   }
 }
 
@@ -585,7 +568,7 @@ async function ownerAddLiquidity() {
     }
 
     toast('Confirm in MetaMask — sending ETH to seed the pool…', 'info');
-    await (await contract.seedPool(addr, tokenWei, { value: ethWei, ..._GAS })).wait();
+    await (await contract.connect(signer).seedPool(addr, tokenWei, { value: ethWei, ..._GAS })).wait();
 
     toast('Liquidity added successfully!', 'success');
     document.getElementById('ownerLiqUSDT').value          = '';
@@ -777,7 +760,7 @@ async function ownerWithdrawETH() {
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
     toast('Confirm in MetaMask…', 'info');
-    const tx = await contract.withdrawETH(amtWei, _GAS);
+    const tx = await contract.connect(signer).withdrawETH(amtWei, _GAS);
     await tx.wait();
     toast('ETH withdrawn successfully.', 'success');
     document.getElementById('ownerWithdrawETHAmt').value = '';
@@ -801,7 +784,7 @@ async function ownerWithdrawToken() {
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
     toast('Confirm in MetaMask…', 'info');
-    const tx = await contract.withdrawToken(addr, amtWei, _GAS);
+    const tx = await contract.connect(signer).withdrawToken(addr, amtWei, _GAS);
     await tx.wait();
     toast(`${_ownerWithdrawTokenSym} withdrawn successfully.`, 'success');
     document.getElementById('ownerWithdrawTokenAmt').value = '';
@@ -813,7 +796,35 @@ async function ownerWithdrawToken() {
   }
 }
 
+function editToken(addr) {
+  const form = document.getElementById('editForm_' + addr);
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveTokenEdit(addr) {
+  if (!requireConnected()) return;
+  const name   = document.getElementById('editName_'   + addr).value.trim();
+  const symbol = document.getElementById('editSymbol_' + addr).value.trim();
+  if (!name || !symbol) { toast('Name and symbol cannot be empty', 'warn'); return; }
+  _txBegin();
+  try {
+    toast('Confirm transaction in MetaMask…', 'info');
+    const tx = await contract.connect(signer).updateToken(addr, name, symbol, _GAS);
+    await tx.wait();
+    _txDone();
+    toast(`Token updated to ${symbol} (${name}).`, 'success');
+    invalidateTabs('invest');
+    loadTokenBalances();
+  } catch(e) {
+    _txDone();
+    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  }
+}
+
 window.setFeaturedToken              = setFeaturedToken;
+window.editToken                     = editToken;
+window.saveTokenEdit                 = saveTokenEdit;
 window.delistToken                   = delistToken;
 window.onLogoChange                  = onLogoChange;
 window.onTokenAddrInput              = onTokenAddrInput;
