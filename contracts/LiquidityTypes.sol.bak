@@ -83,15 +83,6 @@ struct CommissionRecord {
     uint128 amount;   // slot 1: 128 bits
 }
 
-// On-chain missed-commission record — reason: 0=level-ineligible, 1=no-cap, 2=cap-overflow.
-struct MissedRecord {
-    address from;     // slot 0: 160 bits
-    uint64  ts;       //         +64  = 224 bits
-    uint8   level;    //         +8   = 232 bits
-    uint8   reason;   //         +8   = 240 bits
-    uint128 amount;   // slot 1: 128 bits
-}
-
 // On-chain invest record for frontend history tab.
 struct InvestRecord {
     address token;         // slot 0: 160 bits
@@ -118,22 +109,6 @@ struct LPEventRecord {
     uint128 ethReturned;//         +128 = 256 bits
 }
 
-// ROI commission stream — one per level per LP lock.
-struct ROIStream {
-    address recipient;       // who is currently accumulating this stream
-    uint64  recipientSince;  // timestamp when current recipient started
-    bool    ended;           // true once the underlying lock is removed
-    uint128 roiPaidETH;      // cumulative ETH-equiv settled to ALL past recipients
-    uint128 capETH;          // absolute ceiling = ethInvested * commissionRate / 10_000
-}
-
-// Pointer stored in _activeROIStreams / _skippedROIStreams per address.
-struct StreamRef {
-    address investor;
-    uint64  lockIndex;
-    uint8   level;
-}
-
 // Compact per-referral info for the dashboard's Direct Referral Performance section.
 // Returned by getDirectRefsInfo() to replace N×3 individual RPC calls with one batch call.
 struct DirectRefInfo {
@@ -142,4 +117,22 @@ struct DirectRefInfo {
     uint256 directRefCount;
     uint256 remainingCap;   // activeCap: cap from locks still within unlock window
     uint256 totalCap;       // activeCap + pausedCap
+}
+
+// Per-level ROI commission stream for a single investor lock.
+// Tracks which referrer is currently accumulating, how much has been settled to past
+// recipients, and the 5× cap (= ethInvested × referralCommissionRates[level] / 10_000).
+struct ROIStream {
+    address recipient;      // current accumulating referrer (address(0) = nobody)
+    uint64  recipientSince; // timestamp when current recipient started
+    bool    ended;          // true after lock is removed / restaked
+    uint128 roiPaidETH;     // ETH-equiv settled to ALL past recipients (running total)
+    uint128 capETH;         // max total ROI for this stream across all recipients
+}
+
+// Compact reference used in per-referrer active/skipped lists.
+struct StreamRef {
+    address investor;
+    uint64  lockIndex;
+    uint8   level;
 }

@@ -3,8 +3,10 @@
 //
 // What it does:
 //   Phase 1 — Withdraw MATIC and tokens held inside the Liquidity contract
-//   Phase 2 — Sweep LP tokens held inside the Liquidity contract (invested positions)
-//   Phase 3 — Remove all LP from Uniswap pools (seed LP in deployer wallet + swept LP)
+//   Phase 2 — Remove seed LP from Uniswap pools (only LP in deployer wallet from seedPool)
+//
+// NOTE: User-invested LP tokens are locked in the contract and cannot be swept — only
+//       each user can claim/remove their own LP after the 90-day lock period expires.
 //
 // RUN:
 //   npx hardhat run scripts/amoytestnet/removeliquidity.js --network polygonAmoy
@@ -142,10 +144,10 @@ async function main() {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // PHASE 2 — Sweep LP tokens from Liquidity contract
+  // PHASE 2 — Remove seed LP from Uniswap pools
   // ─────────────────────────────────────────────────────────────
   console.log("\n" + sep());
-  console.log("  PHASE 2 — Sweep LP tokens from Liquidity contract");
+  console.log("  PHASE 2 — Remove seed LP from Uniswap pools (deployer wallet only)");
   console.log(sep());
 
   const pairAddresses = [];
@@ -155,27 +157,10 @@ async function main() {
     if (pairAddr === hre.ethers.ZeroAddress) {
       console.log(`  ${t.name}: no Uniswap pair found — skipping`);
       pairAddresses.push(null);
-      continue;
-    }
-    pairAddresses.push(pairAddr);
-
-    const lpToken    = new hre.ethers.Contract(pairAddr, ERC20_ABI, deployer);
-    const contractLP = await lpToken.balanceOf(LIQUIDITY_ADDRESS);
-    if (contractLP > 0n) {
-      console.log(`  ${t.name.padEnd(8)} LP in contract: ${hre.ethers.formatEther(contractLP)} → sweeping…`);
-      await (await liquidityContract.withdrawToken(pairAddr, 0)).wait();
-      console.log(`  ✓ ${t.name} LP swept to deployer`);
     } else {
-      console.log(`  ${t.name.padEnd(8)} LP in contract: 0`);
+      pairAddresses.push(pairAddr);
     }
   }
-
-  // ─────────────────────────────────────────────────────────────
-  // PHASE 3 — Remove all LP from Uniswap pools
-  // ─────────────────────────────────────────────────────────────
-  console.log("\n" + sep());
-  console.log("  PHASE 3 — Remove all LP from Uniswap pools");
-  console.log(sep());
 
   for (let i = 0; i < tokenDefs.length; i++) {
     const t        = tokenDefs[i];

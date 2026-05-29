@@ -5,102 +5,39 @@ const contractAddress = CONTRACT_ADDRESS;
 // Transactions still go through the wallet signer; only eth_call goes here.
 const ALCHEMY_AMOY_URL = 'https://polygon-amoy.g.alchemy.com/v2/_0p-lkCP0DWUV-Z-BQYCL';
 
-// Returns { total: BigNumber, entries: Array } for the connected wallet.
-// "Missed" covers fully bypassed commissions (user ineligible) and partial-cap
-// spills (user received some, excess went upline).
-// entries: [{ from, level, amount: BigNumber, blockNumber, transactionHash }]
+// Returns { total: BigNumber, entries: [] } for the connected wallet.
+// Reads totalMissedCommissions and getMissedRecords from on-chain storage — view calls,
+// no log queries (eth_getLogs is unreliable on Polygon Amoy and silently returns []).
 async function _computeMissedWei(fromBlock = 0) {
-  const ownerAddr = (await contract.owner()).toLowerCase();
   const zero = ethers.BigNumber.from(0);
-  if (walletAddress.toLowerCase() === ownerAddr) return { total: zero, entries: [] };
-
-  const PAID_TOPIC  = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
-  const userPadded  = ethers.utils.hexZeroPad(walletAddress.toLowerCase(), 32).toLowerCase();
-  let total = zero;
-  const entries = [];
-
-  const visited = new Set([walletAddress.toLowerCase()]);
-  let frontier = [walletAddress.toLowerCase()];
-
-  for (let depth = 1; depth <= 10; depth++) {
-    const nextFrontier = [];
-    const membersAtDepth = [];
-
-    await Promise.all(frontier.map(async (addr) => {
-      const refs = await contract.getReferrals(addr).catch(() => []);
-      for (const ref of refs) {
-        const refLower = ref.toLowerCase();
-        if (!visited.has(refLower)) {
-          visited.add(refLower);
-          nextFrontier.push(refLower);
-          membersAtDepth.push(refLower);
-        }
-      }
-    }));
-
-    if (membersAtDepth.length === 0) break;
-
-    await Promise.all(membersAtDepth.map(async (member) => {
-      const logs = await getLogsBatched({
-        address: contract.address,
-        topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
-      }, fromBlock, 'latest');
-
-      // Group by transaction — each tx is one invest() call with one level-d pool.
-      const byTx = new Map();
-      for (const log of logs) {
-        const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-        if (Number(level) !== depth) continue;
-        const key = log.transactionHash;
-        if (!byTx.has(key)) byTx.set(key, { blockNumber: log.blockNumber, total: zero, received: zero });
-        const tx = byTx.get(key);
-        tx.total = tx.total.add(amount);
-        if (log.topics[1].toLowerCase() === userPadded) tx.received = tx.received.add(amount);
-      }
-
-      for (const [txHash, tx] of byTx) {
-        if (tx.total.gt(tx.received)) {
-          const missed = tx.total.sub(tx.received);
-          total = total.add(missed);
-          entries.push({ from: member, level: depth, amount: missed, received: tx.received, blockNumber: tx.blockNumber, transactionHash: txHash });
-        }
-      }
-    }));
-
-    frontier = nextFrontier;
-  }
-
+  const [total, records] = await Promise.all([
+    contract.totalMissedCommissions(walletAddress).catch(() => zero),
+    contract.getMissedRecords(walletAddress).catch(() => []),
+  ]);
+  const entries = (records || []).map(r => ({
+    from:   r.from,
+    level:  Number(r.level),
+    reason: Number(r.reason),
+    amount: r.amount,
+    _ts:    r.ts.toNumber ? r.ts.toNumber() : Number(r.ts),
+    received: zero,
+    blockNumber: null,
+    transactionHash: null,
+  }));
   return { total, entries };
 }
 
 async function checkMissedCommissions() {
   if (!contract || !walletAddress) return;
   try {
-    const [lpLocks, latestBlock] = await Promise.all([
-      contract.getUserLPLocks(walletAddress).catch(() => []),
-      provider.getBlock('latest').catch(() => null),
-    ]);
-    const nowSec = latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000);
-    const hasActiveCap = lpLocks.some(l => {
-      if (l.removed) return false;
-      const capMax  = l.ethInvested.mul(5);
-      const capUsed = l.commissionsCapUsed || ethers.BigNumber.from(0);
-      return capMax.gt(capUsed) && nowSec < Number(l.unlockTime);
-    });
-    if (hasActiveCap) return;
-
-    const fromBlock = latestBlock ? getFromBlock(latestBlock.number) : 0;
-    const { total: missedWei, entries } = await _computeMissedWei(fromBlock);
+    const { total: missedWei } = await _computeMissedWei();
     if (missedWei.isZero()) return;
 
-    const latestEntry  = entries.length > 0
-      ? entries.reduce((best, e) => e.blockNumber > best.blockNumber ? e : best)
-      : null;
-    const latestETH    = latestEntry ? parseFloat(ethers.utils.formatEther(latestEntry.amount)) : 0;
-    const usdtLatest   = ethToUSDT(latestETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const totalETH   = parseFloat(ethers.utils.formatEther(missedWei));
+    const usdtTotal  = ethToUSDT(totalETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
     document.getElementById('missedCommText').innerHTML =
-      `You missed a referral commission of <strong style="color:#f87171;">${usdtLatest} USDT</strong>.<br><br>` +
+      `You missed referral commissions totalling <strong style="color:#f87171;">${usdtTotal} USDT</strong>.<br><br>` +
       `This includes commissions that fully bypassed you because your lock had expired or you had no active lock in the invested token, and commissions where your 5× cap filled mid-payment and the excess spilled to the next eligible upline.<br><br>` +
       `<strong>To receive future commissions:</strong> ensure you have an active (locked) investment in the same token your referrals are investing in, with remaining cap. Restake before your lock expires to avoid gaps.`;
 

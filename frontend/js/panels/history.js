@@ -243,7 +243,8 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
       if (log.topics[0] !== PAID_TOPIC) continue;
       const recipient = ethers.utils.defaultAbiCoder.decode(['address'], log.topics[1])[0];
       const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-      refEvents.push({ recipient, amount, level: Number(level), isPlatform: recipient.toLowerCase() === ownerAddr });
+      // Contract emits level 0-indexed (i=0 → L1); convert to 1-indexed for display.
+      refEvents.push({ recipient, amount, level: Number(level) + 1, isPlatform: recipient.toLowerCase() === ownerAddr });
     }
     refEvents.sort((a, b) => a.level - b.level);
 
@@ -259,10 +260,11 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
         refEventsEstimated = true;
         const ownerAddr = (await contract.owner()).toLowerCase();
         let cur = investorAddr;
-        for (let lvl = 1; lvl <= 5; lvl++) {
+        for (let lvl = 1; lvl <= 10; lvl++) {
           const ref = await contract.getReferrer(cur).catch(() => ethers.constants.AddressZero);
           if (!ref || ref === ethers.constants.AddressZero) break;
-          const rateBN = await contract.referralCommissionRates(lvl).catch(() => ethers.BigNumber.from(0));
+          // referralCommissionRates is 0-indexed: index 0 = L1, index 1 = L2, ...
+          const rateBN = await contract.referralCommissionRates(lvl - 1).catch(() => ethers.BigNumber.from(0));
           const amt = A40.mul(rateBN).div(10000);
           if (amt.isZero()) { cur = ref; continue; }
           refEvents.push({ recipient: ref, amount: amt, level: lvl, isPlatform: ref.toLowerCase() === ownerAddr });
@@ -450,10 +452,31 @@ async function loadRewardHistory() {
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
 
   try {
-    const claims = await contract.getClaimRecords(walletAddress);
+    const [claims, roiClaims] = await Promise.all([
+      contract.getClaimRecords(walletAddress).catch(() => []),
+      contract.getROIClaimRecords(walletAddress).catch(() => []),
+    ]);
 
-    if (!claims.length) {
-      el.innerHTML = '<div class="empty-state">No staking reward claims yet. Claim rewards from your active investments to see history here.</div>';
+    const fEth = bn => parseFloat(ethers.utils.formatEther(bn));
+
+    const stakingRows = (claims || []).map(ev => ({
+      ts:     ev.ts.toNumber ? ev.ts.toNumber() : Number(ev.ts),
+      tokens: fEth(ev.tokensAmount),
+      ethEq:  fEth(ev.ethEquivalent),
+      type:   'staking',
+    }));
+
+    const roiRows = (roiClaims || []).map(ev => ({
+      ts:     ev.ts.toNumber ? ev.ts.toNumber() : Number(ev.ts),
+      tokens: fEth(ev.tokensAmount),
+      ethEq:  fEth(ev.ethEquivalent),
+      type:   'roi',
+    }));
+
+    const all = [...stakingRows, ...roiRows].sort((a, b) => b.ts - a.ts);
+
+    if (!all.length) {
+      el.innerHTML = '<div class="empty-state">No reward claims yet. Claim staking rewards or ROI commissions to see history here.</div>';
       return;
     }
 
@@ -463,22 +486,21 @@ async function loadRewardHistory() {
       platformSym = await erc20.symbol();
     } catch(_) {}
 
-    const sorted = [...claims].sort((a, b) => {
-      const ta = a.ts.toNumber ? a.ts.toNumber() : Number(a.ts);
-      const tb = b.ts.toNumber ? b.ts.toNumber() : Number(b.ts);
-      return tb - ta;
-    });
-
-    const fEth = bn => parseFloat(ethers.utils.formatEther(bn));
-
-    el.innerHTML = sorted.map(ev => {
-      const ts        = ev.ts.toNumber ? ev.ts.toNumber() : Number(ev.ts);
-      const date      = ts ? new Date(ts * 1000).toLocaleString() : '';
-      const tokens    = fEth(ev.tokensAmount);
-      const ethEq     = fEth(ev.ethEquivalent);
-      const usdtVal   = fmtNum(ethEq * USDT_PER_ETH);
-      const tokensFmt = fmtNum(tokens);
-
+    el.innerHTML = all.map(r => {
+      const date      = r.ts ? new Date(r.ts * 1000).toLocaleString() : '';
+      const usdtVal   = fmtNum(r.ethEq * USDT_PER_ETH);
+      const tokensFmt = fmtNum(r.tokens);
+      if (r.type === 'roi') {
+        return `
+          <div class="ph-row">
+            <div class="ph-badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border-color:rgba(167,139,250,0.3);">ROI</div>
+            <div class="ph-main">
+              <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT equivalent</div>
+              <div class="ph-sub">ROI commission claimed</div>
+            </div>
+            <div class="ph-meta"><div class="ph-date">${date}</div></div>
+          </div>`;
+      }
       return `
         <div class="ph-row">
           <div class="ph-badge reward-claim">REWARD</div>
@@ -486,9 +508,7 @@ async function loadRewardHistory() {
             <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT equivalent</div>
             <div class="ph-sub">Staking reward claimed</div>
           </div>
-          <div class="ph-meta">
-            <div class="ph-date">${date}</div>
-          </div>
+          <div class="ph-meta"><div class="ph-date">${date}</div></div>
         </div>`;
     }).join('');
 

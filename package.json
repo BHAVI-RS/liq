@@ -13,7 +13,8 @@
     "amoy:deploy": "hardhat run scripts/amoytestnet/deploy-amoy.js --network polygonAmoy",
     "amoy:fix-hash": "hardhat run scripts/amoytestnet/fix-init-hash.js",
     "node": "hardhat node",
-    "serve": "npx http-server . -p 3000 -c-1 --cors -o liquidity-platform.html"
+    "serve": "npx http-server . -p 3000 -c-1 --cors -o liquidity-platform.html",
+    "amoy:hfsroi": "hardhat run scripts/amoytestnet/hfsroi.js --network polygonAmoy"
   },
   "keywords": [],
   "author": "",

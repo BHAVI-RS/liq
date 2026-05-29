@@ -6,6 +6,8 @@
 //   • TWAP warm-up waits real 31 sec instead of evm_increaseTime
 //   • Pool seed: 100 MATIC + 100,000 tokens per pool (1 token = 0.001 MATIC = $1.00)
 //   • Investment package: 0.1 MATIC = 100 USDT (identical to simulate.js)
+//   • Deploys LiquidityFacet and LiquidityROIFacet before Liquidity
+//   • Liquidity constructor takes (router, factory, weth, platformToken, facet, roiFacet)
 //
 // RUN:
 //   1. npx hardhat run scripts/amoytestnet/amoynode.js --network polygonAmoy
@@ -43,7 +45,7 @@ const DEPLOY_OVERRIDES = {
 const TX_OVERRIDES = {
   maxFeePerGas:         hre.ethers.parseUnits("60", "gwei"),
   maxPriorityFeePerGas: hre.ethers.parseUnits("30", "gwei"),
-  gasLimit: 2_000_000,   // 60 gwei × 2M = 0.12 POL < 1 POL cap
+  gasLimit: 5_000_000,   // invest() makes multiple DELEGATECALLs + ROI stream SSTOREs
 };
 
 const COMM_RATES_BPS = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
@@ -210,17 +212,39 @@ async function main() {
   const libViewAddress = await liquidityViewLib.getAddress();
   console.log(`  LiquidityViewLib: ${libViewAddress}`);
 
+  // ── Facets (must deploy before Liquidity) ──────────────────────────────────
+  const LiquidityFacet = await hre.ethers.getContractFactory("LiquidityFacet", {
+    signer: deployer,
+    libraries: { LiquidityMath: libAddress },
+  });
+  const liquidityFacet = await LiquidityFacet.deploy(
+    UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, DEPLOY_OVERRIDES
+  );
+  await liquidityFacet.waitForDeployment();
+  const facetAddress = await liquidityFacet.getAddress();
+  console.log(`  LiquidityFacet  : ${facetAddress}`);
+
+  const LiquidityROIFacet = await hre.ethers.getContractFactory("LiquidityROIFacet", deployer);
+  const liquidityROIFacet = await LiquidityROIFacet.deploy(DEPLOY_OVERRIDES);
+  await liquidityROIFacet.waitForDeployment();
+  const roiFacetAddress = await liquidityROIFacet.getAddress();
+  console.log(`  LiquidityROIFacet: ${roiFacetAddress}`);
+
+  // ── Main contract ──────────────────────────────────────────────────────────
   const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
     signer: deployer,
     libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
   });
-  const liquidity = await Liquidity.deploy(UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, DEPLOY_OVERRIDES);
+  const liquidity = await Liquidity.deploy(
+    UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, facetAddress, roiFacetAddress,
+    DEPLOY_OVERRIDES
+  );
   await liquidity.waitForDeployment();
   const liquidityAddress = await liquidity.getAddress();
   const deployTx      = liquidity.deploymentTransaction();
   const deployReceipt = await deployTx.wait();
   const deployBlock   = deployReceipt.blockNumber;
-  console.log(`  Liquidity   : ${liquidityAddress}  (block ${deployBlock})`);
+  console.log(`  Liquidity       : ${liquidityAddress}  (block ${deployBlock})`);
 
   // Transfer full supply + register + seed pool for all 3 tokens
   const seedETH    = SEED_ETH;
@@ -277,6 +301,8 @@ const ROUTER_ADDRESS          = "${UNI_ROUTER}";
 const FACTORY_ADDRESS         = "${UNI_FACTORY}";
 const WETH_ADDRESS            = "${UNI_WETH}";
 const DEPLOY_BLOCK            = ${deployBlock};
+const FACET_ADDRESS           = "${facetAddress}";
+const ROI_FACET_ADDRESS       = "${roiFacetAddress}";
 
 const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
 `;
@@ -435,7 +461,9 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   for (const t of deployedTokens) {
     console.log(`  ${t.symbol.padEnd(10)}: ${t.address}`);
   }
-  console.log(`  Liquidity      : ${liquidityAddress}`);
+  console.log(`  LiquidityFacet   : ${facetAddress}`);
+  console.log(`  LiquidityROIFacet: ${roiFacetAddress}`);
+  console.log(`  Liquidity        : ${liquidityAddress}`);
   console.log(`  Router         : ${UNI_ROUTER}`);
   console.log(`  Factory        : ${UNI_FACTORY}`);
   console.log(`  WETH           : ${UNI_WETH}`);

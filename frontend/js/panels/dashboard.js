@@ -30,6 +30,12 @@ var _dashWealthBase          = 0;  // non-staking portion of My Wealth (LP value
 var _dashStakingEventsBase   = 0;
 // In-memory high-water mark so the staking display never decreases (e.g. token price dip).
 var _dashStakingHWM          = 0;
+
+// ── Dashboard ROI commission live ticker ──
+var _dashROITickInterval = null;
+var _dashROIBaseETH      = 0;   // liveETH + pendingETH at last fetch
+var _dashROIRatePerSec   = 0;   // ETH per second accumulated across all active streams
+var _dashROIWall         = 0;   // wall-clock seconds at last fetch
 var _dashRefNow    = 0;
 var _dashWallRef   = 0;
 
@@ -77,7 +83,7 @@ function _dashUpdateTeamWealthDisplay() {
   for (const p of _dashTeamWealthParams) total += _computeWealthFromParams(p);
   el.innerHTML = total > 0.000001
     ? `<span style="color:#a855f7;">${fmtUSDT(total, {decimals:2})}</span>`
-    : '<span style="color:var(--muted);">—</span>';
+    : '0';
 }
 
 async function _loadDashTeamWealth() {
@@ -93,9 +99,14 @@ async function _loadDashTeamWealth() {
       _dashUpdateTeamWealthDisplay();
       return;
     }
-    const paramsList = await Promise.all(
-      allAddrs.map(a => contract.getWealthParams(a).catch(() => null))
-    );
+    // Batch to 5 concurrent calls — firing all 50+ at once floods Amoy testnet RPC
+    const batchSize = 5;
+    const paramsList = [];
+    for (let _bi = 0; _bi < allAddrs.length; _bi += batchSize) {
+      const _chunk = allAddrs.slice(_bi, _bi + batchSize);
+      const _res   = await Promise.all(_chunk.map(a => contract.getWealthParams(a).catch(() => null)));
+      paramsList.push(..._res);
+    }
     _dashTeamWealthParams = paramsList.filter(p => p !== null);
     _dashUpdateTeamWealthDisplay();
     // Tick every 1s: recomputes staking accumulation from wall clock (no chain calls).
@@ -272,20 +283,18 @@ function _dashStartStakingTicker() {
     if (totalETH > _dashStakingHWM) _dashStakingHWM = totalETH;
     const displayETH = Math.max(totalETH, _dashStakingHWM);
 
-    if (displayETH > 0.000001) {
-      const raw   = (displayETH * 1000).toFixed(5);
-      const dot   = raw.indexOf('.');
-      const whole = raw.slice(0, dot);
-      const frac  = raw.slice(dot);     // ".XXXXX"
-      el.innerHTML = `<span style="color:var(--gold);">${whole}${frac} USDT</span>`;
+    if (anyStillActive || displayETH > 0) {
+      const usdt = displayETH * USDT_PER_ETH;
+      const fmt  = usdt >= 0.00001 ? usdt.toFixed(5) : usdt.toExponential(3);
+      el.innerHTML = `<span style="color:var(--gold);">${fmt} USDT</span>`;
     } else {
-      el.innerHTML = '<span style="color:var(--muted);">—</span>';
+      el.innerHTML = '0';
     }
 
     const wealthEl = document.getElementById('dashPnL');
     if (wealthEl) {
       const liveWealthETH = _dashWealthBase + displayETH;
-      wealthEl.innerHTML = liveWealthETH > 0 ? fmtUSDT(liveWealthETH, {decimals:2}) : '—';
+      wealthEl.innerHTML = fmtUSDT(liveWealthETH, {decimals:2});
     }
 
     // All locks have now expired — stop ticking, the value is final.
@@ -293,7 +302,33 @@ function _dashStartStakingTicker() {
   }, 1000);
 }
 
+function _dashStopROITicker() {
+  if (_dashROITickInterval) { clearInterval(_dashROITickInterval); _dashROITickInterval = null; }
+}
+
+function _dashStartROITicker() {
+  _dashStopROITicker();
+  _dashROITickInterval = setInterval(() => {
+    const el = document.getElementById('dashROICommissions');
+    if (!el) { _dashStopROITicker(); return; }
+    const elapsed  = Math.max(0, Math.floor(Date.now() / 1000) - _dashROIWall);
+    const totalETH = _dashROIBaseETH + elapsed * _dashROIRatePerSec;
+    if (_dashROIRatePerSec > 0 || totalETH > 0) {
+      const totalUSDT = totalETH * USDT_PER_ETH;
+      const fmt = totalUSDT >= 0.00001 ? totalUSDT.toFixed(5) : totalUSDT.toExponential(3);
+      el.innerHTML = `<span style="color:#a78bfa;">${fmt} USDT</span>`;
+    } else {
+      el.innerHTML = '0';
+    }
+  }, 1000);
+}
+
+const _poolPriceCache = new Map(); // tokenAddr.lower() → { data, ts }
+
 async function _dashGetPoolPrice(tokenAddr) {
+  const cacheKey = tokenAddr.toLowerCase();
+  const cached = _poolPriceCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 60_000) return cached.data;
   try {
     const factory  = getFactory();
     const pairAddr = await factory.getPair(tokenAddr, DEX_WETH);
@@ -318,7 +353,9 @@ async function _dashGetPoolPrice(tokenAddr) {
     const resETH   = parseFloat(ethers.utils.formatEther(rawETH));
     const priceEth = resToken > 0 ? resETH / resToken : 0;
 
-    return { priceEth, resETH, resToken, totalLPSupply: totalSupply, pairAddr };
+    const result = { priceEth, resETH, resToken, totalLPSupply: totalSupply, pairAddr };
+    _poolPriceCache.set(cacheKey, { data: result, ts: Date.now() });
+    return result;
   } catch(_) { return null; }
 }
 
@@ -822,7 +859,7 @@ async function _loadDashTeamStats() {
       teamBusinessETH += eth;
     }
     volEl.textContent  = teamVolume;
-    bizEl.innerHTML    = teamBusinessETH > 0 ? fmtUSDT(teamBusinessETH, {decimals:2}) : '—';
+    bizEl.innerHTML    = teamBusinessETH > 0 ? fmtUSDT(teamBusinessETH, {decimals:2}) : '0';
   } catch(e) {
     console.error('_loadDashTeamStats', e);
   }
@@ -835,6 +872,7 @@ async function loadDashboard(silent = false) {
     return;
   }
   _dashStopStakingTicker();
+  _dashStopROITicker();
   _tabLoaded.add('dashboard');
   document.getElementById('dashLoadingState').innerHTML = '';
 
@@ -842,8 +880,12 @@ async function loadDashboard(silent = false) {
 
   // Show refreshing indicator on user-triggered loads only; skip on background polls.
   if (!silent) {
-    const _stakingElRef = document.getElementById('dashStakingRewards');
-    if (_stakingElRef) _stakingElRef.innerHTML = '<span style="color:var(--muted);font-size:12px;">···</span>';
+    const _ld = '<span class="ld"><span></span><span></span><span></span></span>';
+    ['dashStakingRewards','dashROICommissions','dashTotalInvested','dashRefEarnings',
+     'dashPnL','dashTeamWealth','dashTeamBusiness','dashTeamVolume'].forEach(id => {
+      const _el = document.getElementById(id);
+      if (_el) _el.innerHTML = _ld;
+    });
     // Clear direct refs list so a wallet switch forces a full reload (bypasses the DOM-card guard).
     const _drefListEl = document.getElementById('dashDirectRefsList');
     if (_drefListEl) _drefListEl.innerHTML = '';
@@ -862,13 +904,16 @@ async function loadDashboard(silent = false) {
   try {
     const _latestBlockNum = await provider.getBlockNumber();
     const _fromBlock      = getFromBlock(_latestBlockNum);
-    const [lpLocks, commStats, stakingReward, platformToken, latestBlock] = await Promise.all([
-      contract.getUserLPLocks(walletAddress),
+    const [lpLocks, commStats, stakingReward, platformToken, latestBlock, roiData] = await Promise.all([
+      contract.getUserLPLocks(walletAddress).catch(() => []),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
-      contract.platformToken(),
+      contract.platformToken().catch(() => null),
       provider.getBlock('latest').catch(() => null),
+      contract.getROIData(walletAddress).catch(() => null),
     ]);
+    // Silent poll: if every critical call failed the RPC is down — keep existing display
+    if (silent && lpLocks.length === 0 && platformToken === null) return;
     // Fetch staking-claim events in the background — they are only needed to add
     // historical claimed ETH from past restake periods. The display renders immediately
     // from lock struct data (fast path); the events-base correction arrives shortly after.
@@ -1001,11 +1046,63 @@ async function loadDashboard(silent = false) {
     const lpFeesETH   = Math.max(0, totalCurrentETH - totalInvestedETH);
     const myWealthETH = refEarningsETH + _initDisplayETH + lpFeesETH + totalInvestedETH;
     _dashWealthBase   = myWealthETH - _initDisplayETH;
-    document.getElementById('dashTotalValue').innerHTML        = totalInvestedETH > 0 ? fmtUSDT(lpFeesETH, {decimals:2}) : '—';
-    document.getElementById('dashTotalValue').style.color      = 'white';
-    document.getElementById('dashTotalValueUSD').innerHTML     = '';
-    const lpTokensEl = document.getElementById('dashLPTokens');
-    if (lpTokensEl) lpTokensEl.textContent = totalLPTokens > 0 ? fmtNum(totalLPTokens) + ' LP' : '';
+
+    // ── ROI commissions display ──
+    const roiLiveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
+    const roiPendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
+    const roiBaseETH    = roiLiveETH + roiPendingETH;
+    _dashROIBaseETH  = roiBaseETH;
+    _dashROIWall     = _wallNow;
+    _dashROIRatePerSec = 0;
+    {
+      const roiEl = document.getElementById('dashROICommissions');
+      if (roiEl) {
+        if (roiBaseETH > 0) {
+          const roiUSDT = roiBaseETH * USDT_PER_ETH;
+          const roiFmt  = roiUSDT >= 0.00001 ? roiUSDT.toFixed(5) : roiUSDT.toExponential(3);
+          roiEl.innerHTML = `<span style="color:#a78bfa;">${roiFmt} USDT</span>`;
+        } else {
+          roiEl.innerHTML = '0';
+        }
+      }
+    }
+    // Compute per-second ROI rate in background, then start ticker
+    const _effNowCapture = _effNow;
+    (async () => {
+      try {
+        const COMM_RATES = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+        const activeStreams = await contract.getActiveROIStreams(walletAddress).catch(() => []);
+        if (!activeStreams.length) { _dashStartROITicker(); return; }
+        const investorMap = new Map();
+        for (const ref of activeStreams) {
+          const key = ref.investor.toLowerCase();
+          if (!investorMap.has(key)) investorMap.set(key, []);
+          investorMap.get(key).push(ref);
+        }
+        let ratePerSec = 0;
+        await Promise.all([...investorMap.entries()].map(async ([, refs]) => {
+          try {
+            const locks = await contract.getUserLPLocks(refs[0].investor);
+            for (const ref of refs) {
+              const lock = locks[Number(ref.lockIndex)];
+              if (!lock || lock.removed) continue;
+              const unlockTime = Number(lock.unlockTime);
+              const lockedAt   = Number(lock.lockedAt);
+              if (_effNowCapture >= unlockTime) continue;
+              const lockDur = unlockTime - lockedAt;
+              if (lockDur <= 0) continue;
+              const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+              const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+              if (ratePPM === 0) continue;
+              const commRate = COMM_RATES[Number(ref.level)] || 0;
+              ratePerSec += ethInv * ratePPM * commRate / (50_000_000_000 * lockDur);
+            }
+          } catch(_) {}
+        }));
+        _dashROIRatePerSec = ratePerSec;
+        _dashStartROITicker();
+      } catch(_) {}
+    })();
     document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH, {decimals: 3});
     document.getElementById('dashRefEarningsUSD').innerHTML    =
       isEligible
@@ -1021,14 +1118,12 @@ async function loadDashboard(silent = false) {
         : '<span style="cursor:pointer;font-size:9px;background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="showIneligiblePopup(event)">INELIGIBLE</span>';
     {
       const _sEl = document.getElementById('dashStakingRewards');
-      if (_initDisplayETH > 0.000001) {
-        const _raw   = (_initDisplayETH * 1000).toFixed(5);
-        const _dot   = _raw.indexOf('.');
-        const _whole = _raw.slice(0, _dot);
-        const _frac  = _raw.slice(_dot);
-        _sEl.innerHTML = `<span style="color:var(--gold);">${_whole}${_frac} USDT</span>`;
+      if (_initAnyActive || _initDisplayETH > 0) {
+        const _usdt = _initDisplayETH * USDT_PER_ETH;
+        const _fmt  = _usdt >= 0.00001 ? _usdt.toFixed(5) : _usdt.toExponential(3);
+        _sEl.innerHTML = `<span style="color:var(--gold);">${_fmt} USDT</span>`;
       } else {
-        _sEl.innerHTML = '<span style="color:var(--muted);">—</span>';
+        _sEl.innerHTML = '0';
       }
     }
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');
@@ -1041,7 +1136,7 @@ async function loadDashboard(silent = false) {
 
     const pnlEl = document.getElementById('dashPnL');
     pnlEl.style.color = '#4ade80'; // Always green for My Wealth
-    pnlEl.innerHTML = myWealthETH > 0 ? fmtUSDT(myWealthETH, {decimals:2}) : '—';
+    pnlEl.innerHTML = myWealthETH > 0 ? fmtUSDT(myWealthETH, {decimals:2}) : '0';
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
 
@@ -1358,49 +1453,8 @@ async function _unlockLabels() {
 
 async function _computeMissedETHForAddr(addr) {
   try {
-    const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
-    const addrPadded = ethers.utils.hexZeroPad(addr.toLowerCase(), 32).toLowerCase();
-    const ownerAddr  = (await contract.owner()).toLowerCase();
-    const zero       = ethers.BigNumber.from(0);
-    if (addr.toLowerCase() === ownerAddr) return 0;
-
-    const visited   = new Set([addr.toLowerCase()]);
-    let frontier    = [addr.toLowerCase()];
-    let totalMissed = zero;
-
-    for (let depth = 1; depth <= 10; depth++) {
-      const nextFrontier = [], membersAtDepth = [];
-      await Promise.all(frontier.map(async (a) => {
-        const refs = await contract.getReferrals(a).catch(() => []);
-        for (const ref of refs) {
-          const r = ref.toLowerCase();
-          if (!visited.has(r)) { visited.add(r); nextFrontier.push(r); membersAtDepth.push(r); }
-        }
-      }));
-      if (membersAtDepth.length === 0) break;
-      await Promise.all(membersAtDepth.map(async (member) => {
-        const fromBlock = (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0) ? DEPLOY_BLOCK : 0;
-        const logs = await getLogsBatched({
-          address: contract.address,
-          topics: [PAID_TOPIC, null, ethers.utils.hexZeroPad(member, 32)],
-        }, fromBlock, 'latest');
-        const byTx = new Map();
-        for (const log of logs) {
-          const [amount, level] = ethers.utils.defaultAbiCoder.decode(['uint256','uint256'], log.data);
-          if (Number(level) !== depth) continue;
-          const key = log.transactionHash;
-          if (!byTx.has(key)) byTx.set(key, { total: zero, received: zero });
-          const entry = byTx.get(key);
-          entry.total = entry.total.add(amount);
-          if (log.topics[1].toLowerCase() === addrPadded) entry.received = entry.received.add(amount);
-        }
-        for (const entry of byTx.values()) {
-          if (entry.total.gt(entry.received)) totalMissed = totalMissed.add(entry.total.sub(entry.received));
-        }
-      }));
-      frontier = nextFrontier;
-    }
-    return parseFloat(ethers.utils.formatEther(totalMissed));
+    const missed = await contract.totalMissedCommissions(addr);
+    return parseFloat(ethers.utils.formatEther(missed));
   } catch (_) { return 0; }
 }
 
@@ -1409,7 +1463,7 @@ async function _refreshRefPopupStats(addr) {
     const investedRaw = await contract.userTotalInvested(addr).catch(() => ethers.BigNumber.from(0));
     const totalInv = parseFloat(ethers.utils.formatEther(investedRaw));
     const invEl = document.getElementById('refPopInvestedVal');
-    if (invEl) invEl.innerHTML = totalInv > 0 ? fmtUSDT(totalInv, {decimals:2}) : '—';
+    if (invEl) invEl.innerHTML = totalInv > 0 ? fmtUSDT(totalInv, {decimals:2}) : '0';
 
     const treeData  = await fetchGeneTree(addr, 1);
     const teamAddrs = _geneCollectAddrs(treeData).slice(1);
@@ -1427,15 +1481,15 @@ async function _refreshRefPopupStats(addr) {
       }
     }
     const twEl = document.getElementById('refPopTeamWealthVal');
-    if (twEl) twEl.innerHTML = teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '—';
+    if (twEl) twEl.innerHTML = teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '0';
     const tbEl = document.getElementById('refPopTeamBizVal');
-    if (tbEl) tbEl.innerHTML = teamBizETH > 0 ? fmtUSDT(teamBizETH, {decimals:2}) : '—';
+    if (tbEl) tbEl.innerHTML = teamBizETH > 0 ? fmtUSDT(teamBizETH, {decimals:2}) : '0';
     const tvEl = document.getElementById('refPopTeamVolVal');
     if (tvEl) tvEl.textContent = teamVol;
 
     const missedETH = await _computeMissedETHForAddr(addr);
     const missEl = document.getElementById('refPopMissedVal');
-    if (missEl) missEl.innerHTML = missedETH > 0 ? fmtUSDT(missedETH, {decimals:2}) : '—';
+    if (missEl) missEl.innerHTML = missedETH > 0 ? fmtUSDT(missedETH, {decimals:2}) : '0';
   } catch(e) {
     console.error('_refreshRefPopupStats', e);
   }
@@ -1506,7 +1560,7 @@ function _startRefPopupTicker() {
     const valEl = document.getElementById('refPopWealthVal');
     if (!valEl) { _stopRefPopupTicker(); return; }
     const wealthETH = _computeWealthFromParams(_refPopupWealthParams);
-    valEl.innerHTML = wealthETH > 0 ? fmtUSDT(wealthETH, {decimals:2}) : '—';
+    valEl.innerHTML = wealthETH > 0 ? fmtUSDT(wealthETH, {decimals:2}) : '0';
   }, 1000);
 
   // Re-fetch the 5 non-wealth stats every 30s
@@ -1582,12 +1636,12 @@ async function openRefPopup(addr) {
     }
 
     const stats = [
-      { label: 'WEALTH',             val: wealthETH > 0     ? fmtUSDT(wealthETH,     {decimals:2}) : '—', color: '#4ade80',    id: 'refPopWealthVal' },
-      { label: 'TOTAL INVESTED',     val: totalInv > 0      ? fmtUSDT(totalInv,      {decimals:2}) : '—', color: 'var(--gold)', id: 'refPopInvestedVal' },
-      { label: 'TEAM WEALTH',        val: teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '—', color: '#a78bfa',    id: 'refPopTeamWealthVal' },
-      { label: 'TEAM BUSINESS',      val: teamBizETH > 0    ? fmtUSDT(teamBizETH,    {decimals:2}) : '—', color: '#4ade80',    id: 'refPopTeamBizVal' },
+      { label: 'WEALTH',             val: wealthETH     > 0 ? fmtUSDT(wealthETH,     {decimals:2}) : '0', color: '#4ade80',     id: 'refPopWealthVal' },
+      { label: 'TOTAL INVESTED',     val: totalInv      > 0 ? fmtUSDT(totalInv,      {decimals:2}) : '0', color: 'var(--gold)', id: 'refPopInvestedVal' },
+      { label: 'TEAM WEALTH',        val: teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '0', color: '#a78bfa',     id: 'refPopTeamWealthVal' },
+      { label: 'TEAM BUSINESS',      val: teamBizETH    > 0 ? fmtUSDT(teamBizETH,    {decimals:2}) : '0', color: '#4ade80',     id: 'refPopTeamBizVal' },
       { label: 'TEAM VOLUME',        val: teamVol,                                                          color: 'var(--cream)', id: 'refPopTeamVolVal' },
-      { label: 'MISSED COMMISSIONS', val: missedETH > 0     ? fmtUSDT(missedETH,     {decimals:2}) : '—', color: '#f87171',    id: 'refPopMissedVal' },
+      { label: 'MISSED COMMISSIONS', val: missedETH     > 0 ? fmtUSDT(missedETH,     {decimals:2}) : '0', color: '#f87171',     id: 'refPopMissedVal' },
     ];
 
     // Replace only the loading section, keep the header/label area intact
@@ -1704,6 +1758,7 @@ function navToRewards(section) {
   setTimeout(() => {
     const cardId = section === 'staking' ? 'rwStakingCard'
                  : section === 'lpfees'  ? 'rwLPFeesCard'
+                 : section === 'roicomm' ? 'rwROICard'
                  :                         'rwRefCard';
     const el = document.getElementById(cardId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1731,6 +1786,8 @@ window._dashFmtCountdown    = _dashFmtCountdown;
 window._dashFmtCompact      = _dashFmtCompact;
 window._dashTickCountdowns  = _dashTickCountdowns;
 window.navToRewards         = navToRewards;
+window._dashStopROITicker   = _dashStopROITicker;
+window._dashStartROITicker  = _dashStartROITicker;
 window.showPausedLocksPopup = showPausedLocksPopup;
 window.showIneligiblePopup  = showIneligiblePopup;
 window.closeDashEligPopup   = closeDashEligPopup;

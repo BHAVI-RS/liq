@@ -1,0 +1,181 @@
+{
+  "network": "polygonAmoy",
+  "deployedAt": "2026-05-29T16:39:04.915Z",
+  "deployBlock": 39227952,
+  "tokenAddress": "0x3585622c8C3C346A3d4A76397E586F5E11F13573",
+  "tokenName": "Hordex Token",
+  "tokenSymbol": "HORDEX",
+  "tokenSupply": "10000000",
+  "liquidityAddress": "0x6A64fba4F1701c2E4edEe344e620809C57B07763",
+  "facetAddress": "0x851E9568Ed5393052331245005A4e541f3d74983",
+  "roiFacetAddress": "0x25cC7AC5698C0178310077b859fA4aEF42EEECE3",
+  "libAddress": "0xC652b968491FCA840a826539CA5a6D7942967e4C",
+  "libViewAddress": "0x35c9A5Ed8955849BAD910A227376435555fA754A",
+  "uniRouter": "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825",
+  "uniFactory": "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48",
+  "uniWeth": "0x7Bd0A72d3A07353C91dDA48D2B78454248d281E6",
+  "seedEth": "100.0",
+  "seedTokens": "100000.0",
+  "accounts": [
+    {
+      "index": 0,
+      "address": "0xF8Fd742887Af3Bd4829c24fF250662D19dEdDb4C",
+      "referrer": null
+    },
+    {
+      "index": 1,
+      "address": "0x60A55d315698C33a5bE8AaFE29A375579aE056A9",
+      "referrer": 0
+    },
+    {
+      "index": 2,
+      "address": "0x225080BC51268Fe5a988940D894a971577726a40",
+      "referrer": 1
+    },
+    {
+      "index": 3,
+      "address": "0xCA038B09923D5668C38c0f07DeE6671F9bE39d50",
+      "referrer": 1
+    },
+    {
+      "index": 4,
+      "address": "0xAeC4746DD72Bbc906081dcC670398a1285494F06",
+      "referrer": 1
+    },
+    {
+      "index": 5,
+      "address": "0x07879E6AfFDa133857692962641B58Fb508beEa0",
+      "referrer": 1
+    },
+    {
+      "index": 6,
+      "address": "0x2EDeddd9D9272E707D6c16c592b4e5EbBd498880",
+      "referrer": 1
+    },
+    {
+      "index": 7,
+      "address": "0xfC62b8Cc3c6BfaC12c64aD9e66367c262596382B",
+      "referrer": 2
+    },
+    {
+      "index": 8,
+      "address": "0xa3f0364991D7038Fc7B8EF93DD003262d0970d57",
+      "referrer": 2
+    },
+    {
+      "index": 9,
+      "address": "0xa1E397406848139960609cA60608942Ea5B07C30",
+      "referrer": 2
+    },
+    {
+      "index": 10,
+      "address": "0x12f5Aba8b14A01C2296C253b87FcB5F95094b9eD",
+      "referrer": 2
+    },
+    {
+      "index": 11,
+      "address": "0xC0a55946E067A2483E4F02F548d350c0eDdc047d",
+      "referrer": 7
+    },
+    {
+      "index": 12,
+      "address": "0x0cB4737EBcE16611A64C7156B46dc709799B7c89",
+      "referrer": 7
+    },
+    {
+      "index": 13,
+      "address": "0x5F9eCCB94931b2d3a0D573e124F775C93a137B41",
+      "referrer": 7
+    },
+    {
+      "index": 14,
+      "address": "0x0E97B5D87f07349a00026b5d53ff9be9DAa7F1E1",
+      "referrer": 11
+    },
+    {
+      "index": 15,
+      "address": "0xeE20BbddB8067B37B5e4E7a5FDC074c01D224561",
+      "referrer": 11
+    },
+    {
+      "index": 16,
+      "address": "0x6310F83bf0B4609103ec29e2E39aFb79600a4052",
+      "referrer": 14
+    },
+    {
+      "index": 17,
+      "address": "0x55fd3d4DAaA7B370bB0a4809EE9f4620EF81adc0",
+      "referrer": 16
+    },
+    {
+      "index": 18,
+      "address": "0x8792AAf6b7A1dB7c689c8F52f75FD796dbfCEaD9",
+      "referrer": 16
+    },
+    {
+      "index": 19,
+      "address": "0x0c2F33720C86716214aD121FF4ecc471Fde021cD",
+      "referrer": 16
+    },
+    {
+      "index": 20,
+      "address": "0x6a94DbE1957599417aa3F887ba39684Ae9b81dAD",
+      "referrer": 16
+    },
+    {
+      "index": 21,
+      "address": "0x7BB5C113ADA83d387B769A3e532D8F1B27cAdb2F",
+      "referrer": 16
+    },
+    {
+      "index": 22,
+      "address": "0x60B64D84bCE31720b9A0B3C03d63c287F450F1Ec",
+      "referrer": 17
+    },
+    {
+      "index": 23,
+      "address": "0x2e901f579231519Cabaaf414c1D1a3A75b057177",
+      "referrer": 17
+    },
+    {
+      "index": 24,
+      "address": "0xfc2bBA17F7743479a9B1f1e67Fc70584e7F7eD4E",
+      "referrer": 17
+    },
+    {
+      "index": 25,
+      "address": "0xA9ecd071ca602b14666ff032bcf947f34C4Ca2eE",
+      "referrer": 17
+    },
+    {
+      "index": 26,
+      "address": "0xb20F24609A53414A54025c00dB01E63932142550",
+      "referrer": 22
+    },
+    {
+      "index": 27,
+      "address": "0x9bb38B7565960Bf4e8dB0f68C1907C8b6E20b974",
+      "referrer": 22
+    },
+    {
+      "index": 28,
+      "address": "0x4876b3fB6F89Be9DedAD9E4bF340EeCF4e750776",
+      "referrer": 22
+    },
+    {
+      "index": 29,
+      "address": "0xf8dF4e0CC40FeBbF592bDea47B776bf7547814Ae",
+      "referrer": 26
+    },
+    {
+      "index": 30,
+      "address": "0x07b25e0359DCC09A65d2814c3331B371F75F5CC2",
+      "referrer": 26
+    },
+    {
+      "index": 31,
+      "address": "0x6187a1E2718E249613549A847A7dB4ab7d75414D",
+      "referrer": 29
+    }
+  ]
+}

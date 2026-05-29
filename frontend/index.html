@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1779625549648"></script>
+  <script src="contract-config.js?v=1780072744909"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -438,11 +438,10 @@
         <div id="dashTeamVolume" class="dash-stat-val" style="color:var(--cream);">—</div>
         <div class="dash-stat-sub">active users under you</div>
       </div>
-      <div class="dash-stat-card" id="dashCard-locks" onclick="navToRewards('lpfees')" title="Click to view LP fees" style="cursor:pointer;">
-        <div class="dash-stat-label">LP FEES <span class="dash-stat-chart-hint">→</span></div>
-        <div id="dashTotalValue" class="dash-stat-val" style="color:var(--cream);">—</div>
-        <div id="dashTotalValueUSD" class="dash-stat-sub"></div>
-        <div id="dashLPTokens" class="dash-stat-sub" style="margin-top:2px;color:var(--muted);"></div>
+      <div class="dash-stat-card" id="dashCard-roicomm" onclick="navToRewards('roicomm')" title="Click to view ROI commissions" style="cursor:pointer;">
+        <div class="dash-stat-label">ROI COMMISSIONS <span class="dash-stat-chart-hint">→</span></div>
+        <div id="dashROICommissions" class="dash-stat-val" style="color:#a78bfa;">—</div>
+        <div id="dashROICommSub" class="dash-stat-sub">live <span style="color:#a78bfa;font-size:9px;">●</span></div>
       </div>
 
       <!-- INLINE STAT GRAPH — lives inside the grid so it spans full width below the clicked card -->
@@ -706,6 +705,12 @@
     <div class="card" id="rwStakingCard">
       <div class="card-title">STAKING REWARDS</div>
       <div id="rwStakingContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
+    </div>
+
+    <!-- ROI COMMISSIONS -->
+    <div class="card" id="rwROICard">
+      <div class="card-title">ROI COMMISSIONS</div>
+      <div id="rwROIContent"><div class="empty-state">Connect wallet to view your rewards.</div></div>
     </div>
 
     <!-- LP POOL FEES -->
@@ -1131,7 +1136,7 @@
 <script src="js/panels/invest.js?v=3"></script>
 <script src="js/panels/pool.js?v=3"></script>
 <script src="js/panels/genealogy.js?v=3"></script>
-<script src="js/panels/rewards.js?v=3"></script>
+<script src="js/panels/rewards.js?v=4"></script>
 <script src="js/panels/myinfo.js?v=3"></script>
 <script src="js/panels/history.js?v=3"></script>
 <script src="js/panels/owner.js?v=3"></script>

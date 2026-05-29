@@ -6,6 +6,200 @@ let _rwRefPerPage    = 10;
 let _rwRefSortKey    = 'ts';
 let _rwRefSortDir    = -1;
 
+// ─── ROI active streams pagination ───────────────────────────────────────────
+let _rwROIStreamPage    = 1;
+let _rwROIStreamPerPage = 5;
+
+function _rwROIStreamsHtml() {
+  if (_rwROIStreamDetails.length === 0) return '';
+  const total = _rwROIStreamDetails.length;
+  const pages = Math.max(1, Math.ceil(total / _rwROIStreamPerPage));
+  const page  = Math.min(_rwROIStreamPage, pages);
+  const start = (page - 1) * _rwROIStreamPerPage;
+  const slice = _rwROIStreamDetails.slice(start, start + _rwROIStreamPerPage);
+  const end   = start + slice.length;
+
+  const perPageBtns = [5, 10, 50, 100].map(n =>
+    `<button onclick="setRwROIStreamPerPage(${n})"
+      style="padding:4px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
+             border:1px solid ${_rwROIStreamPerPage === n ? 'var(--gold)' : 'var(--border)'};
+             background:${_rwROIStreamPerPage === n ? 'rgba(201,168,76,0.12)' : 'var(--surface)'};
+             color:${_rwROIStreamPerPage === n ? 'var(--gold)' : 'var(--muted)'};
+             border-radius:3px;cursor:pointer;">${n}</button>`
+  ).join('');
+
+  const navBtn = (lbl, p, dis) =>
+    `<button onclick="setRwROIStreamPage(${p})" ${dis ? 'disabled' : ''}
+      style="padding:5px 12px;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;
+             border:1px solid var(--border);background:var(--surface);
+             color:${dis ? 'rgba(255,255,255,0.18)' : 'var(--cream)'};
+             border-radius:3px;cursor:${dis ? 'default' : 'pointer'};">${lbl}</button>`;
+
+  let rows = '';
+  for (let j = 0; j < slice.length; j++) {
+    const d = slice[j];
+    const i = start + j;   // global index — matches ticker element IDs
+
+    const paidPct    = d.capETH > 0 ? Math.min(100, d.roiPaidETH / d.capETH * 100) : 0;
+    const accruedPct = d.capETH > 0 ? Math.min(100 - paidPct, d.accruedETH / d.capETH * 100) : 0;
+    const totalPct   = paidPct + accruedPct;
+    const isAtCap    = totalPct >= 99.99;
+
+    const progressBar = `
+      <div class="dis-bar-track" style="width:100%;min-width:90px;">
+        <div class="dis-bar-claimed" style="width:${paidPct.toFixed(2)}%"></div>
+        <div id="rwROIStreamBar-${i}" class="dis-bar-active" style="left:${paidPct.toFixed(2)}%; width:${accruedPct.toFixed(2)}%"></div>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:3px;">
+        <span id="rwROIStreamPct-${i}">${totalPct >= 100 ? '100' : totalPct.toFixed(2)}% of cap</span>${isAtCap ? ' · <span style="color:var(--gold);">cap reached</span>' : ''}
+      </div>`;
+
+    rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
+      <td style="padding:8px 8px;color:var(--muted);font-size:10px;">
+        ${d.investor.slice(0,6)}…${d.investor.slice(-4)}
+        <div style="color:var(--cream);margin-top:2px;">L${d.level + 1} <span style="color:var(--gold);font-size:10px;">${(d.commRate / 100).toFixed(2)}%</span></div>
+      </td>
+      <td style="padding:8px 8px;color:var(--cream);">$${fmtNum(d.ethInv * USDT_PER_ETH)}
+        <div style="font-size:9px;color:var(--muted);">accrued: <span id="rwROIStreamAccrued-${i}" style="color:var(--gold);">$${(d.accruedETH * USDT_PER_ETH).toFixed(5)}</span></div>
+      </td>
+      <td style="padding:8px 8px;min-width:120px;">${progressBar}</td>
+      <td style="padding:8px 8px;text-align:right;color:var(--muted);font-size:10px;">$${fmtNum(d.capETH * USDT_PER_ETH)}</td>
+      <td style="padding:8px 8px;text-align:right;">
+        <button onclick="claimROIFromStreamBtn('${d.investor}',${d.lockIndex},${d.level},this)"
+          id="rwROIStreamClaimBtn-${i}"
+          style="padding:5px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
+                 border:1px solid var(--gold);background:rgba(201,168,76,0.12);color:var(--gold);
+                 border-radius:3px;cursor:pointer;white-space:nowrap;">CLAIM</button>
+      </td>
+    </tr>`;
+  }
+
+  return `<div style="margin-top:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);">ACTIVE STREAMS</div>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span style="font-size:10px;color:var(--muted);font-family:var(--font-mono);">SHOW</span>
+        ${perPageBtns}
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);">
+            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">STREAM</th>
+            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">INVESTED / ACCRUED</th>
+            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;min-width:120px;">PROGRESS</th>
+            <th style="text-align:right;color:var(--muted);font-weight:400;padding:5px 8px;">CAP</th>
+            <th style="text-align:right;color:var(--muted);font-weight:400;padding:5px 8px;">CLAIM</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:10px;">
+      <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);">
+        ${start + 1}–${end} <span style="opacity:0.5;">of</span> ${total} entries
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${navBtn('‹ PREV', page - 1, page <= 1)}
+        <span style="font-size:11px;font-family:var(--font-mono);color:var(--muted);">PAGE</span>
+        <span style="font-size:14px;font-family:var(--font-mono);color:var(--cream);min-width:22px;text-align:center;">${page}</span>
+        <span style="font-size:11px;font-family:var(--font-mono);color:var(--muted);">OF ${pages}</span>
+        ${navBtn('NEXT ›', page + 1, page >= pages)}
+      </div>
+    </div>
+  </div>`;
+}
+
+function _rwROIStreamsSnapBars(container) {
+  if (!container) return;
+  container.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = 'none');
+  requestAnimationFrame(() => requestAnimationFrame(() =>
+    container.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = '')
+  ));
+}
+
+function setRwROIStreamPage(p) {
+  const pages = Math.max(1, Math.ceil(_rwROIStreamDetails.length / _rwROIStreamPerPage));
+  _rwROIStreamPage = Math.max(1, Math.min(p, pages));
+  const el = document.getElementById('rwROIStreamsContainer');
+  if (el) { el.innerHTML = _rwROIStreamsHtml(); _rwROIStreamsSnapBars(el); }
+}
+
+function setRwROIStreamPerPage(n) {
+  _rwROIStreamPerPage = n;
+  _rwROIStreamPage    = 1;
+  const el = document.getElementById('rwROIStreamsContainer');
+  if (el) { el.innerHTML = _rwROIStreamsHtml(); _rwROIStreamsSnapBars(el); }
+}
+
+
+// ─── ROI Commission live ticker ───────────────────────────────────────────────
+let _rwROIInterval    = null;
+let _rwROIBaseETH     = 0;      // liveETH + pendingETH at fetch time
+let _rwROIRatePerSec  = 0;      // ETH per second from active streams
+let _rwROIFetchWall   = 0;      // wall-clock seconds at fetch
+let _rwROITokenSym    = 'HORDEX';
+let _rwROITokenPrice  = 0;      // ETH per token (spot)
+let _rwROIActiveCount = 0;      // number of active streams
+let _rwROIStreamDetails = [];   // [{investor,lockIndex,level,commRate,ethInv,capETH,accruedETH,streamRate}]
+let _rwROILoading = false;      // concurrency guard
+
+function _rwStopROITicker() {
+  if (_rwROIInterval) { clearInterval(_rwROIInterval); _rwROIInterval = null; }
+}
+
+function _rwStartROITicker() {
+  _rwStopROITicker();
+  _rwROIInterval = setInterval(() => {
+    const liveEl   = document.getElementById('rwROILive');
+    if (!liveEl) { _rwStopROITicker(); return; }
+    const elapsed   = Math.max(0, Math.floor(Date.now() / 1000) - _rwROIFetchWall);
+    const totalETH  = _rwROIBaseETH + elapsed * _rwROIRatePerSec;
+    const totalUSDT = totalETH * USDT_PER_ETH;
+    liveEl.textContent = '$' + totalUSDT.toFixed(5);
+
+    const tokEl = document.getElementById('rwROITokens');
+    if (tokEl && _rwROITokenPrice > 0) {
+      const tokens = totalETH / _rwROITokenPrice;
+      tokEl.textContent = fmtNum(tokens) + ' ' + _rwROITokenSym;
+    }
+
+    const btn = document.getElementById('claimROIBtn');
+    if (btn && btn.textContent !== 'CLAIMING…') {
+      const canClaim  = totalETH > 0.000001;
+      const tokens    = _rwROITokenPrice > 0 ? totalETH / _rwROITokenPrice : 0;
+      btn.textContent = canClaim ? 'CLAIM ALL · ' + fmtNum(tokens) + ' ' + _rwROITokenSym : 'NOTHING TO CLAIM';
+      btn.disabled    = !canClaim;
+      btn.style.background  = canClaim ? 'var(--gold)' : 'rgba(255,255,255,0.06)';
+      btn.style.borderColor = canClaim ? 'var(--gold)' : 'var(--border)';
+      btn.style.color       = canClaim ? '#0a0a0a'     : 'var(--muted)';
+      btn.style.cursor      = canClaim ? 'pointer'     : 'not-allowed';
+    }
+
+    for (let _si = 0; _si < _rwROIStreamDetails.length; _si++) {
+      const _d    = _rwROIStreamDetails[_si];
+      const _capL = Math.max(0, _d.capETH - _d.roiPaidETH);
+      const _a    = Math.min(_capL, Math.max(0, _d.accruedETH + elapsed * _d.streamRate));
+
+      const _accEl = document.getElementById('rwROIStreamAccrued-' + _si);
+      if (_accEl) _accEl.textContent = '$' + (_a * USDT_PER_ETH).toFixed(5);
+
+      if (_d.capETH > 0) {
+        const _paidPct = Math.min(100, _d.roiPaidETH / _d.capETH * 100);
+        const _accPct  = Math.min(100 - _paidPct, _a / _d.capETH * 100);
+        const _barEl   = document.getElementById('rwROIStreamBar-' + _si);
+        if (_barEl) _barEl.style.width = _accPct.toFixed(3) + '%';
+        const _pctEl   = document.getElementById('rwROIStreamPct-' + _si);
+        if (_pctEl) {
+          const _tot = _paidPct + _accPct;
+          _pctEl.textContent = (_tot >= 100 ? '100' : _tot.toFixed(2)) + '% of cap';
+        }
+      }
+    }
+  }, 1000);
+}
+
 // ─── Staking live ticker ──────────────────────────────────────────────────────
 let _rwPollInterval    = null;
 let _rwStakingInterval = null;
@@ -25,9 +219,8 @@ function _rwStartPoll() {
   _rwPollInterval = setInterval(() => {
     const panel = document.getElementById('panel-rewards');
     if (!panel || !panel.classList.contains('active')) { _rwStopPoll(); return; }
-    loadRwStaking(true);
-    loadRwLPFees(true);
-  }, 5000);
+    loadRwROI(true);
+  }, 30000);
 }
 
 function _rwStopTicker() {
@@ -171,7 +364,9 @@ function _rwRefHistHtml() {
     const txUrl   = ev.transactionHash ? `https://amoy.polygonscan.com/tx/${ev.transactionHash}` : null;
 
     if (ev._missed) {
-      const tipText = ev._missedReason === 'cap' ? 'Referral cap over!' : 'Investment not locked!';
+      const tipText = ev._missedReason === 'cap'        ? 'Referral cap exceeded — excess spilled to next upline'
+                   : ev._missedReason === 'ineligible' ? 'Not enough active referrals to qualify for this level'
+                   :                                     'No active investment lock or lock expired';
       rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);background:rgba(248,113,113,0.04);">
         <td style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
         <td style="padding:7px 8px;">
@@ -340,7 +535,7 @@ let _rwLoadTime = 0;
 
 async function loadRewards() {
   if (!contract || !walletAddress) {
-    ['rwRefContent','rwStakingContent','rwLPFeesContent'].forEach(id => {
+    ['rwRefContent','rwStakingContent','rwROIContent','rwLPFeesContent'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = '<div class="empty-state">Connect wallet to view your rewards.</div>';
     });
@@ -352,6 +547,7 @@ async function loadRewards() {
   _tabLoaded.add('rewards');
   loadRwReferral();
   loadRwStaking();
+  loadRwROI();
   loadRwLPFees();
 }
 
@@ -362,27 +558,21 @@ async function loadRwReferral() {
   el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   try {
     const _zeroStats = { earned: ethers.BigNumber.from(0), totalCap: ethers.BigNumber.from(0), remainingCap: ethers.BigNumber.from(0) };
-    const [commStats, commRecords, activeCountRaw, minInvRaw, missedResult] = await Promise.all([
+    // Fast on-chain calls only — _computeMissedWei runs in the background after render
+    const [commStats, commRecords, activeCountRaw, minInvRaw] = await Promise.all([
       contract.getUserCommissionStats(walletAddress).catch(() => _zeroStats),
       contract.getCommissionRecords(walletAddress).catch(() => []),
       contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
-      // _computeMissedWei may fail silently on Amoy RPC — catch and default to empty
-      (async () => {
-        const lb = await provider.getBlockNumber().catch(() => 0);
-        return _computeMissedWei(getFromBlock(lb)).catch(() => ({ total: ethers.BigNumber.from(0), entries: [] }));
-      })(),
     ]);
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
     const minInvLabel = minInvETH > 0 ? `≥ ${fmtUSDT(minInvETH,{noEth:true})} each` : 'any active investment';
 
     const earned    = parseFloat(ethers.utils.formatEther(commStats.earned));
-    const missed    = parseFloat(ethers.utils.formatEther(missedResult.total));
     const remaining = parseFloat(ethers.utils.formatEther(commStats.remainingCap));
 
-    // Normalise on-chain CommissionRecord into the shape the rest of the code expects.
-    // _ts is the on-chain timestamp; blockNumber/transactionHash are not stored on-chain.
+    // Normalise on-chain CommissionRecord — no block fetches needed (ts is stored on-chain)
     const receivedEvs = commRecords.map(r => ({
       _missed: false,
       _ts:     r.ts.toNumber ? r.ts.toNumber() : Number(r.ts),
@@ -391,44 +581,13 @@ async function loadRwReferral() {
       transactionHash: null,
     }));
 
-    const missedEvs = missedResult.entries.map(e => ({
-      _missed: true,
-      _missedReason: (e.received && !e.received.isZero()) ? 'cap' : 'no-lock',
-      _ts: null,
-      args: { from: e.from, level: e.level, amount: e.amount },
-      blockNumber: e.blockNumber,
-      transactionHash: e.transactionHash,
-    }));
-
-    // Fetch block timestamps only for missed entries (which have real blockNumbers)
     _rwRefBlockTsMap = new Map();
-    const blockNums = [...new Set(missedEvs.map(e => e.blockNumber).filter(Boolean))];
-    await Promise.all(blockNums.map(async bn => {
-      const blk = await provider.getBlock(bn).catch(() => null);
-      if (blk) _rwRefBlockTsMap.set(bn, blk.timestamp);
-    }));
-
-    _rwRefAllEvents = [...receivedEvs, ...missedEvs].sort((a, b) => {
-      const ta = a._ts || _rwRefBlockTsMap.get(a.blockNumber) || 0;
-      const tb = b._ts || _rwRefBlockTsMap.get(b.blockNumber) || 0;
-      return tb - ta;
-    });
+    _rwRefAllEvents  = receivedEvs.sort((a, b) => (b._ts || 0) - (a._ts || 0));
     _rwRefPage = 1;
 
-    if (typeof _batchGetRefLabels === 'function') {
-      const fromAddrs = [...new Set(_rwRefAllEvents.map(e => e.args.from))];
-      await _batchGetRefLabels(fromAddrs).catch(() => {});
-    }
-
-    const missedWarn = missed > 0.000001
-      ? `<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;color:#f87171;">
-           <span style="letter-spacing:1px;">⚠ MISSED COMMISSIONS: ${fmtUSDT(missed)}</span>
-           <div style="margin-top:4px;color:rgba(248,113,113,0.7);font-size:10px;">Includes commissions that bypassed you entirely (ineligible) and excess that spilled past your 5× cap. Invest to earn future commissions in full.</div>
-         </div>` : '';
-
     const maxEligibleLevel = Math.min(activeCount, 10);
-    const eligColor = maxEligibleLevel > 0 ? '#4ade80' : '#f87171';
 
+    // Render immediately — missed card shows loading dots
     el.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
@@ -439,17 +598,78 @@ async function loadRwReferral() {
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CAP REMAINING</div>
           <div data-field="remaining" style="font-size:18px;color:var(--gold);font-family:var(--font-display);">${fmtUSDT(remaining)}</div>
         </div>
-        <div style="background:${missed > 0.000001 ? 'rgba(248,113,113,0.07)' : 'var(--bg)'};border:1px solid ${missed > 0.000001 ? 'rgba(248,113,113,0.35)' : 'var(--border)'};border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:${missed > 0.000001 ? '#f87171' : 'var(--muted)'};margin-bottom:6px;">MISSED</div>
-          <div style="font-size:18px;font-family:var(--font-display);color:${missed > 0.000001 ? '#f87171' : 'var(--muted)'};">${missed > 0.000001 ? fmtUSDT(missed) : '—'}</div>
+        <div id="rwRefMissedCard" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div id="rwRefMissedLabel" style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">MISSED</div>
+          <div id="rwRefMissedVal" style="font-size:18px;font-family:var(--font-display);color:var(--muted);"><span class="ld"><span></span><span></span><span></span></span></div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">ELIGIBLE UP TO</div>
           <div style="font-size:18px;font-family:var(--font-display);color:${maxEligibleLevel === 10 ? '#4ade80' : maxEligibleLevel > 0 ? 'var(--cream)' : 'var(--muted)'};">${maxEligibleLevel > 0 ? 'Level ' + maxEligibleLevel : '—'}${maxEligibleLevel === 10 ? ' · MAX' : ''}</div>
         </div>
       </div>
-      ${missedWarn}
+      <div id="rwRefMissedWarn"></div>
       <div id="rwRefHistContainer">${_rwRefHistHtml()}</div>`;
+
+    // Labels in background — re-renders table when ready, doesn't block initial display
+    if (typeof _batchGetRefLabels === 'function') {
+      const fromAddrs = [...new Set(_rwRefAllEvents.map(e => e.args.from))];
+      _batchGetRefLabels(fromAddrs).catch(() => {}).then(() => {
+        const c = document.getElementById('rwRefHistContainer');
+        if (c) c.innerHTML = _rwRefHistHtml();
+      });
+    }
+
+    // Missed commissions — computed in background, updates card + table when done
+    (async () => {
+      try {
+        const lb = await provider.getBlockNumber().catch(() => 0);
+        const missedResult = await _computeMissedWei(getFromBlock(lb))
+          .catch(() => ({ total: ethers.BigNumber.from(0), entries: [] }));
+        const missed = parseFloat(ethers.utils.formatEther(missedResult.total));
+
+        // Update missed stat card
+        const missedCard  = document.getElementById('rwRefMissedCard');
+        const missedLabel = document.getElementById('rwRefMissedLabel');
+        const missedVal   = document.getElementById('rwRefMissedVal');
+        if (missedCard) {
+          missedCard.style.background   = missed > 0.000001 ? 'rgba(248,113,113,0.07)' : 'var(--bg)';
+          missedCard.style.borderColor  = missed > 0.000001 ? 'rgba(248,113,113,0.35)' : 'var(--border)';
+        }
+        if (missedLabel) missedLabel.style.color = missed > 0.000001 ? '#f87171' : 'var(--muted)';
+        if (missedVal) {
+          missedVal.style.color = missed > 0.000001 ? '#f87171' : 'var(--muted)';
+          missedVal.innerHTML   = missed > 0.000001 ? fmtUSDT(missed) : '0';
+        }
+
+        // Update warning banner
+        const warnEl = document.getElementById('rwRefMissedWarn');
+        if (warnEl && missed > 0.000001) {
+          warnEl.innerHTML = `<div style="background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;color:#f87171;">
+            <span style="letter-spacing:1px;">⚠ MISSED COMMISSIONS: ${fmtUSDT(missed)}</span>
+            <div style="margin-top:4px;color:rgba(248,113,113,0.7);font-size:10px;">Includes commissions that bypassed you entirely (ineligible) and excess that spilled past your 5× cap. Invest to earn future commissions in full.</div>
+          </div>`;
+        }
+
+        // Merge missed entries into the event list and re-render table
+        if (missedResult.entries.length > 0) {
+          const missedEvs = missedResult.entries.map(e => ({
+            _missed: true,
+            _missedReason: e.reason === 2 ? 'cap' : e.reason === 0 ? 'ineligible' : 'no-lock',
+            _ts: e._ts || null,
+            args: { from: e.from, level: e.level, amount: e.amount },
+            blockNumber: null,
+            transactionHash: null,
+          }));
+          _rwRefAllEvents = [..._rwRefAllEvents, ...missedEvs].sort((a, b) => {
+            const ta = a._ts || _rwRefBlockTsMap.get(a.blockNumber) || 0;
+            const tb = b._ts || _rwRefBlockTsMap.get(b.blockNumber) || 0;
+            return tb - ta;
+          });
+          const c = document.getElementById('rwRefHistContainer');
+          if (c) c.innerHTML = _rwRefHistHtml();
+        }
+      } catch(_) {}
+    })();
 
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
@@ -655,6 +875,205 @@ async function claimStakingReward() {
   }
 }
 
+// ─── loadRwROI ────────────────────────────────────────────────────────────────
+
+async function loadRwROI(silent = false) {
+  if (_rwROILoading) return;
+  _rwROILoading = true;
+  const el = document.getElementById('rwROIContent');
+  if (!el) { _rwROILoading = false; return; }
+  if (!silent) {
+    _rwStopROITicker();
+    el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
+  }
+  try {
+    const COMM_RATES = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+
+    const [roiData, activeStreams, platformToken, latestBlock] = await Promise.all([
+      contract.getROIData(walletAddress).catch(() => null),
+      contract.getActiveROIStreams(walletAddress).catch(() => null),
+      contract.platformToken().catch(() => null),
+      provider.getBlock('latest').catch(() => null),
+    ]);
+
+    // In silent (poll) mode: if core data failed, keep the existing ticker running
+    if (silent && roiData === null) { _rwROILoading = false; return; }
+    if (silent && activeStreams === null) { _rwROILoading = false; return; }
+
+    // Reset stream page to 1 only on full (non-silent) loads to preserve user's position
+    if (!silent) { _rwROIStreamPage = 1; }
+
+    const streams = activeStreams || [];
+
+    const liveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
+    const pendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
+    const baseETH    = liveETH + pendingETH;
+
+    // Fetch token price and symbol
+    let tokenSym = 'HORDEX', tokenPrice = 0;
+    if (platformToken) {
+      try {
+        const pool = await _dashGetPoolPrice(platformToken);
+        if (pool) tokenPrice = pool.priceEth;
+      } catch(_) {}
+      try { const t = await contract.getToken(platformToken); if (t.symbol) tokenSym = t.symbol; } catch(_) {}
+    }
+
+    // Compute per-second accrual rate + per-stream details — all from lock data, no extra RPC calls.
+    // capETH = ethInv * commRate / 10_000  (mirrors contract's initROIStreamsExt formula)
+    // accruedETH = same linear formula as _calcAccrued (recipientSince ≈ lockedAt for new streams)
+    let ratePerSec = 0;
+    const wallNow  = Math.floor(Date.now() / 1000);
+    const blockTs  = latestBlock ? latestBlock.timestamp : wallNow;
+    const effNow   = Math.max(blockTs, wallNow);
+    _rwROIStreamDetails = [];
+
+    if (streams.length > 0) {
+      const lockDataMap   = new Map();
+      const streamInfoMap = new Map();
+      const uniqueInvKeys = [...new Set(streams.map(r => r.investor.toLowerCase()))];
+      await Promise.all([
+        ...uniqueInvKeys.map(async (key) => {
+          const addr = streams.find(r => r.investor.toLowerCase() === key).investor;
+          try { lockDataMap.set(key, await contract.getUserLPLocks(addr)); } catch(_) {}
+        }),
+        ...streams.map(async (ref) => {
+          const key = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
+          try {
+            const info = await contract.getROIStreamInfo(ref.investor, ref.lockIndex, ref.level);
+            streamInfoMap.set(key, info);
+          } catch(_) {}
+        })
+      ]);
+
+      for (const ref of streams) {
+        const lock = (lockDataMap.get(ref.investor.toLowerCase()) || [])[Number(ref.lockIndex)];
+        if (!lock || lock.removed) continue;
+        const unlockTime = Number(lock.unlockTime);
+        const lockedAt   = Number(lock.lockedAt);
+        const lockDur    = unlockTime - lockedAt;
+        if (lockDur <= 0) continue;
+        const ethInv   = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+        const ratePPM  = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+        const commRate = COMM_RATES[Number(ref.level)] || 0;
+        const capETH   = ethInv * commRate / 10_000;
+        const streamRate = (effNow < unlockTime && ratePPM > 0)
+          ? ethInv * ratePPM * commRate / (50_000_000_000 * lockDur)
+          : 0;
+
+        const streamKey    = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
+        const streamInfo   = streamInfoMap.get(streamKey);
+        const roiPaidETH   = streamInfo ? parseFloat(ethers.utils.formatEther(streamInfo.roiPaidETH)) : 0;
+        const recSince     = streamInfo ? Number(streamInfo.recipientSince) : lockedAt;
+
+        // Accrue from recipientSince (more accurate than from lockedAt), capped by remaining cap
+        const startTs    = Math.max(lockedAt, recSince);
+        const elapsed2   = Math.max(0, Math.min(unlockTime, effNow) - startTs);
+        const capLeft    = Math.max(0, capETH - roiPaidETH);
+        const accruedETH = lockDur > 0 && ratePPM > 0
+          ? Math.min(capLeft, ethInv * ratePPM * elapsed2 * commRate / (50_000_000_000 * lockDur))
+          : 0;
+
+        ratePerSec += streamRate;
+        _rwROIStreamDetails.push({
+          investor: ref.investor, lockIndex: Number(ref.lockIndex), level: Number(ref.level),
+          commRate, ethInv, capETH, accruedETH, streamRate, roiPaidETH
+        });
+      }
+    }
+
+    _rwROIBaseETH     = baseETH;
+    _rwROIRatePerSec  = ratePerSec;
+    _rwROIFetchWall   = wallNow;
+    _rwROITokenSym    = tokenSym;
+    _rwROITokenPrice  = tokenPrice;
+    _rwROIActiveCount = streams.length;
+
+    const claimTokens = tokenPrice > 0 && baseETH > 0.000001 ? baseETH / tokenPrice : 0;
+    const canClaim    = baseETH > 0.000001;
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">LIVE ACCRUING (USDT) <span style="color:#a78bfa;font-size:9px;">●</span></div>
+          <div id="rwROILive" style="font-size:16px;color:#a78bfa;font-family:var(--font-display);">$${(liveETH * USDT_PER_ETH).toFixed(5)}</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);">${streams.length} active stream${streams.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">SETTLED PENDING (USDT)</div>
+          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">$${fmtNum(pendingETH * USDT_PER_ETH)}</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);">from redirected streams</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE (TOKENS)</div>
+          <div id="rwROITokens" style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${claimTokens > 0.000001 ? fmtNum(claimTokens) + ' ' + tokenSym : '—'}</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <button id="claimROIBtn" onclick="claimAllROI()"
+          style="background:${canClaim ? 'var(--gold)' : 'rgba(255,255,255,0.06)'};
+                 border:1px solid ${canClaim ? 'var(--gold)' : 'var(--border)'};
+                 color:${canClaim ? '#0a0a0a' : 'var(--muted)'};
+                 border-radius:4px;padding:10px 24px;font-family:var(--font-mono);
+                 font-size:11px;font-weight:700;letter-spacing:1px;
+                 cursor:${canClaim ? 'pointer' : 'not-allowed'};transition:opacity 0.15s;"
+          ${canClaim ? '' : 'disabled'}>
+          ${canClaim ? 'CLAIM ALL · ' + fmtNum(claimTokens) + ' ' + tokenSym : 'NOTHING TO CLAIM'}
+        </button>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">Accumulates from your downline's staking rewards · No cooldown</div>
+      </div>
+
+      ${streams.length === 0 && pendingETH < 0.000001 ? '<div class="empty-state">No active ROI streams. Refer active investors to start earning.</div>' : ''}
+
+      <div id="rwROIStreamsContainer">${_rwROIStreamsHtml()}</div>`;
+
+    // Snap bars to rendered positions without CSS transition (same as staking)
+    el.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = 'none');
+    requestAnimationFrame(() => requestAnimationFrame(() =>
+      el.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = '')
+    ));
+
+    _rwStopROITicker();
+    _rwStartROITicker();
+  } catch(e) {
+    if (!silent) el.innerHTML = `<div class="empty-state">Error: ${e.errorName || e.reason || e?.error?.message || e.message}</div>`;
+  } finally {
+    _rwROILoading = false;
+  }
+}
+
+async function claimROIFromStreamBtn(investor, lockIndex, level, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
+  try {
+    toast('Confirm ROI claim in MetaMask…', 'info');
+    const tx = await contract.connect(signer).claimROIFromStream(investor, lockIndex, level, _GAS);
+    toast('Transaction sent — waiting for confirmation…', 'info');
+    await tx.wait();
+    toast('ROI commission claimed!', 'success');
+    loadRwROI();
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'CLAIM'; }
+    toast('Claim failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  }
+}
+
+async function claimAllROI() {
+  const btn = document.getElementById('claimROIBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
+  try {
+    toast('Confirm ROI commission claim in MetaMask…', 'info');
+    const tx = await contract.connect(signer).claimAllROI(_GAS);
+    toast('Transaction sent — waiting for confirmation…', 'info');
+    await tx.wait();
+    toast('ROI commissions claimed!', 'success');
+    loadRwROI();
+  } catch(e) {
+    if (btn) { btn.disabled = false; }
+    toast('Claim failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+  }
+}
+
 // ─── loadRwLPFees ─────────────────────────────────────────────────────────────
 
 async function loadRwLPFees(silent = false) {
@@ -758,10 +1177,15 @@ window._rwAppendCommission = _rwAppendCommission;
 window.loadRewards        = loadRewards;
 window.loadRwReferral     = loadRwReferral;
 window.loadRwStaking      = loadRwStaking;
+window.loadRwROI          = loadRwROI;
 window.loadRwLPFees       = loadRwLPFees;
 window._rwStopPoll        = _rwStopPoll;
 window._rwStartPoll       = _rwStartPoll;
-window.claimStakingReward = claimStakingReward;
-window.setRwRefPerPage    = setRwRefPerPage;
-window.setRwRefPage       = setRwRefPage;
-window.sortRwRef          = sortRwRef;
+window.claimStakingReward      = claimStakingReward;
+window.claimAllROI             = claimAllROI;
+window.claimROIFromStreamBtn   = claimROIFromStreamBtn;
+window.setRwRefPerPage       = setRwRefPerPage;
+window.setRwRefPage          = setRwRefPage;
+window.sortRwRef             = sortRwRef;
+window.setRwROIStreamPage    = setRwROIStreamPage;
+window.setRwROIStreamPerPage = setRwROIStreamPerPage;

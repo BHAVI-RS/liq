@@ -10,7 +10,7 @@
 const hre = require("hardhat");
 
 const TOTAL          = 60;
-const FUND_TARGET    = hre.ethers.parseEther("2");   // top-up target per sub-wallet
+const FUND_TARGET    = hre.ethers.parseEther("5");   // top-up target per sub-wallet
 const FUND_THRESHOLD = hre.ethers.parseEther("0.5"); // skip if already has this much
 
 function sep(c = "─", n = 60) { return c.repeat(n); }
