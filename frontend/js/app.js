@@ -173,7 +173,7 @@ function registerEthereumListeners(eth) {
     if (_txInFlight === 0 && App.walletAddress) {
       App.walletProvider = new ethers.providers.Web3Provider(eth);
       App.signer         = App.walletProvider.getSigner();
-      App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
+      App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
       if (contractAddress) {
         App.contract = new ethers.Contract(contractAddress, CONTRACT_ABI, App.signer);
         _stopChainListeners();
@@ -210,7 +210,7 @@ async function connectWallet() {
     }
     App.signer        = App.walletProvider.getSigner();
     App.walletAddress = await App.signer.getAddress();
-    App.provider      = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
+    App.provider      = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
 
     document.getElementById('connectBtn').textContent = App.walletAddress.slice(0,6) + '...' + App.walletAddress.slice(-4);
     document.getElementById('connectBtn').classList.add('connected');
@@ -495,7 +495,7 @@ async function loadLandingStats() {
     if (cached) _applyLandingStats(cached);
   } catch(_) {}
 
-  const readProvider = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
+  const readProvider = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
   const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
 
   // ── Fast path: single view call — shows 3 stats with no event scanning ──
@@ -592,7 +592,7 @@ window.addEventListener('load', async () => {
   try {
     eth.autoRefreshOnNetworkChange = false;
     App.walletProvider = new ethers.providers.Web3Provider(eth);
-    App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL);
+    App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
     const accounts = await eth.request({ method: 'eth_accounts' });
 
     if (!accounts || accounts.length === 0 ||

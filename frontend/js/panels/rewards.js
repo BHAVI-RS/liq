@@ -2,7 +2,7 @@
 let _rwRefAllEvents  = [];
 let _rwRefBlockTsMap = new Map();
 let _rwRefPage       = 1;
-let _rwRefPerPage    = 10;
+let _rwRefPerPage    = 5;
 let _rwRefSortKey    = 'ts';
 let _rwRefSortDir    = -1;
 
@@ -35,6 +35,8 @@ function _rwROIStreamsHtml() {
              color:${dis ? 'rgba(255,255,255,0.18)' : 'var(--cream)'};
              border-radius:3px;cursor:${dis ? 'default' : 'pointer'};">${lbl}</button>`;
 
+  const ROI_LEVEL_RATES = [10, 5, 2, 1, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25];
+
   let rows = '';
   for (let j = 0; j < slice.length; j++) {
     const d = slice[j];
@@ -44,39 +46,44 @@ function _rwROIStreamsHtml() {
     const accruedPct = d.capETH > 0 ? Math.min(100 - paidPct, d.accruedETH / d.capETH * 100) : 0;
     const totalPct   = paidPct + accruedPct;
     const isAtCap    = totalPct >= 99.99;
-
-    const progressBar = `
-      <div class="dis-bar-track" style="width:100%;min-width:90px;">
-        <div class="dis-bar-claimed" style="width:${paidPct.toFixed(2)}%"></div>
-        <div id="rwROIStreamBar-${i}" class="dis-bar-active" style="left:${paidPct.toFixed(2)}%; width:${accruedPct.toFixed(2)}%"></div>
-      </div>
-      <div style="font-size:9px;color:var(--muted);margin-top:3px;">
-        <span id="rwROIStreamPct-${i}">${totalPct >= 100 ? '100' : totalPct.toFixed(2)}% of cap</span>${isAtCap ? ' · <span style="color:var(--gold);">cap reached</span>' : ''}
-      </div>`;
+    const levelRate  = ROI_LEVEL_RATES[d.level] !== undefined ? ROI_LEVEL_RATES[d.level] : '—';
+    const paidTokens = _rwROITokenPrice > 0 && d.roiPaidNonZero ? d.roiPaidETH / _rwROITokenPrice : 0;
+    const claimedLine = d.roiPaidNonZero
+      ? `<div style="font-size:9px;color:#4ade80;margin-top:3px;">✓ ${paidTokens > 0 ? fmtNum(paidTokens) + ' ' + _rwROITokenSym : '$' + fmtNum(d.roiPaidETH * USDT_PER_ETH) + ' USDT'} claimed</div>`
+      : `<div style="font-size:9px;color:var(--muted);margin-top:3px;">0 ${_rwROITokenSym} claimed</div>`;
 
     rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
       <td style="padding:8px 8px;color:var(--muted);font-size:10px;">
-        ${d.investor.slice(0,6)}…${d.investor.slice(-4)}
-        <div style="color:var(--cream);margin-top:2px;">L${d.level + 1} <span style="color:var(--gold);font-size:10px;">${(d.commRate / 100).toFixed(2)}%</span></div>
+        ${d.investor.slice(0,6)}…<span class="rw-roi-addr-end">${d.investor.slice(-4)}</span>
+        <div style="color:var(--cream);margin-top:2px;">L${d.level + 1} <span style="color:var(--gold);font-size:10px;">${levelRate}%</span></div>
       </td>
-      <td style="padding:8px 8px;color:var(--cream);">$${fmtNum(d.ethInv * USDT_PER_ETH)}
-        <div style="font-size:9px;color:var(--muted);">accrued: <span id="rwROIStreamAccrued-${i}" style="color:var(--gold);">$${(d.accruedETH * USDT_PER_ETH).toFixed(5)}</span></div>
+      <td style="padding:8px 8px;">
+        <span style="font-family:var(--font-display);font-size:20px;line-height:1.1;color:var(--gold);">$${fmtNum(d.ethInv * USDT_PER_ETH)}</span>
       </td>
-      <td style="padding:8px 8px;min-width:120px;">${progressBar}</td>
-      <td style="padding:8px 8px;text-align:right;color:var(--muted);font-size:10px;">$${fmtNum(d.capETH * USDT_PER_ETH)}</td>
+      <td style="padding:8px 8px;min-width:160px;">
+        <div style="display:flex;align-items:baseline;gap:6px;">
+          <span id="rwROIStreamAccrued-${i}" style="color:var(--gold);">$${((d.roiPaidETH + d.accruedETH) * USDT_PER_ETH).toFixed(5)}</span>
+          <span id="rwROIStreamPct-${i}" class="rw-roi-stream-pct" style="font-size:9px;color:var(--muted);">${totalPct >= 100 ? '100' : totalPct.toFixed(2)}%</span>${isAtCap ? '<span style="font-size:9px;color:var(--gold);"> cap reached</span>' : ''}
+        </div>
+        <div style="margin-top:5px;" class="dis-bar-track">
+          <div class="dis-bar-claimed" style="width:${paidPct.toFixed(2)}%"></div>
+          <div id="rwROIStreamBar-${i}" class="dis-bar-active" style="left:${paidPct.toFixed(2)}%; width:${accruedPct.toFixed(2)}%"></div>
+        </div>
+        ${claimedLine}
+      </td>
       <td style="padding:8px 8px;text-align:right;">
         <button onclick="claimROIFromStreamBtn('${d.investor}',${d.lockIndex},${d.level},this)"
           id="rwROIStreamClaimBtn-${i}"
           style="padding:5px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
                  border:1px solid var(--gold);background:rgba(201,168,76,0.12);color:var(--gold);
-                 border-radius:3px;cursor:pointer;white-space:nowrap;">CLAIM</button>
+                 border-radius:3px;cursor:pointer;white-space:nowrap;">${(() => { const _t = _rwROITokenPrice > 0 && d.accruedETH > 0 ? d.accruedETH / _rwROITokenPrice : 0; return _t > 0 ? 'CLAIM · ' + _t.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM'; })()}</button>
       </td>
     </tr>`;
   }
 
   return `<div style="margin-top:16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);">ACTIVE STREAMS</div>
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);"><span class="rw-streams-title-desk">${total} ACTIVE STREAM${total !== 1 ? 'S' : ''}</span><span class="rw-streams-title-mob">Active Streams</span></div>
       <div style="display:flex;align-items:center;gap:5px;">
         <span style="font-size:10px;color:var(--muted);font-family:var(--font-mono);">SHOW</span>
         ${perPageBtns}
@@ -87,9 +94,8 @@ function _rwROIStreamsHtml() {
         <thead>
           <tr style="border-bottom:1px solid var(--border);">
             <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">STREAM</th>
-            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">INVESTED / ACCRUED</th>
-            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;min-width:120px;">PROGRESS</th>
-            <th style="text-align:right;color:var(--muted);font-weight:400;padding:5px 8px;">CAP</th>
+            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">INVESTED</th>
+            <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">ACCRUED</th>
             <th style="text-align:right;color:var(--muted);font-weight:400;padding:5px 8px;">CLAIM</th>
           </tr>
         </thead>
@@ -167,7 +173,7 @@ function _rwStartROITicker() {
 
     const btn = document.getElementById('claimROIBtn');
     if (btn && btn.textContent !== 'CLAIMING…') {
-      const canClaim  = totalETH > 0.000001;
+      const canClaim  = totalUSDT > 0.00001;
       const tokens    = _rwROITokenPrice > 0 ? totalETH / _rwROITokenPrice : 0;
       btn.textContent = canClaim ? 'CLAIM ALL · ' + fmtNum(tokens) + ' ' + _rwROITokenSym : 'NOTHING TO CLAIM';
       btn.disabled    = !canClaim;
@@ -183,7 +189,13 @@ function _rwStartROITicker() {
       const _a    = Math.min(_capL, Math.max(0, _d.accruedETH + elapsed * _d.streamRate));
 
       const _accEl = document.getElementById('rwROIStreamAccrued-' + _si);
-      if (_accEl) _accEl.textContent = '$' + (_a * USDT_PER_ETH).toFixed(5);
+      if (_accEl) _accEl.textContent = '$' + ((_d.roiPaidETH + _a) * USDT_PER_ETH).toFixed(5);
+
+      const _claimBtn = document.getElementById('rwROIStreamClaimBtn-' + _si);
+      if (_claimBtn && _claimBtn.textContent !== 'CLAIMING…') {
+        const _bt = _rwROITokenPrice > 0 && _a > 0 ? _a / _rwROITokenPrice : 0;
+        _claimBtn.textContent = _bt > 0 ? 'CLAIM · ' + _bt.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM';
+      }
 
       if (_d.capETH > 0) {
         const _paidPct = Math.min(100, _d.roiPaidETH / _d.capETH * 100);
@@ -358,6 +370,7 @@ function _rwRefHistHtml() {
     const date        = tsVal ? _fmtTsFull(tsVal) : (ev.blockNumber ? `Block #${ev.blockNumber}` : '—');
     const from        = ev.args.from;
     const fromDisplay = (typeof _labelCache !== 'undefined' && _labelCache.get(from.toLowerCase())) || from;
+    const fromShort   = fromDisplay.length > 12 ? fromDisplay.slice(0, 12) + '…' : fromDisplay;
     const amt     = parseFloat(ethers.utils.formatEther(ev.args.amount));
     const level   = Number(ev.args.level);
     const ratePct = (RATES[level - 1] || 0) / 500;
@@ -368,16 +381,16 @@ function _rwRefHistHtml() {
                    : ev._missedReason === 'ineligible' ? 'Not enough active referrals to qualify for this level'
                    :                                     'No active investment lock or lock expired';
       rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);background:rgba(248,113,113,0.04);">
-        <td style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
-        <td style="padding:7px 8px;">
-          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
+        <td class="rw-ref-col-date" style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
+        <td class="rw-ref-from-cell" style="padding:7px 8px;">
+          <div class="rw-ref-from-inner" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;min-width:0;"><span class="rw-addr-full">${fromDisplay}</span><span class="rw-addr-short">${fromShort}</span></a>
             <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
           </div>
         </td>
         <td style="padding:7px 8px;text-align:center;color:#f87171;">L${level}</td>
-        <td style="padding:7px 8px;text-align:center;color:rgba(248,113,113,0.6);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
-        <td style="padding:7px 8px;text-align:right;">
+        <td class="rw-ref-col-rate" style="padding:7px 8px;text-align:center;color:rgba(248,113,113,0.6);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
+        <td class="rw-ref-amt-cell" style="padding:7px 8px;text-align:right;">
           <div class="rw-missed-tip">
             ${txUrl ? `<a href="${txUrl}" target="_blank" rel="noopener" style="color:#f87171;text-decoration:none;">⚠ −${fmtNum(ethToUSDT(amt))} USDT ↗</a>` : `<span style="color:#f87171;">⚠ −${fmtNum(ethToUSDT(amt))} USDT</span>`}
             <div class="rw-missed-tip-box">${tipText}</div>
@@ -386,21 +399,21 @@ function _rwRefHistHtml() {
       </tr>`;
     } else {
       rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);">
-        <td style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
-        <td style="padding:7px 8px;">
-          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;">${fromDisplay}</a>
+        <td class="rw-ref-col-date" style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
+        <td class="rw-ref-from-cell" style="padding:7px 8px;">
+          <div class="rw-ref-from-inner" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;min-width:0;"><span class="rw-addr-full">${fromDisplay}</span><span class="rw-addr-short">${fromShort}</span></a>
             <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
           </div>
         </td>
         <td style="padding:7px 8px;text-align:center;color:var(--cream);">L${level}</td>
-        <td style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
-        <td style="padding:7px 8px;text-align:right;">${txUrl ? `<a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${fmtNum(ethToUSDT(amt))} USDT ↗</a>` : `<span style="color:#4ade80;">+${fmtNum(ethToUSDT(amt))} USDT</span>`}</td>
+        <td class="rw-ref-col-rate" style="padding:7px 8px;text-align:center;color:var(--muted);font-size:10px;">${ratePct.toFixed(ratePct % 1 === 0 ? 0 : 2)}%</td>
+        <td class="rw-ref-amt-cell" style="padding:7px 8px;text-align:right;">${txUrl ? `<a href="${txUrl}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;">+${fmtNum(ethToUSDT(amt))} USDT ↗</a>` : `<span style="color:#4ade80;">+${fmtNum(ethToUSDT(amt))} USDT</span>`}</td>
       </tr>`;
     }
   }
 
-  const perPageBtns = [10, 50, 100].map(n =>
+  const perPageBtns = [5, 10, 50, 100].map(n =>
     `<button onclick="setRwRefPerPage(${n})"
       style="padding:4px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
              border:1px solid ${_rwRefPerPage === n ? 'var(--gold)' : 'var(--border)'};
@@ -439,10 +452,10 @@ function _rwRefHistHtml() {
       <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);">
         <thead>
           <tr style="border-bottom:1px solid var(--border);">
-            <th onclick="sortRwRef('ts')"     style="text-align:left;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;cursor:pointer;user-select:none;white-space:nowrap;">DATE${_rwRefSI('ts')}</th>
+            <th onclick="sortRwRef('ts')"     class="rw-ref-col-date" style="text-align:left;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;cursor:pointer;user-select:none;white-space:nowrap;">DATE${_rwRefSI('ts')}</th>
             <th                               style="text-align:left;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">FROM</th>
             <th onclick="sortRwRef('level')"  style="text-align:center;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;cursor:pointer;user-select:none;">LVL${_rwRefSI('level')}</th>
-            <th                               style="text-align:center;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">RATE</th>
+            <th                               class="rw-ref-col-rate" style="text-align:center;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">RATE</th>
             <th onclick="sortRwRef('amount')" style="text-align:right;padding:7px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;cursor:pointer;user-select:none;">AMOUNT${_rwRefSI('amount')}</th>
           </tr>
         </thead>
@@ -589,7 +602,7 @@ async function loadRwReferral() {
 
     // Render immediately — missed card shows loading dots
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px;">
+      <div class="rw-stat-grid-4">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL EARNED</div>
           <div data-field="earned" style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned, {decimals: 3})}</div>
@@ -609,6 +622,17 @@ async function loadRwReferral() {
       </div>
       <div id="rwRefMissedWarn"></div>
       <div id="rwRefHistContainer">${_rwRefHistHtml()}</div>`;
+
+    // If the target is rwStakingCard, scroll now — referral is the only card above it.
+    // For rwROICard / rwLPFeesCard, keep the flag so loadRwStaking consumes it after
+    // staking content renders (staking also sits above those cards).
+    if (window._rwPendingScrollId === 'rwStakingCard') {
+      window._rwPendingScrollId = null;
+      requestAnimationFrame(() => {
+        const el = document.getElementById('rwStakingCard');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
 
     // Labels in background — re-renders table when ready, doesn't block initial display
     if (typeof _batchGetRefLabels === 'function') {
@@ -772,31 +796,37 @@ async function loadRwStaking(silent = false) {
 
       lockRows += `
         <tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
-          <td style="padding:8px 8px;color:var(--muted);font-size:10px;">#${i+1}</td>
-          <td style="padding:8px 8px;color:var(--cream);">${fmtUSDT(ethInvested,{noEth:true})}<div style="font-size:9px;color:var(--muted);">accrued: <span id="rwLockAccrued-${i}" style="color:var(--gold);">$${fmtNum(liveUSDT_lock)} USDT</span></div></td>
-          <td style="padding:8px 8px;">
-            ${progressBar}
-            <div style="font-size:9px;color:var(--muted);margin-top:3px;">${progressLabel} · ${claimedCell}</div>
+          <td class="rw-s-td-num" style="padding:8px 8px;color:var(--muted);font-size:10px;">#${i+1}</td>
+          <td class="rw-s-td-inv" style="padding:8px 8px;">
+            <span style="font-family:var(--font-display);font-size:20px;line-height:1.1;color:var(--gold);white-space:nowrap;">${fmtUSDT(ethInvested,{noEth:true})}</span>
           </td>
-          <td style="padding:8px 8px;text-align:right;">${statusCell}</td>
+          <td class="rw-s-td-prog" style="padding:8px 8px;">
+            <div class="rw-s-prog-header" style="display:flex;align-items:baseline;gap:6px;margin-bottom:5px;">
+              <span id="rwLockAccrued-${i}" style="color:var(--gold);">$${fmtNum(liveUSDT_lock)} USDT</span>
+              <span style="font-size:9px;color:var(--muted);">${progressLabel}</span>
+            </div>
+            ${progressBar}
+            ${claimedCell ? `<div class="rw-s-prog-claimed" style="font-size:9px;color:var(--muted);margin-top:3px;">${claimedCell}</div>` : ''}
+          </td>
+          <td class="rw-s-td-claim" style="padding:8px 8px;text-align:right;">${statusCell}</td>
         </tr>`;
     }
 
     const canClaim = totalClaimableTokens > 0.000001;
 
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+      <div class="rw-stat-grid-3 rw-staking-stat-grid">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">ACCRUED (USDT)</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">ACCRUED (USDT)</span><span class="rw-stat-label-mob">Accrued</span></div>
           <div id="rwStakingAccrued" style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${totalLiveUSDT > 0 ? '$' + fmtNum(totalLiveUSDT) : '$0'}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE (USDT)</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">CLAIMABLE (USDT)</span><span class="rw-stat-label-mob">Claimable</span></div>
           <div id="rwStakingClaimable" style="font-size:16px;color:var(--cream);font-family:var(--font-display);">${totalClaimableUSDT > 0 ? '$' + fmtNum(totalClaimableUSDT) : '$0'}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">LIFETIME CLAIMED</div>
-          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">${lifetimeClaimed > 0 ? fmtNum(lifetimeClaimed) : '0'}</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">LIFETIME CLAIMED</span><span class="rw-stat-label-mob">Claimed</span></div>
+          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">${lifetimeClaimed > 0 ? fmtNum(lifetimeClaimed) + ' ' + firstTokenSym : '0'}</div>
         </div>
       </div>
 
@@ -811,13 +841,12 @@ async function loadRwStaking(silent = false) {
           ${canClaim ? '' : 'disabled'}>
           ${canClaim ? 'CLAIM ALL · ' + fmtNum(totalClaimableTokens) + ' ' + firstTokenSym : 'NOTHING TO CLAIM'}
         </button>
-        <div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">No cooldown · tokens sent at current market price</div>
       </div>
 
       ${lockRows ? `
       <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:8px;">PER-INVESTMENT BREAKDOWN</div>
       <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);">
+        <table class="rw-staking-table" style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);">
           <thead>
             <tr style="border-bottom:1px solid var(--border);">
               <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:400;">#</th>
@@ -840,6 +869,17 @@ async function loadRwStaking(silent = false) {
     ));
 
     _rwStartTicker();
+
+    // If navigated here from a dashboard card below the staking section (e.g. ROI),
+    // scroll now that staking content has rendered.
+    if (window._rwPendingScrollId) {
+      const _scrollTarget = window._rwPendingScrollId;
+      window._rwPendingScrollId = null;
+      requestAnimationFrame(() => {
+        const el2 = document.getElementById(_scrollTarget);
+        if (el2) el2.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
 
   } catch(e) {
     document.getElementById('rwStakingContent').innerHTML =
@@ -889,11 +929,12 @@ async function loadRwROI(silent = false) {
   try {
     const COMM_RATES = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
 
-    const [roiData, activeStreams, platformToken, latestBlock] = await Promise.all([
+    const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords] = await Promise.all([
       contract.getROIData(walletAddress).catch(() => null),
       contract.getActiveROIStreams(walletAddress).catch(() => null),
       contract.platformToken().catch(() => null),
       provider.getBlock('latest').catch(() => null),
+      contract.getROIClaimRecords(walletAddress).catch(() => []),
     ]);
 
     // In silent (poll) mode: if core data failed, keep the existing ticker running
@@ -908,6 +949,9 @@ async function loadRwROI(silent = false) {
     const liveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
     const pendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
     const baseETH    = liveETH + pendingETH;
+    const lifetimeClaimedTokens = (roiClaimRecords || []).reduce(
+      (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.tokensAmount)), 0
+    );
 
     // Fetch token price and symbol
     let tokenSym = 'HORDEX', tokenPrice = 0;
@@ -939,10 +983,13 @@ async function loadRwROI(silent = false) {
         }),
         ...streams.map(async (ref) => {
           const key = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
-          try {
-            const info = await contract.getROIStreamInfo(ref.investor, ref.lockIndex, ref.level);
-            streamInfoMap.set(key, info);
-          } catch(_) {}
+          for (let _attempt = 0; _attempt < 2; _attempt++) {
+            try {
+              const info = await contract.getROIStreamInfo(ref.investor, ref.lockIndex, ref.level);
+              streamInfoMap.set(key, info);
+              break;
+            } catch(_) {}
+          }
         })
       ]);
 
@@ -961,10 +1008,12 @@ async function loadRwROI(silent = false) {
           ? ethInv * ratePPM * commRate / (50_000_000_000 * lockDur)
           : 0;
 
-        const streamKey    = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
-        const streamInfo   = streamInfoMap.get(streamKey);
-        const roiPaidETH   = streamInfo ? parseFloat(ethers.utils.formatEther(streamInfo.roiPaidETH)) : 0;
-        const recSince     = streamInfo ? Number(streamInfo.recipientSince) : lockedAt;
+        const streamKey      = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
+        const streamInfo     = streamInfoMap.get(streamKey);
+        const roiPaidRaw     = streamInfo ? streamInfo.roiPaidETH : ethers.BigNumber.from(0);
+        const roiPaidETH     = parseFloat(ethers.utils.formatEther(roiPaidRaw));
+        const roiPaidNonZero = roiPaidRaw.gt(0);
+        const recSince       = streamInfo ? Number(streamInfo.recipientSince) : lockedAt;
 
         // Accrue from recipientSince (more accurate than from lockedAt), capped by remaining cap
         const startTs    = Math.max(lockedAt, recSince);
@@ -977,10 +1026,13 @@ async function loadRwROI(silent = false) {
         ratePerSec += streamRate;
         _rwROIStreamDetails.push({
           investor: ref.investor, lockIndex: Number(ref.lockIndex), level: Number(ref.level),
-          commRate, ethInv, capETH, accruedETH, streamRate, roiPaidETH
+          commRate, ethInv, capETH, accruedETH, streamRate, roiPaidETH, roiPaidNonZero
         });
       }
     }
+
+    // Highest unclaimed rewards first
+    _rwROIStreamDetails.sort((a, b) => b.accruedETH - a.accruedETH);
 
     _rwROIBaseETH     = baseETH;
     _rwROIRatePerSec  = ratePerSec;
@@ -989,24 +1041,22 @@ async function loadRwROI(silent = false) {
     _rwROITokenPrice  = tokenPrice;
     _rwROIActiveCount = streams.length;
 
-    const claimTokens = tokenPrice > 0 && baseETH > 0.000001 ? baseETH / tokenPrice : 0;
-    const canClaim    = baseETH > 0.000001;
+    const claimTokens = tokenPrice > 0 && baseETH * USDT_PER_ETH > 0.00001 ? baseETH / tokenPrice : 0;
+    const canClaim    = baseETH * USDT_PER_ETH > 0.00001;
 
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+      <div class="rw-stat-grid-3 rw-roi-stat-grid">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">LIVE ACCRUING (USDT) <span style="color:#a78bfa;font-size:9px;">●</span></div>
-          <div id="rwROILive" style="font-size:16px;color:#a78bfa;font-family:var(--font-display);">$${(liveETH * USDT_PER_ETH).toFixed(5)}</div>
-          <div style="font-size:9px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);">${streams.length} active stream${streams.length !== 1 ? 's' : ''}</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">ACCRUED (USDT) <span style="color:#a78bfa;font-size:9px;">●</span></span><span class="rw-stat-label-mob">Accrued <span style="color:#a78bfa;font-size:9px;">●</span></span></div>
+          <div id="rwROILive" style="font-size:16px;color:#a78bfa;font-family:var(--font-display);">$${(baseETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">SETTLED PENDING (USDT)</div>
-          <div style="font-size:16px;color:var(--cream);font-family:var(--font-display);">$${fmtNum(pendingETH * USDT_PER_ETH)}</div>
-          <div style="font-size:9px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);">from redirected streams</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">CLAIMABLE (TOKENS)</span><span class="rw-stat-label-mob">Claimable</span></div>
+          <div id="rwROITokens" style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${claimTokens > 0 ? fmtNum(claimTokens) + ' ' + tokenSym : '—'}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CLAIMABLE (TOKENS)</div>
-          <div id="rwROITokens" style="font-size:16px;color:var(--gold);font-family:var(--font-display);">${claimTokens > 0.000001 ? fmtNum(claimTokens) + ' ' + tokenSym : '—'}</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">LIFETIME CLAIMED</span><span class="rw-stat-label-mob">Claimed</span></div>
+          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">${lifetimeClaimedTokens > 0 ? fmtNum(lifetimeClaimedTokens) + ' ' + tokenSym : '0'}</div>
         </div>
       </div>
 
@@ -1021,10 +1071,9 @@ async function loadRwROI(silent = false) {
           ${canClaim ? '' : 'disabled'}>
           ${canClaim ? 'CLAIM ALL · ' + fmtNum(claimTokens) + ' ' + tokenSym : 'NOTHING TO CLAIM'}
         </button>
-        <div style="font-size:10px;color:var(--muted);margin-top:6px;font-family:var(--font-mono);">Accumulates from your downline's staking rewards · No cooldown</div>
       </div>
 
-      ${streams.length === 0 && pendingETH < 0.000001 ? '<div class="empty-state">No active ROI streams. Refer active investors to start earning.</div>' : ''}
+      ${streams.length === 0 && pendingETH * USDT_PER_ETH < 0.00001 ? '<div class="empty-state">No active ROI streams. Refer active investors to start earning.</div>' : ''}
 
       <div id="rwROIStreamsContainer">${_rwROIStreamsHtml()}</div>`;
 
@@ -1051,6 +1100,7 @@ async function claimROIFromStreamBtn(investor, lockIndex, level, btn) {
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     toast('ROI commission claimed!', 'success');
+    _rwROILoading = false;
     loadRwROI();
   } catch(e) {
     if (btn) { btn.disabled = false; btn.textContent = 'CLAIM'; }
@@ -1067,6 +1117,7 @@ async function claimAllROI() {
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     toast('ROI commissions claimed!', 'success');
+    _rwROILoading = false;
     loadRwROI();
   } catch(e) {
     if (btn) { btn.disabled = false; }
@@ -1129,23 +1180,23 @@ async function loadRwLPFees(silent = false) {
           </div>
         </td>
         <td style="padding:9px 8px;text-align:right;color:var(--cream);">${fmtUSDT(ethInvested,{noEth:true})}</td>
-        <td style="padding:9px 8px;text-align:right;color:var(--cream);">${currentETH > 0 ? fmtUSDT(currentETH,{noEth:true}) : '—'}</td>
+        <td class="rw-lp-col-curval" style="padding:9px 8px;text-align:right;color:var(--cream);">${currentETH > 0 ? fmtUSDT(currentETH,{noEth:true}) : '—'}</td>
         <td style="padding:9px 8px;text-align:right;">
           <span style="color:${gainClr};">${currentETH > 0 ? (gainETH >= 0 ? '+' : '') + fmtUSDT(gainETH,{noEth:true}) : '—'}</span>
           ${currentETH > 0 ? `<div style="font-size:9px;color:${gainClr};opacity:0.75;">${(gainETH >= 0 ? '+' : '') + fmtNum(gainPct, 2)}%</div>` : ''}
         </td>
-        <td style="padding:9px 8px;text-align:right;font-size:10px;color:${statusClr};">${statusTxt}</td>
+        <td class="rw-lp-col-status" style="padding:9px 8px;text-align:right;font-size:10px;color:${statusClr};">${statusTxt}</td>
       </tr>`;
     }
 
     const totalClr = totalGainETH > 0.000001 ? '#4ade80' : totalGainETH < -0.000001 ? '#f87171' : 'var(--muted)';
 
     el.innerHTML = `
-      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
+      <div class="rw-lp-info-box" style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.18);border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:11px;font-family:var(--font-mono);">
         <div style="color:var(--gold);letter-spacing:1px;font-size:10px;margin-bottom:5px;">HOW UNISWAP V2 POOL FEES WORK</div>
         <div style="color:var(--muted);line-height:1.75;">Every swap charges a <span style="color:var(--cream);">0.3% fee</span> that flows to LP providers. Fees <span style="color:var(--cream);">compound automatically</span> — your LP tokens grow in value with every swap. <span style="color:var(--cream);">No separate fee claim needed.</span> Earnings are included when you claim or remove LP tokens.</div>
       </div>
-      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;display:inline-block;min-width:200px;">
+      <div class="rw-lp-earnings-box" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;display:inline-block;min-width:200px;">
         <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:5px;">ESTIMATED POOL EARNINGS</div>
         <div style="font-size:22px;font-family:var(--font-display);color:${totalClr};">${totalGainETH !== 0 ? (totalGainETH >= 0 ? '+' : '') + fmtUSDT(totalGainETH,{noEth:true}) : '—'}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px;">${activeCnt} active position${activeCnt !== 1 ? 's' : ''} · fees + price change combined</div>
@@ -1156,9 +1207,9 @@ async function loadRwLPFees(silent = false) {
             <tr style="border-bottom:1px solid var(--border);">
               <th style="text-align:left;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">TOKEN</th>
               <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">INVESTED</th>
-              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">CURRENT VALUE</th>
+              <th class="rw-lp-col-curval" style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">CURRENT VALUE</th>
               <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">GAIN (FEES + PRICE)</th>
-              <th style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">STATUS</th>
+              <th class="rw-lp-col-status" style="text-align:right;padding:6px 8px;color:var(--muted);letter-spacing:1px;font-weight:400;">STATUS</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

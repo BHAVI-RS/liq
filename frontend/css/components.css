@@ -208,6 +208,7 @@ input[type="email"]::placeholder { color: var(--muted); }
 .gene-level-header {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 12px;
   margin-bottom: 10px;
 }
@@ -563,6 +564,14 @@ input[type="email"]::placeholder { color: var(--muted); }
 /* ── MOBILE: shrink refresh / secondary buttons ── */
 @media (max-width: 640px) {
   .btn-secondary { padding: 8px 14px !important; font-size: 11px !important; }
+
+  /* Toast notifications — full-width strip at the bottom */
+  #statusLog {
+    right: 12px;
+    left: 12px;
+    bottom: 16px;
+    max-width: none;
+  }
 }
 
 /* Pool bidirectional swap divider */
@@ -635,6 +644,11 @@ input[type="email"]::placeholder { color: var(--muted); }
 .rw-missed-tip:hover .rw-missed-tip-box {
   display: block;
 }
+#poolChartWrap {
+  height: 236px; /* 220px canvas + 8px padding top + bottom */
+  box-sizing: border-box;
+}
+
 .pool-chart-tooltip {
   position: absolute;
   pointer-events: none;
@@ -892,6 +906,190 @@ input[type="email"]::placeholder { color: var(--muted); }
 .inv-btn-claim-staking:hover { opacity:0.85; }
 .inv-btn-claim-staking:disabled { opacity:0.45; cursor:not-allowed; }
 
+/* ── LP FEES MOBILE ── */
+@media (max-width: 640px) {
+  .rw-lp-info-box,
+  .rw-lp-earnings-box  { display: none !important; }
+  .rw-lp-col-curval,
+  .rw-lp-col-status    { display: none; }
+}
+
+/* ── STAKING TABLE MOBILE LAYOUT ── */
+@media (max-width: 640px) {
+  .rw-staking-table thead { display: none; }
+
+  /* Each position = one flex row, no wrapping */
+  .rw-staking-table tbody tr {
+    display: flex !important;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 2px;
+    border-bottom: 1px solid rgba(20,30,42,0.7);
+  }
+
+  /* # index */
+  .rw-s-td-num {
+    flex: 0 0 auto;
+    padding: 0 !important;
+    white-space: nowrap;
+  }
+
+  /* Invested amount — single line, compact */
+  .rw-s-td-inv {
+    flex: 0 0 auto;
+    padding: 0 !important;
+    white-space: nowrap;
+  }
+  .rw-s-td-inv span { font-size: 13px !important; line-height: 1.2 !important; }
+
+  /* Progress bar — stretches to fill remaining width */
+  .rw-s-td-prog {
+    flex: 1 1 0;
+    min-width: 70px;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .rw-s-td-prog::before { content: none !important; }
+
+  /* Claimable value — right-aligned, no wrap */
+  .rw-s-td-claim {
+    flex: 0 0 auto;
+    padding: 0 !important;
+    display: block !important;
+    text-align: right !important;
+    white-space: nowrap;
+  }
+  .rw-s-td-claim::before { content: none !important; }
+
+  /* Hide accrued USDT + progress % text */
+  .rw-s-prog-header  { display: none !important; }
+  /* Hide "✓ X claimed" sub-text */
+  .rw-s-prog-claimed { display: none !important; }
+}
+
+/* ── STAT BOX LABEL TOGGLE ── */
+.rw-stat-label-mob    { display: none; }
+.rw-streams-title-mob { display: none; }
+@media (max-width: 640px) {
+  .rw-streams-title-desk { display: none; }
+  .rw-streams-title-mob  { display: inline; }
+}
+
+/* Desktop: slightly larger stat values */
+.rw-staking-stat-grid > div > div:nth-child(2),
+.rw-roi-stat-grid    > div > div:nth-child(2) { font-size: 18px !important; }
+
+@media (max-width: 640px) {
+  .rw-staking-stat-grid .rw-stat-label-desk,
+  .rw-roi-stat-grid    .rw-stat-label-desk { display: none; }
+  .rw-staking-stat-grid .rw-stat-label-mob,
+  .rw-roi-stat-grid    .rw-stat-label-mob  { display: inline; }
+}
+
+/* ── STAKING REWARDS MOBILE ── */
+@media (max-width: 640px) {
+  .rw-staking-stat-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+  }
+  .rw-staking-stat-grid > div { padding: 8px 6px !important; }
+  .rw-staking-stat-grid > div > div:nth-child(2) { font-size: 14px !important; }
+}
+
+/* ── ROI COMMISSIONS MOBILE ── */
+@media (max-width: 640px) {
+  /* Stat cards — force single row */
+  .rw-roi-stat-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+  }
+  .rw-roi-stat-grid > div { padding: 8px 6px !important; }
+  .rw-roi-stat-grid > div > div:nth-child(2) { font-size: 14px !important; }
+
+  /* Stream address — hide tail after "…" */
+  .rw-roi-addr-end { display: none; }
+
+  /* Progress % — hide */
+  .rw-roi-stream-pct { display: none; }
+}
+
+/* ── REWARDS REFERRAL ADDRESS SPANS ── */
+.rw-addr-short { display: none; }
+
+/* ── REWARDS PANEL STAT GRIDS ── */
+.rw-stat-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.rw-stat-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+  .rw-ref-col-date, .rw-ref-col-rate { display: none; }
+
+  /* Address spans — show short version only */
+  .rw-addr-full  { display: none; }
+  .rw-addr-short { display: inline; }
+
+  /* FROM cell — truncated address + copy button on one line, vertically centred */
+  .rw-ref-from-cell { white-space: nowrap; }
+  .rw-ref-from-inner {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 5px;
+  }
+  .rw-ref-from-inner a    { white-space: nowrap; line-height: 1; }
+  .rw-ref-from-inner button { flex-shrink: 0; align-self: center; }
+
+  /* AMOUNT cell — single line, no wrapping */
+  .rw-ref-amt-cell { white-space: nowrap; }
+  .rw-ref-amt-cell a,
+  .rw-ref-amt-cell span,
+  .rw-ref-amt-cell .rw-missed-tip { white-space: nowrap; }
+
+  .rw-stat-grid-4 { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .rw-stat-grid-3 { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+
+  /* Claim buttons — full width, truncate token amount on very small screens */
+  #claimStakingBtn, #claimROIBtn {
+    width: 100%;
+    padding: 10px 12px !important;
+    font-size: 10px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+  }
+
+  /* Tighten stat card inner padding */
+  .rw-stat-grid-4 > div,
+  .rw-stat-grid-3 > div {
+    padding: 10px 12px !important;
+  }
+
+  /* Reduce main card padding on rewards panel */
+  #panel-rewards .card { padding: 16px 12px; }
+}
+
+@media (max-width: 400px) {
+  .rw-stat-grid-4 { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .rw-stat-grid-3 { grid-template-columns: 1fr; gap: 6px; }
+
+  /* Scale down large stat values in tight cards */
+  .rw-stat-grid-4 > div [style*="font-size:18px"],
+  .rw-stat-grid-4 > div [style*="font-size: 18px"] {
+    font-size: 14px !important;
+  }
+}
+
 /* Responsive tweaks for components */
 @media (max-width: 768px) {
   /* Main container — full width */
@@ -986,13 +1184,44 @@ input[type="email"]::placeholder { color: var(--muted); }
   .pkg-card-usd { font-size: 14px; }
   .pkg-cat-btn  { font-size: 11px; padding: 8px 8px; }
 
+  /* Chart box — slightly shorter on mobile */
+  #poolChartWrap { height: 186px !important; }
+
   /* Pool stats — single column */
   #poolStats { grid-template-columns: 1fr !important; }
 
-  /* Token detail modal */
-  #tokenDetailOverlay > div { width: 96% !important; padding: 16px !important; }
+  /* Token detail modal — compact on mobile */
+  #tokenDetailOverlay > div { width: 96% !important; max-height: 82vh !important; }
+  #tdHeader { padding: 14px 14px 12px !important; gap: 10px !important; }
+  #tdBody   { padding: 14px 14px !important; gap: 12px !important; }
+  #tdLogo   { width: 36px !important; height: 36px !important; font-size: 15px !important; border-radius: 7px !important; }
+  #tdSymbol { font-size: 17px !important; letter-spacing: 1.5px !important; }
+  #tdName   { font-size: 11px !important; }
+  /* Contract address — single line with ellipsis */
+  #tdAddr {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: normal !important;
+  }
+  /* Selected token address in provide liquidity — single line */
+  .invest-sel-addr {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: normal !important;
+  }
 
   /* Genealogy tree */
   .gene-tree { overflow-x: auto; }
   .gene-level-header { font-size: 13px; padding: 10px 14px; }
+
+  /* Genealogy — hide card title (panel already shows heading via ::before) */
+  #panel-genealogy .card-title { display: none !important; }
+
+  /* Genealogy list — mobile simplification */
+  .gene-commission-rate { display: none !important; }
+  .gene-elig-label      { display: none !important; }
+  .gene-col-invested    { display: none !important; }
+  .gene-col-teamvol     { display: none !important; }
 }

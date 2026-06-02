@@ -1,19 +1,13 @@
-// Polygon Amoy simulation — exact equivalent of scripts/simulate.js on Hardhat.
+// Polygon Amoy simulation — 57 accounts, 3 tokens, full referral tree + all invest.
 //
-// Differences from simulate.js:
-//   • Uses pre-deployed Uniswap V2 contracts on Polygon Amoy
-//   • 57 signers derived from PRIVATE_KEY (funded by amoynode.js)
-//   • TWAP warm-up waits real 31 sec instead of evm_increaseTime
-//   • Pool seed: 100 MATIC + 100,000 tokens per pool (1 token = 0.001 MATIC = $1.00)
-//   • Investment package: 0.1 MATIC = 100 USDT (identical to simulate.js)
-//   • Deploys LiquidityFacet and LiquidityROIFacet before Liquidity
-//   • Liquidity constructor takes (router, factory, weth, platformToken, facet, roiFacet)
+// This script self-funds sub-wallets — amoynode.js is NOT required.
 //
 // RUN:
-//   1. npx hardhat run scripts/amoytestnet/amoynode.js --network polygonAmoy
-//   2. npx hardhat run scripts/amoytestnet/simulateamoy.js --network polygonAmoy
+//   npx hardhat run scripts/amoytestnet/simulateamoy.js --network polygonAmoy
 //
-// account[00] needs ≥ 310 POL (3 × 100 seed + gas).
+// REQUIREMENTS:
+//   account[0] (PRIVATE_KEY in .env) needs ≥ 350 POL
+//     (3 × 100 MATIC pool seeds + ~28 POL to fund [1..56] + gas).
 
 const hre  = require("hardhat");
 const fs   = require("fs");
@@ -32,8 +26,12 @@ const SEED_ETH     = hre.ethers.parseEther("100");
 const SEED_TOKENS  = hre.ethers.parseEther("100000");
 
 const TOTAL_WALLETS  = 60;
-const TOTAL_ACCOUNTS = 57; // accounts [0..56] used in simulation (same as simulate.js)
+const TOTAL_ACCOUNTS = 57; // accounts [0..56] used in simulation
 const TWAP_WAIT_SECS = 31; // 31 sec for testing — change to 31 * 60 for mainnet
+
+// All sub-wallets invest — fund each with 0.5 POL
+const FUND_AMOUNT = hre.ethers.parseEther("0.5");
+const FUND_THRESH = hre.ethers.parseEther("0.4");   // skip top-up if already has this
 
 // maxFeePerGas × gasLimit must stay under 1 POL (the RPC provider's fee cap).
 // Actual fee paid = baseFee × gasUsed — always much lower than the ceiling.
@@ -158,17 +156,41 @@ async function main() {
   console.log(`  Deployer : ${deployer.address}`);
   console.log(`  Accounts : ${TOTAL_ACCOUNTS} signers (accounts [0..56])\n`);
 
-  // Sanity-check: account[0] and at least account[56] must have some balance
-  const bal0  = await provider.getBalance(signers[0].address);
-  const bal56 = await provider.getBalance(signers[56].address);
-  if (bal0 < hre.ethers.parseEther("310")) {
-    console.error("❌  account[00] needs ≥ 310 POL (3 × 100 MATIC seed + gas). Run amoynode.js first.");
+  const balBefore = await provider.getBalance(deployer.address);
+  console.log(`  Balance  : ${hre.ethers.formatEther(balBefore)} POL\n`);
+
+  if (balBefore < hre.ethers.parseEther("350")) {
+    console.error(
+      "❌  account[0] needs ≥ 350 POL\n" +
+      "   (3 × 100 MATIC pool seeds + ~28 POL to fund [1..56] + gas)"
+    );
     process.exit(1);
   }
-  if (bal56 < hre.ethers.parseEther("0.15")) {
-    console.error("❌  account[56] has < 0.15 POL. Run amoynode.js first to fund sub-wallets.");
-    process.exit(1);
+
+  // ─────────────────────────────────────────────────────────────
+  // PHASE 0 — FUND SUB-WALLETS [1..56]
+  // ─────────────────────────────────────────────────────────────
+  console.log(sep());
+  console.log("  PHASE 0 — FUND SUB-WALLETS  [1..56]");
+  console.log(sep());
+
+  let funded = 0;
+  for (let i = 1; i < TOTAL_ACCOUNTS; i++) {
+    const bal = await provider.getBalance(signers[i].address);
+    if (bal >= FUND_THRESH) {
+      console.log(`  [${String(i).padStart(2)}]  ${hre.ethers.formatEther(bal).padStart(10)} POL — skip`);
+      continue;
+    }
+    await mine(() => deployer.sendTransaction({
+      to:    signers[i].address,
+      value: FUND_AMOUNT,
+      maxFeePerGas:         TX_OVERRIDES.maxFeePerGas,
+      maxPriorityFeePerGas: TX_OVERRIDES.maxPriorityFeePerGas,
+    }));
+    console.log(`  [${String(i).padStart(2)}]  funded ${hre.ethers.formatEther(FUND_AMOUNT)} POL ✓`);
+    funded++;
   }
+  console.log(`\n  ${funded} wallets funded, ${TOTAL_ACCOUNTS - 1 - funded} already had enough POL.\n`);
 
   // ─────────────────────────────────────────────────────────────
   // PHASE 1 — DEPLOY
@@ -467,6 +489,8 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   console.log(`  Router         : ${UNI_ROUTER}`);
   console.log(`  Factory        : ${UNI_FACTORY}`);
   console.log(`  WETH           : ${UNI_WETH}`);
+  const balAfter = await provider.getBalance(deployer.address);
+  console.log(`  POL spent      : ~${hre.ethers.formatEther(balBefore - balAfter)} POL`);
   console.log(`  Accounts       : ${investOrder.length}  (accounts[0..56])`);
   console.log(`  Package        : 100 USDT (0.1 MATIC) each`);
   console.log(`  Total invested : $${toUSDT(totalInvested)} USDT`);

@@ -48,16 +48,6 @@ window._poolUserTokenBal  = 0;   // user's token balance for hybrid buy logic
 window._poolMode          = 'buy'; // current buy/sell tab — controls trade history order
 window._poolTradeBuys     = [];  // last-fetched buy trades (most-recent first)
 window._poolTradeSells    = [];  // last-fetched sell trades (most-recent first)
-window._poolSessionTrades = [];  // direct swap trades (persisted in localStorage), merged with chain history
-
-function _loadLocalSwaps(tokenAddr) {
-  try { return JSON.parse(localStorage.getItem('hordex_swaps_' + tokenAddr.toLowerCase()) || '[]'); }
-  catch(_) { return []; }
-}
-function _saveLocalSwaps(tokenAddr, trades) {
-  try { localStorage.setItem('hordex_swaps_' + tokenAddr.toLowerCase(), JSON.stringify(trades.slice(0, 30))); }
-  catch(_) {}
-}
 
 let _poolRefreshCount = 0;
 
@@ -283,12 +273,12 @@ async function loadPoolPanel() {
 async function loadPoolInfo(tokenAddr) {
   if (!requireConnected()) return;
   _stopPoolPolling();
-  if (window._poolSelectedToken !== tokenAddr) window._poolSessionTrades = _loadLocalSwaps(tokenAddr);
   window._poolSelectedToken  = tokenAddr;
   window._poolLastPrice      = 0;
   window._poolCurPrice       = 0;
   window._poolChartLastBlock = 0;
   window._poolChartData      = [];
+  window._poolChartAnimated  = false; // allow one animation per token selection
 
   const card = document.getElementById('poolDetailCard');
   card.style.display = 'block';
@@ -477,23 +467,30 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
   }
 
   try {
-    const tokenAddr   = window._poolSelectedToken;
-    const tradeSnaps  = await contract.getTradeHistory(tokenAddr);
+    const tokenAddr = window._poolSelectedToken;
+    if (!tokenAddr) return;
 
-    const chainTrades = [...tradeSnaps].reverse().map(snap => {
-      const ethAmt  = parseFloat(ethers.utils.formatEther(snap.ethAmt));
-      const tokAmt  = parseFloat(ethers.utils.formatUnits(snap.tokAmt, dec));
-      const usdtAmt = ethToUSDT(ethAmt);
-      const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
-      return { isBuy: snap.isBuy, tokenAmt: tokAmt, usdtAmt, price };
-    });
-    const allTrades = [...(window._poolSessionTrades || []), ...chainTrades];
+    // All trades now flow through contract.swapBuy / contract.swapSell,
+    // so getTradeHistory is the single reliable source — no event log fetching needed.
+    const buys = [], sells = [];
+    const onChain = await contract.getTradeHistory(tokenAddr);
+    for (let i = onChain.length - 1; i >= 0; i--) {
+      const t = onChain[i];
+      const tokF = parseFloat(ethers.utils.formatUnits(t.tokAmt, dec));
+      const ethF = parseFloat(ethers.utils.formatEther(t.ethAmt));
+      if (tokF <= 0) continue;
+      const usdtAmt = ethToUSDT(ethF);
+      const entry = { tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF };
+      if (t.isBuy) buys.push(entry); else sells.push(entry);
+    }
+    console.log('[trades] buys:', buys.length, 'sells:', sells.length);
 
-    window._poolTradeBuys  = allTrades.filter(t =>  t.isBuy).slice(0, 5);
-    window._poolTradeSells = allTrades.filter(t => !t.isBuy).slice(0, 5);
+    window._poolTradeBuys  = buys.slice(0, 5);
+    window._poolTradeSells = sells.slice(0, 5);
     _renderTradeHistory(tokenSymbol);
 
   } catch(e) {
+    console.error('[trades] loadTradeHistory error:', e);
     if (!silent) histEl.innerHTML = `<div style="color:#ff5050;font-size:11px;font-family:var(--font-mono);">Failed to load trades.</div>`;
   }
 }
@@ -616,38 +613,19 @@ async function poolBuyTokens() {
   if (!window._poolSelectedToken) { toast('Select a token first', 'warn'); return; }
   _txBegin();
   try {
-    const router = getRouter();
-    const ethIn      = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
-    const amountsOut = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
-    const minOut   = amountsOut[1].mul(990).div(1000); // 1% slippage
-    const deadline = (await provider.getBlock('latest')).timestamp + 86400;
+    const router  = getRouter();
+    const ethIn   = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
+    const amounts = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
+    const minOut  = amounts[1].mul(990).div(1000); // 1% slippage
     toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await router.swapExactETHForTokens(
-      minOut, [DEX_WETH, window._poolSelectedToken], walletAddress, deadline, { value: ethIn, ..._GAS }
+    // Route through contract so the trade is recorded in getTradeHistory
+    const tx = await contract.connect(signer).swapBuy(
+      window._poolSelectedToken, minOut, { value: ethIn, ..._GAS }
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
-    const receipt = await tx.wait();
+    await tx.wait();
     _txDone();
     toast('Buy successful!', 'success');
-    // Parse swap amounts from receipt and prepend to in-memory trade list
-    try {
-      const pairAddr = window._poolSelectedPair;
-      const isToken0 = window._poolIsToken0;
-      const dec      = window._poolTokenDecimals;
-      for (const log of receipt.logs) {
-        if (log.address.toLowerCase() !== pairAddr.toLowerCase()) continue;
-        if (log.topics[0] !== SWAP_TOPIC) continue;
-        const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
-          ['uint256','uint256','uint256','uint256'], log.data);
-        const tokAmt  = parseFloat(ethers.utils.formatUnits(isToken0 ? a0out : a1out, dec));
-        const ethAmt  = parseFloat(ethers.utils.formatEther(isToken0 ? a1in : a0in));
-        const usdtAmt = ethToUSDT(ethAmt);
-        const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
-        window._poolSessionTrades.unshift({ isBuy: true, tokenAmt: tokAmt, usdtAmt, price });
-        _saveLocalSwaps(window._poolSelectedToken, window._poolSessionTrades);
-        break;
-      }
-    } catch(_) {}
     document.getElementById('poolBuyUSDT').value  = '';
     document.getElementById('poolBuyToken').value = '';
     const hintEl = document.getElementById('poolBuyHint');
@@ -675,43 +653,24 @@ async function poolSellTokens() {
       _txDone();
       return;
     }
-    const router   = getRouter();
-    const amounts  = await router.getAmountsOut(amtIn, [window._poolSelectedToken, DEX_WETH]);
-    const minETH   = amounts[1].mul(990).div(1000); // 1% slippage
-    const deadline = (await provider.getBlock('latest')).timestamp + 86400;
-    const allowance = await erc20.allowance(walletAddress, DEX_ROUTER);
+    const router  = getRouter();
+    const amounts = await router.getAmountsOut(amtIn, [window._poolSelectedToken, DEX_WETH]);
+    const minETH  = amounts[1].mul(990).div(1000); // 1% slippage
+    // Approve platform contract (not router) — contract proxies the swap and records the trade
+    const allowance = await erc20.allowance(walletAddress, CONTRACT_ADDRESS);
     if (allowance.lt(amtIn)) {
       toast('Approve token spend in MetaMask…', 'info');
-      const approveTx = await erc20.approve(DEX_ROUTER, amtIn, _GAS);
+      const approveTx = await erc20.approve(CONTRACT_ADDRESS, amtIn, _GAS);
       await approveTx.wait();
     }
     toast('Confirm swap in MetaMask…', 'info');
-    const tx = await router.swapExactTokensForETH(
-      amtIn, minETH, [window._poolSelectedToken, DEX_WETH], walletAddress, deadline, _GAS
+    const tx = await contract.connect(signer).swapSell(
+      window._poolSelectedToken, amtIn, minETH, _GAS
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
-    const receipt = await tx.wait();
+    await tx.wait();
     _txDone();
     toast('Sell successful!', 'success');
-    // Parse swap amounts from receipt and prepend to in-memory trade list
-    try {
-      const pairAddr = window._poolSelectedPair;
-      const isToken0 = window._poolIsToken0;
-      const dec      = window._poolTokenDecimals;
-      for (const log of receipt.logs) {
-        if (log.address.toLowerCase() !== pairAddr.toLowerCase()) continue;
-        if (log.topics[0] !== SWAP_TOPIC) continue;
-        const [a0in, a1in, a0out, a1out] = ethers.utils.defaultAbiCoder.decode(
-          ['uint256','uint256','uint256','uint256'], log.data);
-        const tokAmt  = parseFloat(ethers.utils.formatUnits(isToken0 ? a0in : a1in, dec));
-        const ethAmt  = parseFloat(ethers.utils.formatEther(isToken0 ? a1out : a0out));
-        const usdtAmt = ethToUSDT(ethAmt);
-        const price   = tokAmt > 0 ? usdtAmt / tokAmt : 0;
-        window._poolSessionTrades.unshift({ isBuy: false, tokenAmt: tokAmt, usdtAmt, price });
-        _saveLocalSwaps(window._poolSelectedToken, window._poolSessionTrades);
-        break;
-      }
-    } catch(_) {}
     document.getElementById('poolSellAmt').value  = '';
     document.getElementById('poolSellUSDT').value = '';
     loadPoolInfo(window._poolSelectedToken);
@@ -726,13 +685,14 @@ async function poolSellTokens() {
 window._poolChartData      = [];
 window._poolChartTimeframe = 'all';
 window._poolChartState     = null; // {data, padL, padR, padT, padB, W, H, tMin, tMax, vLo, vHi}
+window._poolChartAnimId    = null; // rAF handle for draw animation
 
 async function loadPriceChart(pairAddr, isToken0, dec) {
   const canvas = document.getElementById('poolPriceCanvas');
   if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.parentElement.clientWidth || 500;
-  const H = 200;
+  const H = Math.max(60, canvas.parentElement.clientHeight - 16);
   canvas.width        = W * dpr;
   canvas.height       = H * dpr;
   canvas.style.width  = W + 'px';
@@ -829,7 +789,28 @@ function renderPriceChart(tf) {
 
   const data   = all.filter(p => p.time >= viewMin && p.time <= viewMax);
   const canvas = document.getElementById('poolPriceCanvas');
-  if (canvas) _drawPriceCanvas(canvas, data, viewMin, viewMax);
+  if (canvas) _animatePriceChart(canvas, data, viewMin, viewMax);
+}
+
+function _animatePriceChart(canvas, data, viewMin, viewMax) {
+  if (window._poolChartAnimId) { cancelAnimationFrame(window._poolChartAnimId); window._poolChartAnimId = null; }
+  if (!data.length) { _drawPriceCanvas(canvas, data, viewMin, viewMax); return; }
+  // Animate only on the first render per token selection; poll refreshes draw instantly
+  if (window._poolChartAnimated) {
+    _drawPriceCanvas(canvas, data, viewMin, viewMax);
+    return;
+  }
+  window._poolChartAnimated = true;
+  const start = performance.now();
+  const dur   = 700;
+  function step(ts) {
+    const raw  = Math.min(1, (ts - start) / dur);
+    const ease = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+    _drawPriceCanvas(canvas, data, viewMin, viewMax, null, ease);
+    if (raw < 1) { window._poolChartAnimId = requestAnimationFrame(step); }
+    else         { window._poolChartAnimId = null; }
+  }
+  window._poolChartAnimId = requestAnimationFrame(step);
 }
 
 // Helper: rounded rect path
@@ -843,10 +824,10 @@ function _rrect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx) {
+function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx, animProgress) {
   const dpr = window.devicePixelRatio || 1;
   const W   = canvas.parentElement.clientWidth || 500;
-  const H   = 268;
+  const H   = Math.max(60, canvas.parentElement.clientHeight - 16);
   canvas.width        = W * dpr;
   canvas.height       = H * dpr;
   canvas.style.width  = W + 'px';
@@ -865,22 +846,31 @@ function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx) {
     return;
   }
 
-  // Layout: price area only
-  const padL   = 70, padR = 14, padT = 18, padB = 34;
-  const priceH = H - padT - padB;
-  const cW     = W - padL - padR;
+  const padR = 14, padT = 14, padB = 8;
 
-  const tMin  = viewMin;
-  const tMax  = viewMax;
   const times = data.map(p => p.time);
   const vals  = data.map(p => p.price);
+  const tMin  = viewMin;
+  const tMax  = viewMax;
+  const vMin  = Math.min(...vals);
+  const vMax  = Math.max(...vals);
+  const vPad  = (vMax - vMin) * 0.15 || vMax * 0.15 || 0.000001;
+  const vLo   = vMin - vPad;
+  const vHi   = vMax + vPad;
+  const vRng  = vHi - vLo;
 
-  const vMin = Math.min(...vals);
-  const vMax = Math.max(...vals);
-  const vPad = (vMax - vMin) * 0.15 || vMax * 0.15 || 0.000001;
-  const vLo  = vMin - vPad;
-  const vHi  = vMax + vPad;
-  const vRng = vHi - vLo;
+  // Measure y-labels first so padL is tight but not cramped
+  ctx.font = '9px monospace';
+  let maxLabelW = 0;
+  for (let i = 0; i <= 5; i++) {
+    const v = vLo + (vRng / 5) * i;
+    const lbl = v < 0.0001 ? v.toExponential(2) : fmtNum(v);
+    const w = ctx.measureText(lbl).width;
+    if (w > maxLabelW) maxLabelW = w;
+  }
+  const padL   = Math.ceil(maxLabelW) + 10;
+  const priceH = H - padT - padB;
+  const cW     = W - padL - padR;
 
   const tx = t => padL + ((t - tMin) / (tMax - tMin || 1)) * cW;
   const ty = v => padT + priceH - ((v - vLo) / vRng) * priceH;
@@ -890,8 +880,7 @@ function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx) {
 
   window._poolChartState = { data, viewMin, viewMax, padL, padR, padT, padB, W, H, tMin, tMax, vLo, vHi, vRng, cW, cH: priceH };
 
-  // ── Price grid (horizontal) ──
-  ctx.font         = '9px monospace';
+  // ── Y-axis grid + labels (always full width — not clipped to animation) ──
   ctx.textBaseline = 'middle';
   ctx.textAlign    = 'right';
   for (let i = 0; i <= 5; i++) {
@@ -902,38 +891,17 @@ function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx) {
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
     const lbl = v < 0.0001 ? v.toExponential(2) : fmtNum(v);
     ctx.fillStyle = 'rgba(148,163,184,0.42)';
+    ctx.font = '9px monospace';
     ctx.fillText(lbl, padL - 5, y);
   }
 
-  // ── Time grid (vertical) + time labels ──
-  const span = tMax - tMin;
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'top';
-  for (let i = 0; i <= 5; i++) {
-    const t = tMin + (span / 5) * i;
-    const x = padL + (i / 5) * cW;
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + priceH); ctx.stroke();
-
-    const d = new Date(t);
-    let lbl;
-    if      (span < 7200e3)   lbl = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-    else if (span < 86400e3)  lbl = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    else if (span < 604800e3) lbl = d.toLocaleDateString([], { month:'short', day:'numeric' }) + ' ' + d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    else                      lbl = d.toLocaleDateString([], { month:'short', day:'numeric' });
-    ctx.fillStyle = 'rgba(148,163,184,0.38)';
-    ctx.fillText(lbl, x, H - padB + 5);
-  }
-
-// ── Clip to price area ──
+  // ── Price line clipped to animation progress ──
+  const progress = (animProgress == null) ? 1 : animProgress;
   ctx.save();
   ctx.beginPath();
-  ctx.rect(padL - 1, padT - 1, cW + 2, priceH + 2);
+  ctx.rect(padL, padT - 1, cW * progress, priceH + 2);
   ctx.clip();
 
-
-  // Price line with glow
   ctx.shadowColor = lineClr;
   ctx.shadowBlur  = 5;
   ctx.beginPath();
@@ -947,58 +915,61 @@ function _drawPriceCanvas(canvas, data, viewMin, viewMax, hoverIdx) {
 
   ctx.restore();
 
-  // ── Current price tag on y-axis ──
-  const lastVal = vals[vals.length - 1];
-  const lastY   = ty(lastVal);
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = lineClr + '44';
-  ctx.lineWidth   = 1;
-  ctx.beginPath(); ctx.moveTo(padL, lastY); ctx.lineTo(W - padR, lastY); ctx.stroke();
-  ctx.setLineDash([]);
+  // ── Price tag + trailing dot (shown only when animation is complete) ──
+  if (progress >= 1) {
+    const lastVal = vals[vals.length - 1];
+    const lastY   = ty(lastVal);
 
-  const pFmt = lastVal < 0.0001 ? lastVal.toExponential(2) : fmtNum(lastVal);
-  ctx.font = 'bold 9px monospace';
-  ctx.textAlign    = 'right';
-  ctx.textBaseline = 'middle';
-  const tagW = ctx.measureText(pFmt).width + 12;
-  ctx.fillStyle = lineClr;
-  _rrect(ctx, padL - tagW - 1, lastY - 8, tagW, 16, 3);
-  ctx.fill();
-  ctx.fillStyle = '#0a1628';
-  ctx.fillText(pFmt, padL - 5, lastY);
-
-  // ── Hover crosshair & dot ──
-  if (hoverIdx != null && hoverIdx >= 0 && hoverIdx < data.length) {
-    const hx = tx(times[hoverIdx]);
-    const hy = ty(vals[hoverIdx]);
-    ctx.save();
-    ctx.beginPath(); ctx.rect(padL, padT, cW, priceH); ctx.clip();
-    ctx.setLineDash([3, 4]);
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = lineClr + '44';
     ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + priceH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(padL, hy); ctx.lineTo(W - padR, hy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, lastY); ctx.lineTo(W - padR, lastY); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.shadowColor = lineClr; ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
-    ctx.fillStyle   = lineClr;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth   = 1.5;
-    ctx.fill(); ctx.stroke();
-    ctx.shadowBlur  = 0;
-    ctx.restore();
-  } else {
-    const lx = tx(times[times.length - 1]);
-    ctx.save();
-    ctx.beginPath(); ctx.rect(padL, padT, cW, priceH); ctx.clip();
-    ctx.shadowColor = lineClr; ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(lx, lastY, 4, 0, Math.PI * 2);
+
+    const pFmt = lastVal < 0.0001 ? lastVal.toExponential(2) : fmtNum(lastVal);
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'middle';
+    const tagW = ctx.measureText(pFmt).width + 12;
     ctx.fillStyle = lineClr;
+    _rrect(ctx, padL - tagW - 1, lastY - 8, tagW, 16, 3);
     ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.restore();
+    ctx.fillStyle = '#0a1628';
+    ctx.fillText(pFmt, padL - 5, lastY);
+
+    // ── Hover crosshair + dot ──
+    if (hoverIdx != null && hoverIdx >= 0 && hoverIdx < data.length) {
+      const hx = tx(times[hoverIdx]);
+      const hy = ty(vals[hoverIdx]);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(padL, padT, cW, priceH); ctx.clip();
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + priceH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(padL, hy); ctx.lineTo(W - padR, hy); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.shadowColor = lineClr; ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle   = lineClr;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth   = 1.5;
+      ctx.fill(); ctx.stroke();
+      ctx.shadowBlur  = 0;
+      ctx.restore();
+    } else {
+      const lx = tx(times[times.length - 1]);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(padL, padT, cW, priceH); ctx.clip();
+      ctx.shadowColor = lineClr; ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(lx, lastY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = lineClr;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
   }
 }
 
@@ -1006,11 +977,16 @@ function _initChartHover(canvas) {
   if (canvas._hoverBound) return;
   canvas._hoverBound = true;
 
+  // No hover on touch/mobile — avoids sticky crosshairs and unnecessary redraws
+  if ('ontouchstart' in window || navigator.maxTouchPoints > 0) return;
+
   const tooltip = document.getElementById('poolChartTooltip');
   let animFrame = null;
   let lastIdx   = null;
 
   canvas.addEventListener('mousemove', e => {
+    // Cancel any draw animation so hover takes over cleanly
+    if (window._poolChartAnimId) { cancelAnimationFrame(window._poolChartAnimId); window._poolChartAnimId = null; }
     const st = window._poolChartState;
     if (!st || !st.data.length) { if (tooltip) tooltip.style.display = 'none'; return; }
 

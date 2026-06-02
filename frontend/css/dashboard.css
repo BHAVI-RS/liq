@@ -17,6 +17,14 @@
   border-color: var(--gold);
   background: #132038;
 }
+#dashCard-pnl {
+  cursor: default;
+}
+#dashCard-pnl:hover {
+  border-color: var(--border);
+  background: var(--surface);
+  transform: none;
+}
 
 /* Stats grid — always 2 columns */
 #dashStatsRow {

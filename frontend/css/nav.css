@@ -396,12 +396,17 @@ body.modal-open footer {
   #panel-dashboard::before   { content: 'DASHBOARD'; }
   #panel-investments::before { content: 'INVESTMENTS'; }
   #panel-invest::before      { content: 'INVEST'; }
-  #panel-pool::before        { content: 'POOL'; }
+  #panel-pool::before        { content: 'SWAP'; }
   #panel-genealogy::before   { content: 'GENEALOGY'; }
   #panel-rewards::before     { content: 'REWARDS'; }
   #panel-myinfo::before      { content: 'MY INFO'; }
   #panel-history::before     { content: 'HISTORY'; }
   #panel-owner::before       { content: 'OWNER'; }
+
+  /* Hide % change in swap header on mobile */
+  .pool-header-change { display: none; }
+  /* Hide elements that should only show on desktop */
+  .hide-mobile { display: none !important; }
 
   /* Show hamburger, hide desktop tabs */
   #hamburgerBtn { display: flex; }

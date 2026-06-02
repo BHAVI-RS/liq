@@ -253,10 +253,8 @@ function _dashStartStakingTicker() {
     const el = document.getElementById('dashStakingRewards');
     if (!el) { _dashStopStakingTicker(); return; }
     const now = _dashStakingTickBase + (Math.floor(Date.now() / 1000) - _dashStakingTickWall);
-    // Base = ETH from all StakingRewardClaimed events (stable, never resets on restake).
-    // Per-lock we add only: pendingETH (live, ticking) + tokensAccumulated * price (carry).
-    // claimedETH per lock is already captured in _dashStakingEventsBase — don't double-count.
-    let totalETH = _dashStakingEventsBase;
+    // Sum earnedETH per lock — matches rewards tab ACCRUED (total earned, never drops after claiming).
+    let totalETH = 0;
     let anyStillActive = false;
     let activeLockCount = 0;
     for (let i = 0; i < _dashStakingTickLocks.length; i++) {
@@ -270,11 +268,7 @@ function _dashStartStakingTicker() {
       const ratePPM_tick = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
       const rwEth_tick   = ratePPM_tick > 0 ? eth * ratePPM_tick / 1_000_000 : 0;
       const earnedETH    = dur > 0 ? rwEth_tick * elapsed / dur : 0;
-      const claimedETH   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
-      const tokensAcc    = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
-      const priceEth     = _dashStakingTickPrices[i] || 0;
-      const pendingETH   = Math.max(0, earnedETH - claimedETH);
-      totalETH += pendingETH + tokensAcc * priceEth;
+      totalETH += earnedETH;
       if (elapsed < dur) { anyStillActive = true; activeLockCount++; }
     }
 
@@ -517,9 +511,9 @@ function buildSeries(type, data) {
     for (const ev of events) {
       if (ev.type === 'invest') { invested += ev.eth; lpVal += ev.lp * lpPricePerToken; }
       else                      { refVal   += ev.eth; }
-      pts.push({ time: ev.time, value: (lpVal + refVal) - invested });
+      pts.push({ time: ev.time, value: invested + lpVal + refVal });
     }
-    pts.push({ time: now, value: (lpVal + refVal) - invested });
+    pts.push({ time: now, value: invested + lpVal + refVal });
     return pts;
   }
   if (type === 'locks') {
@@ -536,7 +530,8 @@ function _scaleSeriesToUSDT(type, pts) {
   return pts.map(p => ({ time: p.time, value: p.value * USDT_PER_ETH }));
 }
 
-function drawLineGraph(canvas, series, color, unitLabel) {
+function drawLineGraph(canvas, series, color, unitLabel, graphOpts) {
+  graphOpts = graphOpts || {};
   if (_graphCleanup) { _graphCleanup(); _graphCleanup = null; }
 
   const dpr  = window.devicePixelRatio || 1;
@@ -549,7 +544,8 @@ function drawLineGraph(canvas, series, color, unitLabel) {
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
 
-  const padL = 62, padR = 20, padT = 20, padB = 44;
+  const padL = 62, padR = 20, padT = 20;
+  const padB = graphOpts.noXAxis ? 12 : 44;
   const cW = W - padL - padR;
   const cH = H - padT - padB;
 
@@ -579,15 +575,17 @@ function drawLineGraph(canvas, series, color, unitLabel) {
     ctx.fillText(label, padL - 6, y + 3.5);
   }
 
-  ctx.textAlign = 'center';
-  const xTicks = Math.min(series.length, 5);
-  for (let i = 0; i < xTicks; i++) {
-    const idx = Math.round(i * (series.length - 1) / Math.max(xTicks - 1, 1));
-    const x   = tx(series[idx].time);
-    ctx.fillStyle = 'rgba(148,163,184,0.55)';
-    ctx.fillText(_fmtTs(series[idx].time), x, H - padB + 16);
-    ctx.strokeStyle = 'rgba(201,168,76,0.06)';
-    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + cH); ctx.stroke();
+  if (!graphOpts.noXAxis) {
+    ctx.textAlign = 'center';
+    const xTicks = Math.min(series.length, 5);
+    for (let i = 0; i < xTicks; i++) {
+      const idx = Math.round(i * (series.length - 1) / Math.max(xTicks - 1, 1));
+      const x   = tx(series[idx].time);
+      ctx.fillStyle = 'rgba(148,163,184,0.55)';
+      ctx.fillText(_fmtTs(series[idx].time), x, H - padB + 16);
+      ctx.strokeStyle = 'rgba(201,168,76,0.06)';
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + cH); ctx.stroke();
+    }
   }
 
   if (vMin < 0 && vMax > 0) {
@@ -598,27 +596,54 @@ function drawLineGraph(canvas, series, color, unitLabel) {
     ctx.setLineDash([]);
   }
 
-  ctx.fillStyle = color + '22';
-  ctx.beginPath();
-  ctx.moveTo(tx(series[0].time), ty(0));
-  for (let i = 0; i < series.length - 1; i++) {
-    ctx.lineTo(tx(series[i].time), ty(series[i].value));
-    ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
-  }
-  ctx.lineTo(tx(series[series.length-1].time), ty(series[series.length-1].value));
-  ctx.lineTo(tx(series[series.length-1].time), ty(0));
-  ctx.closePath(); ctx.fill();
+  if (graphOpts.smooth && series.length > 1) {
+    const grad = ctx.createLinearGradient(0, padT, 0, padT + cH);
+    grad.addColorStop(0, color + '44');
+    grad.addColorStop(1, color + '05');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(0));
+    ctx.lineTo(tx(series[0].time), ty(series[0].value));
+    for (let i = 0; i < series.length - 1; i++) {
+      const cpx = (tx(series[i].time) + tx(series[i+1].time)) / 2;
+      ctx.bezierCurveTo(cpx, ty(series[i].value), cpx, ty(series[i+1].value), tx(series[i+1].time), ty(series[i+1].value));
+    }
+    ctx.lineTo(tx(series[series.length-1].time), ty(0));
+    ctx.closePath(); ctx.fill();
 
-  ctx.strokeStyle = color;
-  ctx.lineWidth   = 2.5;
-  ctx.lineJoin    = 'round';
-  ctx.beginPath();
-  ctx.moveTo(tx(series[0].time), ty(series[0].value));
-  for (let i = 0; i < series.length - 1; i++) {
-    ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
-    ctx.lineTo(tx(series[i+1].time), ty(series[i+1].value));
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2.5;
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(series[0].value));
+    for (let i = 0; i < series.length - 1; i++) {
+      const cpx = (tx(series[i].time) + tx(series[i+1].time)) / 2;
+      ctx.bezierCurveTo(cpx, ty(series[i].value), cpx, ty(series[i+1].value), tx(series[i+1].time), ty(series[i+1].value));
+    }
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = color + '22';
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(0));
+    for (let i = 0; i < series.length - 1; i++) {
+      ctx.lineTo(tx(series[i].time), ty(series[i].value));
+      ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
+    }
+    ctx.lineTo(tx(series[series.length-1].time), ty(series[series.length-1].value));
+    ctx.lineTo(tx(series[series.length-1].time), ty(0));
+    ctx.closePath(); ctx.fill();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2.5;
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(series[0].value));
+    for (let i = 0; i < series.length - 1; i++) {
+      ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
+      ctx.lineTo(tx(series[i+1].time), ty(series[i+1].value));
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
 
   series.forEach(p => {
     ctx.beginPath();
@@ -652,7 +677,7 @@ function drawLineGraph(canvas, series, color, unitLabel) {
     const py = ty(best.value);
 
     ctx.clearRect(0, 0, W, H);
-    drawLineGraph._redraw(ctx, series, color, tx, ty, padL, padR, padT, padB, cW, cH, W, H, vMin, vMax, vRange, tMin, tMax);
+    drawLineGraph._redraw(ctx, series, color, tx, ty, padL, padR, padT, padB, cW, cH, W, H, vMin, vMax, vRange, tMin, tMax, graphOpts);
 
     ctx.strokeStyle = 'rgba(201,168,76,0.35)';
     ctx.lineWidth   = 1;
@@ -687,7 +712,7 @@ function drawLineGraph(canvas, series, color, unitLabel) {
   function hideTooltip() {
     tooltip.style.display = 'none';
     ctx.clearRect(0, 0, W, H);
-    drawLineGraph._redraw(ctx, series, color, tx, ty, padL, padR, padT, padB, cW, cH, W, H, vMin, vMax, vRange, tMin, tMax);
+    drawLineGraph._redraw(ctx, series, color, tx, ty, padL, padR, padT, padB, cW, cH, W, H, vMin, vMax, vRange, tMin, tMax, graphOpts);
   }
 
   const onMove  = (e) => { const cx = e.touches ? e.touches[0].clientX : e.clientX; const cy = e.touches ? e.touches[0].clientY : e.clientY; showTooltip(cx, cy); };
@@ -707,7 +732,8 @@ function drawLineGraph(canvas, series, color, unitLabel) {
   };
 }
 
-drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, padB, cW, cH, W, H, vMin, vMax, vRange, tMin, tMax) {
+drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, padB, cW, cH, W, H, vMin, vMax, vRange, tMin, tMax, graphOpts) {
+  graphOpts = graphOpts || {};
   ctx.clearRect(0, 0, W, H);
   ctx.lineWidth = 1;
   const GRID_ROWS = 5;
@@ -721,15 +747,17 @@ drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, p
     const label = Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(1) : fmtNum(v);
     ctx.fillText(label, padL - 6, y + 3.5);
   }
-  const xTicks = Math.min(series.length, 5);
-  for (let i = 0; i < xTicks; i++) {
-    const idx = Math.round(i * (series.length - 1) / Math.max(xTicks - 1, 1));
-    const x   = tx(series[idx].time);
-    ctx.fillStyle = 'rgba(148,163,184,0.55)';
-    ctx.font = '10px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(_fmtTs(series[idx].time), x, H - padB + 16);
-    ctx.strokeStyle = 'rgba(201,168,76,0.06)';
-    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + cH); ctx.stroke();
+  if (!graphOpts.noXAxis) {
+    const xTicks = Math.min(series.length, 5);
+    for (let i = 0; i < xTicks; i++) {
+      const idx = Math.round(i * (series.length - 1) / Math.max(xTicks - 1, 1));
+      const x   = tx(series[idx].time);
+      ctx.fillStyle = 'rgba(148,163,184,0.55)';
+      ctx.font = '10px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(_fmtTs(series[idx].time), x, H - padB + 16);
+      ctx.strokeStyle = 'rgba(201,168,76,0.06)';
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + cH); ctx.stroke();
+    }
   }
   if (vMin < 0 && vMax > 0) {
     const y0 = ty(0);
@@ -738,24 +766,48 @@ drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, p
     ctx.beginPath(); ctx.moveTo(padL, y0); ctx.lineTo(W - padR, y0); ctx.stroke();
     ctx.setLineDash([]);
   }
-  ctx.fillStyle = color + '22';
-  ctx.beginPath();
-  ctx.moveTo(tx(series[0].time), ty(0));
-  for (let i = 0; i < series.length - 1; i++) {
-    ctx.lineTo(tx(series[i].time), ty(series[i].value));
-    ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
+  if (graphOpts.smooth && series.length > 1) {
+    const grad = ctx.createLinearGradient(0, padT, 0, padT + cH);
+    grad.addColorStop(0, color + '44');
+    grad.addColorStop(1, color + '05');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(0));
+    ctx.lineTo(tx(series[0].time), ty(series[0].value));
+    for (let i = 0; i < series.length - 1; i++) {
+      const cpx = (tx(series[i].time) + tx(series[i+1].time)) / 2;
+      ctx.bezierCurveTo(cpx, ty(series[i].value), cpx, ty(series[i+1].value), tx(series[i+1].time), ty(series[i+1].value));
+    }
+    ctx.lineTo(tx(series[series.length-1].time), ty(0));
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(series[0].value));
+    for (let i = 0; i < series.length - 1; i++) {
+      const cpx = (tx(series[i].time) + tx(series[i+1].time)) / 2;
+      ctx.bezierCurveTo(cpx, ty(series[i].value), cpx, ty(series[i+1].value), tx(series[i+1].time), ty(series[i+1].value));
+    }
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = color + '22';
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(0));
+    for (let i = 0; i < series.length - 1; i++) {
+      ctx.lineTo(tx(series[i].time), ty(series[i].value));
+      ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
+    }
+    ctx.lineTo(tx(series[series.length-1].time), ty(series[series.length-1].value));
+    ctx.lineTo(tx(series[series.length-1].time), ty(0));
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tx(series[0].time), ty(series[0].value));
+    for (let i = 0; i < series.length - 1; i++) {
+      ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
+      ctx.lineTo(tx(series[i+1].time), ty(series[i+1].value));
+    }
+    ctx.stroke();
   }
-  ctx.lineTo(tx(series[series.length-1].time), ty(series[series.length-1].value));
-  ctx.lineTo(tx(series[series.length-1].time), ty(0));
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(tx(series[0].time), ty(series[0].value));
-  for (let i = 0; i < series.length - 1; i++) {
-    ctx.lineTo(tx(series[i+1].time), ty(series[i].value));
-    ctx.lineTo(tx(series[i+1].time), ty(series[i+1].value));
-  }
-  ctx.stroke();
   series.forEach(p => {
     ctx.beginPath(); ctx.arc(tx(p.time), ty(p.value), 3.5, 0, Math.PI * 2);
     ctx.fillStyle = color; ctx.strokeStyle = '#04080f'; ctx.lineWidth = 1.5;
@@ -764,7 +816,7 @@ drawLineGraph._redraw = function(ctx, series, color, tx, ty, padL, padR, padT, p
 };
 
 function openStatGraph(type) {
-  if (type === 'locks') return;
+  if (type === 'locks' || type === 'pnl') return;
 
   const panel = document.getElementById('dashGraphPanel');
 
@@ -780,8 +832,11 @@ function openStatGraph(type) {
   }
 
   const opts = GRAPH_OPTS[type];
+  const graphOpts = type === 'pnl' ? { noXAxis: true, smooth: true } : {};
   document.getElementById('dashGraphTitle').textContent = opts.label + ' OVER TIME';
-  document.getElementById('dashGraphSub').textContent   = opts.yLabel + '  ·  X-axis = time since registration';
+  document.getElementById('dashGraphSub').textContent   = type === 'pnl'
+    ? opts.yLabel
+    : opts.yLabel + '  ·  X-axis = time since registration';
   panel.dataset.type     = type;
   panel.style.transition = 'none';
   panel.style.opacity    = '0';
@@ -798,7 +853,7 @@ function openStatGraph(type) {
   } else {
     canvas.style.display  = '';
     emptyEl.style.display = 'none';
-    requestAnimationFrame(() => drawLineGraph(canvas, series, opts.color, opts.unit));
+    requestAnimationFrame(() => drawLineGraph(canvas, series, opts.color, opts.unit, graphOpts));
   }
 
   if (!_graphCache && contract && walletAddress) {
@@ -812,7 +867,7 @@ function openStatGraph(type) {
       } else {
         canvas.style.display  = '';
         emptyEl.style.display = 'none';
-        requestAnimationFrame(() => drawLineGraph(canvas, s2, opts.color, opts.unit));
+        requestAnimationFrame(() => drawLineGraph(canvas, s2, opts.color, opts.unit, graphOpts));
       }
     });
   }
@@ -1013,9 +1068,8 @@ async function loadDashboard(silent = false) {
     // would freeze the display until the new period surpassed the old peak.
     _dashStakingHWM = 0;
 
-    // Compute initial total: events base + per-lock pending + carry.
-    // Do NOT add rewardClaimedETH here — it is already counted in _dashStakingEventsBase.
-    let _initTotalETH = _dashStakingEventsBase, _initAnyActive = false;
+    // Compute initial total as sum of earnedETH per lock — matches rewards tab ACCRUED.
+    let _initTotalETH = 0, _initAnyActive = false;
     for (let _i = 0; _i < lpLocks.length; _i++) {
       const _l          = lpLocks[_i];
       if (_l.removed) continue;
@@ -1027,10 +1081,7 @@ async function loadDashboard(silent = false) {
       const _ratePPM    = _l.rewardRatePPM ? _l.rewardRatePPM.toNumber() : 0;
       const _rwEth      = _ratePPM > 0 ? _eth * _ratePPM / 1_000_000 : 0;
       const _earnedETH  = _dur > 0 ? _rwEth * _el2 / _dur : 0;
-      const _claimedETH = parseFloat(ethers.utils.formatEther(_l.rewardClaimedETH || ethers.BigNumber.from(0)));
-      const _tokensAcc  = parseFloat(ethers.utils.formatEther(_l.tokensAccumulated || ethers.BigNumber.from(0)));
-      const _priceEth   = _dashStakingTickPrices[_i] || 0;
-      _initTotalETH += Math.max(0, _earnedETH - _claimedETH) + _tokensAcc * _priceEth;
+      _initTotalETH += _earnedETH;
       if (_effNow < _ut && _ratePPM > 0) _initAnyActive = true;
     }
 
@@ -1754,15 +1805,22 @@ function showIneligiblePopup(event) {
 }
 
 function navToRewards(section) {
+  const cardId = section === 'staking' ? 'rwStakingCard'
+               : section === 'lpfees'  ? 'rwLPFeesCard'
+               : section === 'roicomm' ? 'rwROICard'
+               :                         'rwRefCard';
   switchTabByName('rewards');
-  setTimeout(() => {
-    const cardId = section === 'staking' ? 'rwStakingCard'
-                 : section === 'lpfees'  ? 'rwLPFeesCard'
-                 : section === 'roicomm' ? 'rwROICard'
-                 :                         'rwRefCard';
-    const el = document.getElementById(cardId);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 150);
+  if (section === 'referral') {
+    // Referral card is at the top — no layout shift from content above it
+    setTimeout(() => {
+      const el = document.getElementById(cardId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+  } else {
+    // Staking / ROI / LP fees sit below the referral card whose async render
+    // causes a large layout shift. Store target and scroll after ref renders.
+    window._rwPendingScrollId = cardId;
+  }
 }
 
 function navToGeneView(mode) {

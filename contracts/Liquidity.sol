@@ -423,21 +423,24 @@ contract Liquidity is LiquidityStorage {
     function claimROIFromStream(address investor, uint256 lockIndex, uint8 level)
         external nonReentrant onlyRegistered
     {
+        // Snapshot pending before settling so we can isolate this stream's contribution.
+        uint256 pendingBefore = _roiPendingETH[msg.sender];
         _callROI(abi.encodeCall(LiquidityROIFacet.settleStreamExt, (investor, lockIndex, level)));
-        uint256 ethAmount = _roiPendingETH[msg.sender];
-        if (ethAmount == 0) revert NothingToClaim();
-        _roiPendingETH[msg.sender] = 0;
+        // Only the delta belongs to this stream; leave any pre-existing pending untouched.
+        uint256 streamEth = _roiPendingETH[msg.sender] - pendingBefore;
+        if (streamEth == 0) revert NothingToClaim();
+        _roiPendingETH[msg.sender] = pendingBefore;
         _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
-        uint256 roiTokens = (ethAmount * 1e18) / price;
+        uint256 roiTokens = (streamEth * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
         if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
-            ethEquivalent: uint128(ethAmount),
+            ethEquivalent: uint128(streamEth),
             ts:            uint64(block.timestamp)
         }));
-        emit ROIClaimed(msg.sender, roiTokens, ethAmount);
+        emit ROIClaimed(msg.sender, roiTokens, streamEth);
     }
 
     // ── TWAP ─────────────────────────────────────────────────────────────────
@@ -635,6 +638,44 @@ contract Liquidity is LiquidityStorage {
         return _calcAccrued(stream, investor, lockIndex, level);
     }
 
+    // ── Direct swap functions (records every trade in _tradeHistory) ─────────
+    function swapBuy(address _token, uint256 _minTokensOut) external payable nonReentrant {
+        if (msg.value == 0) revert MustSendETH();
+        address[] memory path = new address[](2);
+        path[0] = WETH;
+        path[1] = _token;
+        uint256[] memory amounts = IUniswapV2Router02(UNISWAP_ROUTER)
+            .swapExactETHForTokens{value: msg.value}(
+                _minTokensOut, path, msg.sender, block.timestamp + 300
+            );
+        _tradeHistory[_token].push(TradeSnap({
+            ts:     uint64(block.timestamp),
+            isBuy:  true,
+            ethAmt: uint128(msg.value),
+            tokAmt: uint128(amounts[1])
+        }));
+    }
+
+    function swapSell(address _token, uint256 _tokensIn, uint256 _minEthOut) external nonReentrant {
+        if (_tokensIn == 0) revert MustSpecifyTokenAmount();
+        IERC20(_token).transferFrom(msg.sender, address(this), _tokensIn);
+        IERC20(_token).approve(UNISWAP_ROUTER, _tokensIn);
+        address[] memory path = new address[](2);
+        path[0] = _token;
+        path[1] = WETH;
+        uint256[] memory amounts = IUniswapV2Router02(UNISWAP_ROUTER)
+            .swapExactTokensForETH(
+                _tokensIn, _minEthOut, path, msg.sender, block.timestamp + 300
+            );
+        IERC20(_token).approve(UNISWAP_ROUTER, 0);
+        _tradeHistory[_token].push(TradeSnap({
+            ts:     uint64(block.timestamp),
+            isBuy:  false,
+            ethAmt: uint128(amounts[1]),
+            tokAmt: uint128(_tokensIn)
+        }));
+    }
+
     receive() external payable {}
 }
 
@@ -643,4 +684,14 @@ interface IUniswapV2Router02 {
         address token, uint amountTokenDesired, uint amountTokenMin,
         uint amountETHMin, address to, uint deadline
     ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
+    function swapExactETHForTokens(
+        uint amountOutMin, address[] calldata path, address to, uint deadline
+    ) external payable returns (uint[] memory amounts);
+    function swapExactTokensForETH(
+        uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline
+    ) external returns (uint[] memory amounts);
+    function removeLiquidityETH(
+        address token, uint liquidity, uint amountTokenMin, uint amountETHMin,
+        address to, uint deadline
+    ) external returns (uint amountToken, uint amountETH);
 }

@@ -146,7 +146,8 @@
 .landing-main-scroll {
   flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center;
 }
-#landingConnectScreen { max-width: 720px; width: 100%; margin: 0 auto; padding: 44px 24px 0; text-align: center; }
+#landingConnectScreen { width: 100%; }
+.landing-hero-wrap { max-width: 720px; width: 100%; margin: 0 auto; padding: 44px 24px 0; text-align: center; }
 #landingNewUserScreen { margin: auto; padding: 40px 20px 60px; }
 
 /* Hero stats */
@@ -167,7 +168,7 @@
 
 /* Content sections (scrolled to from menu) */
 .landing-section {
-  max-width: 720px; width: 100%; margin: 0 auto;
+  max-width: min(1100px, calc(100% - 80px)); width: 100%; margin: 0 auto;
   padding: 52px 24px; border-top: 1px solid rgba(255,255,255,0.05); text-align: left;
 }
 .landing-section-label {
@@ -186,7 +187,7 @@
 }
 .ls-step-body { font-size: 13px; color: rgba(237,232,220,0.55); line-height: 1.8; }
 .ls-step-body strong { color: var(--cream); font-weight: 500; }
-.landing-section-footer { padding: 40px 24px 60px; max-width: 720px; width: 100%; margin: 0 auto; }
+.landing-section-footer { padding: 40px 24px 60px; max-width: min(1100px, calc(100% - 80px)); width: 100%; margin: 0 auto; }
 
 /* FAQ accordion */
 .lnd-faq-item { border-bottom: 1px solid rgba(255,255,255,0.06); }
@@ -204,10 +205,11 @@
   padding: 0 0 16px;
 }
 .lnd-faq-item.open .lnd-faq-a { display: block; }
+.lnd-faq-item.open .lnd-faq-q { color: var(--gold); }
 
 /* Contract footer */
 .landing-contract-footer {
-  max-width: 720px; width: 100%; margin: 0 auto;
+  max-width: min(1100px, calc(100% - 80px)); width: 100%; margin: 0 auto;
   padding: 28px 24px 52px; text-align: center;
 }
 .lcf-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2.5px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
@@ -303,7 +305,7 @@
 /* ── RESPONSIVE ── */
 @media (max-width: 580px) {
   .landing-stat-grid { grid-template-columns: repeat(2, 1fr); }
-  #landingConnectScreen { padding: 28px 16px 0; }
-  .landing-section { padding: 40px 16px; }
+  .landing-hero-wrap { padding: 28px 16px 0; }
+  .landing-section { padding: 40px 20px; }
   .bro-grid { grid-template-columns: 1fr; }
 }

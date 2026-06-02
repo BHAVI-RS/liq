@@ -49,6 +49,9 @@ abstract contract LiquidityStorage {
     mapping(address => StreamRef[])                        internal _activeROIStreams;
     mapping(address => mapping(uint256 => StreamRef[]))   internal _skippedROIStreams;
     mapping(address => uint256)                           internal _roiPendingETH;
+    // Streams deferred past an eligible person because they already hold a lower-level
+    // (higher-rate) stream from the same lock — "one stream per lock" rule.
+    mapping(address => StreamRef[])                        internal _deferredROIStreams;
 
     // Helper shared by Liquidity.sol and facets
     function _qualifies(address _user) internal view returns (bool) {

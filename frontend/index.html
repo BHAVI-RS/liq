@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1780072744909"></script>
+  <script src="contract-config.js?v=1780367216714"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -62,6 +62,7 @@
     <!-- ── Hero / connect screen ── -->
     <div id="landingConnectScreen">
 
+      <div class="landing-hero-wrap">
       <!-- Hero -->
       <div class="landing-logo">HORDEX</div>
       <div class="landing-sub">— <span>Funding the Future</span> —</div>
@@ -89,21 +90,7 @@
         <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2.5px;color:var(--muted);margin-bottom:14px;">PARTNERS</div>
         <div style="display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;">
           <div class="landing-partner-badge">
-            <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
-              <circle cx="50" cy="50" r="50" fill="#FF007A"/>
-              <!-- unicorn horn -->
-              <polygon points="50,8 46,32 54,32" fill="white" opacity="0.9"/>
-              <!-- unicorn head body simplified -->
-              <ellipse cx="50" cy="55" rx="22" ry="20" fill="white" opacity="0.95"/>
-              <ellipse cx="50" cy="42" rx="14" ry="13" fill="white"/>
-              <!-- eye -->
-              <circle cx="55" cy="40" r="2.5" fill="#FF007A"/>
-              <!-- ear -->
-              <polygon points="43,32 39,24 47,30" fill="white"/>
-              <!-- mane lines -->
-              <path d="M36 38 Q30 48 32 60" stroke="#FF007A" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7"/>
-              <path d="M38 36 Q31 45 33 57" stroke="#FF69B4" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.5"/>
-            </svg>
+            <img src="logo/Uniswap Logo.png" width="36" height="36" alt="Uniswap" style="flex-shrink:0;border-radius:50%;object-fit:cover;">
             <div>
               <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:1px;color:#FF007A;line-height:1.2;">UNISWAP</div>
               <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.5px;color:rgba(255,0,122,0.5);">PROTOCOL PARTNER</div>
@@ -111,20 +98,7 @@
           </div>
 
           <div class="landing-partner-badge" style="background:rgba(240,185,11,0.05);border-color:rgba(240,185,11,0.2);">
-            <!-- BNB Chain official logo: 5-diamond arrangement -->
-            <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
-              <circle cx="50" cy="50" r="50" fill="#0B0E11"/>
-              <!-- top diamond -->
-              <polygon points="50,5 59,14 50,23 41,14" fill="#F0B90B"/>
-              <!-- left diamond -->
-              <polygon points="5,50 14,41 23,50 14,59" fill="#F0B90B"/>
-              <!-- center diamond -->
-              <polygon points="50,32 68,50 50,68 32,50" fill="#F0B90B"/>
-              <!-- right diamond -->
-              <polygon points="95,50 86,41 77,50 86,59" fill="#F0B90B"/>
-              <!-- bottom diamond -->
-              <polygon points="50,95 59,86 50,77 41,86" fill="#F0B90B"/>
-            </svg>
+            <img src="logo/Binance Logo.png" width="36" height="36" alt="Binance" style="flex-shrink:0;border-radius:50%;object-fit:cover;">
             <div>
               <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:1px;color:#F0B90B;line-height:1.2;">BNB CHAIN</div>
               <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.5px;color:rgba(240,185,11,0.5);">ECOSYSTEM PARTNER</div>
@@ -132,6 +106,7 @@
           </div>
         </div>
       </div>
+      </div><!-- /.landing-hero-wrap -->
 
       <!-- ── What is HORDEX? section ── -->
       <section class="landing-section" id="landing-what">
@@ -400,8 +375,8 @@
     <!-- STATS GRID -->
     <div id="dashStatsRow" style="display:none;">
       <!-- Row 1: My Wealth + Team Wealth -->
-      <div class="dash-stat-card" id="dashCard-pnl" data-graph="pnl" onclick="openStatGraph('pnl')" title="Click to view chart">
-        <div class="dash-stat-label">My Wealth <span class="dash-stat-chart-hint">↗</span></div>
+      <div class="dash-stat-card" id="dashCard-pnl">
+        <div class="dash-stat-label">My Wealth</div>
         <div id="dashPnL" class="dash-stat-val">—</div>
         <div id="dashPnLPct" class="dash-stat-sub"></div>
       </div>
@@ -552,7 +527,7 @@
 
     <!-- Token list -->
     <div class="card">
-      <div class="card-title">SWAP</div>
+      <div class="card-title hide-mobile">SWAP</div>
       <div id="poolTokenList" class="token-list">
         <div class="empty-state">Loading pools<span class='ld'><span></span><span></span><span></span></span></div>
       </div>
@@ -561,38 +536,34 @@
     <!-- Pool detail + trade (hidden until token selected) -->
     <div class="card" id="poolDetailCard" style="display:none;">
 
-      <!-- Header: pair + contract + live price -->
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:20px;flex-wrap:wrap;">
-        <div style="display:flex;align-items:center;gap:12px;min-width:0;">
-          <div id="poolTokenIcon" style="width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">⬡</div>
+      <!-- Header: pair left, price right -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+        <div id="poolTokenIcon" style="width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">⬡</div>
+        <div style="min-width:0;flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;">
           <div style="min-width:0;">
             <div id="poolTokenLabel" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--cream);letter-spacing:.06em;line-height:1.2;"></div>
-            <div id="poolTokenAddr" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:5px;word-break:break-all;cursor:pointer;transition:color .2s;" title="Click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.full||this.textContent);this.style.color='var(--gold)';setTimeout(()=>this.style.color='',1200)"></div>
+            <div id="poolTokenAddr" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:4px;word-break:break-all;cursor:pointer;transition:color .2s;" title="Click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.full||this.textContent);this.style.color='var(--gold)';setTimeout(()=>this.style.color='',1200)"></div>
           </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:14px;margin-left:auto;flex-shrink:0;">
-          <div style="text-align:right;">
-            <div id="poolHeaderPrice" class="pool-header-price" style="color:var(--muted);">—</div>
-            <div id="poolHeaderChange" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:2px;transition:color .4s;">—</div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div id="poolHeaderPrice" class="pool-header-price" style="color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.03em;">—</div>
+            <div id="poolHeaderChange" class="pool-header-change" style="font-size:10px;color:var(--muted);font-family:var(--font-mono);transition:color .4s;margin-top:2px;">—</div>
           </div>
-          <button id="poolUpdateTwapBtn" onclick="poolUpdateTWAP()" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">UPDATE TWAP</button>
-          <button onclick="loadPoolInfo(window._poolSelectedToken)" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;letter-spacing:1px;">↻</button>
         </div>
       </div>
 
       <!-- Price chart (full width) -->
       <div style="margin-bottom:20px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:1.5px;">PRICE CHART (USDT)</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
             <button onclick="switchPriceChart('24h')" id="pct-24h" style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">24H</button>
             <button onclick="switchPriceChart('1w')"  id="pct-1w"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">1W</button>
             <button onclick="switchPriceChart('1m')"  id="pct-1m"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">1M</button>
             <button onclick="switchPriceChart('1y')"  id="pct-1y"  style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">1Y</button>
             <button onclick="switchPriceChart('all')" id="pct-all" style="padding:4px 9px;font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface);color:var(--muted);">ALL</button>
           </div>
+          <button onclick="loadPoolInfo(window._poolSelectedToken)" style="padding:4px 9px;font-family:var(--font-mono);font-size:11px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:none;color:var(--muted);flex-shrink:0;">↻</button>
         </div>
-        <div style="position:relative;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;">
+        <div id="poolChartWrap" style="position:relative;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;">
           <canvas id="poolPriceCanvas" style="width:100%;display:block;"></canvas>
           <div id="poolChartTooltip" class="pool-chart-tooltip"></div>
         </div>
@@ -604,23 +575,23 @@
         <!-- LEFT: buy / sell -->
         <div>
           <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:18px;width:fit-content;">
-            <button id="poolBuyBtn"  onclick="switchPoolMode('buy')"  style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--success,#26d97f);color:#000;font-weight:700;">BUY</button>
-            <button id="poolSellBtn" onclick="switchPoolMode('sell')" style="padding:8px 28px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:none;cursor:pointer;background:var(--surface);color:var(--muted);">SELL</button>
+            <button id="poolBuyBtn"  onclick="switchPoolMode('buy')"  style="padding:6px 18px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:none;cursor:pointer;background:var(--success,#26d97f);color:#000;font-weight:700;">BUY</button>
+            <button id="poolSellBtn" onclick="switchPoolMode('sell')" style="padding:6px 18px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;border:none;cursor:pointer;background:var(--surface);color:var(--muted);">SELL</button>
           </div>
 
           <!-- BUY form -->
           <div id="poolBuyForm">
             <div class="field">
-              <label style="display:flex;justify-content:space-between;">
+              <label style="display:flex;justify-content:space-between;align-items:center;">
                 <span>USDT to spend</span>
-                <span id="poolBuyUsdtBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;" onclick="poolBuyMax()">
+                <span id="poolBuyUsdtBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;text-transform:none;letter-spacing:0;" onclick="poolBuyMax()">
                   BAL: <span id="poolBuyUsdtBal">—</span> USDT &nbsp;MAX
                 </span>
               </label>
               <input id="poolBuyUSDT" type="number" min="0" step="0.01" placeholder="0.00"
                      oninput="onBuyUsdtInput()" onfocus="this.select()">
             </div>
-            <div class="pool-swap-sep">↕</div>
+            <div class="pool-swap-sep" onclick="switchPoolMode('sell')" title="Switch to Sell" style="cursor:pointer;">↕</div>
             <div class="field">
               <label style="display:flex;justify-content:space-between;">
                 <span>Tokens to receive</span>
@@ -631,29 +602,29 @@
             </div>
             <div id="poolBuyRate" style="margin:6px 0 6px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
             <div id="poolBuyHint" style="min-height:16px;margin-bottom:10px;font-size:10px;font-family:var(--font-mono);letter-spacing:.04em;"></div>
-            <button class="btn btn-primary" onclick="poolBuyTokens()">BUY TOKENS</button>
+            <button class="btn" onclick="poolBuyTokens()" style="background:#26d97f;color:#000;font-weight:700;padding:9px 18px;font-size:11px;">BUY TOKENS</button>
           </div>
 
           <!-- SELL form -->
           <div id="poolSellForm" style="display:none;">
             <div class="field">
-              <label style="display:flex;justify-content:space-between;">
+              <label style="display:flex;justify-content:space-between;align-items:center;">
                 <span>Tokens to sell</span>
-                <span id="poolSellBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;" onclick="poolSellMax()">
+                <span id="poolSellBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;text-transform:none;letter-spacing:0;" onclick="poolSellMax()">
                   BAL: <span id="poolSellBal">—</span> &nbsp;MAX
                 </span>
               </label>
               <input id="poolSellAmt" type="number" min="0" step="1" placeholder="0"
                      oninput="onSellTokenInput()" onfocus="this.select()">
             </div>
-            <div class="pool-swap-sep">↕</div>
+            <div class="pool-swap-sep" onclick="switchPoolMode('buy')" title="Switch to Buy" style="cursor:pointer;">↕</div>
             <div class="field">
               <label>USDT to receive</label>
               <input id="poolSellUSDT" type="number" min="0" step="0.01" placeholder="0.00"
                      oninput="onSellUsdtInput()" onfocus="this.select()">
             </div>
             <div id="poolSellRate" style="margin:6px 0 12px;font-size:11px;color:var(--gold);font-family:var(--font-mono);">—</div>
-            <button class="btn btn-primary" onclick="poolSellTokens()">SELL TOKENS</button>
+            <button class="btn btn-primary" onclick="poolSellTokens()" style="padding:9px 18px;font-size:11px;">SELL TOKENS</button>
           </div>
         </div>
 
@@ -1024,9 +995,9 @@
 <div id="tokenDetailOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;pointer-events:all;">
   <div style="background:var(--panel);border:1px solid rgba(201,168,76,0.2);border-radius:8px;max-width:520px;width:92%;max-height:85vh;overflow-y:auto;position:relative;">
     <!-- Header -->
-    <div style="display:flex;align-items:center;gap:16px;padding:28px 28px 20px;border-bottom:1px solid var(--border);">
+    <div id="tdHeader" style="display:flex;align-items:center;gap:16px;padding:28px 28px 20px;border-bottom:1px solid var(--border);">
       <div id="tdLogo" style="width:56px;height:56px;border-radius:10px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;overflow:hidden;">⬡</div>
-      <div>
+      <div style="min-width:0;flex:1;">
         <div id="tdSymbol" style="font-family:var(--font-display);font-size:24px;letter-spacing:2px;color:var(--gold);"></div>
         <div id="tdName" style="font-size:13px;color:var(--muted);margin-top:2px;"></div>
       </div>
@@ -1034,7 +1005,7 @@
     </div>
 
     <!-- Body -->
-    <div style="padding:24px 28px;display:flex;flex-direction:column;gap:18px;">
+    <div id="tdBody" style="padding:24px 28px;display:flex;flex-direction:column;gap:18px;">
 
       <!-- Contract address -->
       <div>

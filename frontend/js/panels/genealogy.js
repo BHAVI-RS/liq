@@ -1,6 +1,7 @@
 let _geneView      = 'list';
 let _geneLoading   = false;
 let _geneTree      = null;
+let _geneRootNid   = null;
 let _geneInvestedMap = new Map();
 let _geneStatsMap    = new Map();  // addr.toLowerCase() → { teamCount, teamBusiness }
 let _geneTtHideTimer = null;
@@ -13,6 +14,12 @@ function switchGeneView(mode) {
   document.getElementById('geneListBtn').style.color      = mode === 'list' ? '#000' : 'var(--muted)';
   document.getElementById('geneTreeBtn').style.background = mode === 'tree' ? 'var(--gold)' : 'var(--surface)';
   document.getElementById('geneTreeBtn').style.color      = mode === 'tree' ? '#000' : 'var(--muted)';
+
+  // On mobile tree view: always show the detail panel, defaulting to the root "YOU" node
+  if (mode === 'tree' && _isTouchDevice() && _geneRootNid) {
+    const rootEl = document.getElementById(_geneRootNid);
+    if (rootEl) _geneShowMobileDetail(rootEl);
+  }
 }
 
 async function fetchGeneTree(addr, depth) {
@@ -54,7 +61,36 @@ function _buildGeneStatsMap(node) {
 
 // ─── Shared tooltip ───────────────────────────────────────────────────────────
 
+const _isTouchDevice = () => ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
+function _geneBuildTooltipBody(el) {
+  const addr    = el.dataset.addr          || '';
+  const inv     = parseFloat(el.dataset.inv           || '0');
+  const teamCnt = parseInt(el.dataset.teamCount       || '0');
+  const teamBiz = parseFloat(el.dataset.teamBusiness  || '0');
+  const invLabel = inv > 0 ? fmtUSDT(inv, {noEth:true}) : `<span style="color:#f87171;">No active package</span>`;
+  const bizLabel = fmtUSDT(teamBiz, {noEth:true});
+  const copyBtn  = `<button onclick="copyAddr('${addr}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(201,168,76,0.3);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>`;
+  return `
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:center;">
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ADDRESS</div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="color:var(--gold);font-size:10px;word-break:break-all;">${addr}</span>
+        ${copyBtn}
+      </div>
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ACTIVE PKG</div>
+      <div style="color:var(--cream);">${invLabel}</div>
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM VOLUME</div>
+      <div style="color:var(--cream);">${teamCnt} active user${teamCnt !== 1 ? 's' : ''}</div>
+      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM BUSINESS</div>
+      <div style="color:#4ade80;">${bizLabel}</div>
+    </div>`;
+}
+
 function geneShowTooltip(e, el) {
+  // On touch devices, suppress hover-triggered calls — tooltip is shown via tap in geneNodeClick instead
+  if (_isTouchDevice()) return;
+
   if (_geneTtHideTimer) { clearTimeout(_geneTtHideTimer); _geneTtHideTimer = null; }
 
   let tt = document.getElementById('geneTooltip');
@@ -80,31 +116,7 @@ function geneShowTooltip(e, el) {
     document.body.appendChild(tt);
   }
 
-  const addr    = el.dataset.addr   || '';
-  const inv     = parseFloat(el.dataset.inv           || '0');
-  const teamCnt = parseInt(el.dataset.teamCount       || '0');
-  const teamBiz = parseFloat(el.dataset.teamBusiness  || '0');
-
-  const invLabel = inv > 0 ? fmtUSDT(inv, {noEth:true}) : `<span style="color:#f87171;">No active package</span>`;
-  const bizLabel = fmtUSDT(teamBiz, {noEth:true});
-  const copyBtn  = `<button onclick="copyAddr('${addr}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(201,168,76,0.3);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>`;
-
-  tt.innerHTML = `
-    <div style="color:var(--gold);font-size:10px;letter-spacing:1px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(201,168,76,0.2);">USER DETAILS</div>
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px;align-items:center;">
-      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ADDRESS</div>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <span style="color:var(--gold);font-size:10px;word-break:break-all;">${addr}</span>
-        ${copyBtn}
-      </div>
-      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">ACTIVE PKG</div>
-      <div style="color:var(--cream);">${invLabel}</div>
-      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM VOLUME</div>
-      <div style="color:var(--cream);">${teamCnt} active user${teamCnt !== 1 ? 's' : ''}</div>
-      <div style="color:var(--muted);font-size:9px;letter-spacing:.08em;white-space:nowrap;">TEAM BUSINESS</div>
-      <div style="color:#4ade80;">${bizLabel}</div>
-    </div>`;
-
+  tt.innerHTML = `<div style="color:var(--gold);font-size:10px;letter-spacing:1px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(201,168,76,0.2);">USER DETAILS</div>` + _geneBuildTooltipBody(el);
   tt.style.display = 'block';
   const tw   = tt.offsetWidth  || 280;
   const th   = tt.offsetHeight || 160;
@@ -120,10 +132,43 @@ function geneShowTooltip(e, el) {
 }
 
 function geneHideTooltip() {
+  if (_isTouchDevice()) return;
   _geneTtHideTimer = setTimeout(() => {
     const tt = document.getElementById('geneTooltip');
     if (tt) tt.style.display = 'none';
   }, 120);
+}
+
+// Mobile-only: inline detail card at top of tree view, no overlay needed
+function _geneShowMobileDetail(el) {
+  const treeEl = document.getElementById('geneTreeView');
+  if (!treeEl) return;
+
+  let panel = document.getElementById('geneMobileDetail');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'geneMobileDetail';
+    panel.style.cssText = [
+      'background:#0b1520','border:1px solid rgba(201,168,76,0.35)',
+      'border-radius:10px','padding:14px 16px','margin-bottom:14px',
+      'font-family:var(--font-mono)','font-size:11px','line-height:1.6',
+      'display:none'
+    ].join(';');
+  }
+  // Re-anchor to top of tree view in case the tree was re-rendered
+  if (panel.parentElement !== treeEl) {
+    treeEl.insertBefore(panel, treeEl.firstChild);
+  }
+
+  panel.innerHTML = `
+    <div style="color:var(--gold);font-size:10px;letter-spacing:1px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(201,168,76,0.2);">USER DETAILS</div>
+    ${_geneBuildTooltipBody(el)}`;
+  panel.style.display = 'block';
+}
+
+function _geneCloseMobileDetail() {
+  const panel = document.getElementById('geneMobileDetail');
+  if (panel) panel.style.display = 'none';
 }
 
 // ─── List view accordion toggle ───────────────────────────────────────────────
@@ -152,7 +197,7 @@ function _geneBuildNodeHtml(node, depth) {
 
   const nodeLabel = (typeof _labelCache !== 'undefined' && _labelCache.get(addr.toLowerCase())) || addr;
   const label = isRoot
-    ? `YOU · ${addr}`
+    ? (_isTouchDevice() ? 'YOU' : `YOU · ${addr}`)
     : `<span class="gene-node-lvl">L${depth}</span>${nodeLabel}`;
 
   const nodeEl = `<span class="gene-node ${isRoot ? 'gene-node-self' : ''}"
@@ -161,10 +206,10 @@ function _geneBuildNodeHtml(node, depth) {
     data-inv="${inv}"
     data-team-count="${node._teamCount || 0}"
     data-team-business="${node._teamBusiness || 0}"
-    ${hasKids ? `onclick="geneNodeClick('${nid}')"` : ''}
+    onclick="geneNodeTap('${nid}')"
     onmouseenter="geneShowTooltip(event,this)"
     onmouseleave="geneHideTooltip()"
-    style="display:inline-flex;align-items:center;gap:4px;${hasKids ? 'cursor:pointer;' : ''}"
+    style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"
   >${expandIcon}${label}</span>`;
 
   if (!hasKids) return `<li>${nodeEl}</li>`;
@@ -173,16 +218,21 @@ function _geneBuildNodeHtml(node, depth) {
   return `<li>${nodeEl}<ul class="gene-subtree" id="sub-${nid}" ${hidden}>${kids}</ul></li>`;
 }
 
-function geneNodeClick(nid) {
+function geneNodeTap(nid) {
   const ul = document.getElementById('sub-' + nid);
   const ei = document.getElementById('ei-'  + nid);
-  if (!ul) return;
-  const opening = ul.style.display === 'none';
-  ul.style.display = opening ? '' : 'none';
-  if (ei) {
-    ei.textContent = opening ? '▼' : '▶';
-    ei.style.color = opening ? 'var(--gold)' : 'var(--muted)';
+  const el = document.getElementById(nid);
+  // Expand / collapse children if present
+  if (ul) {
+    const opening = ul.style.display === 'none';
+    ul.style.display = opening ? '' : 'none';
+    if (ei) {
+      ei.textContent = opening ? '▼' : '▶';
+      ei.style.color = opening ? 'var(--gold)' : 'var(--muted)';
+    }
   }
+  // On mobile show details panel for every node (expandable or leaf)
+  if (_isTouchDevice() && el) _geneShowMobileDetail(el);
 }
 
 // ─── loadGenealogy ────────────────────────────────────────────────────────────
@@ -265,21 +315,21 @@ async function loadGenealogy() {
           const inv      = _geneInvestedMap.get(a) || 0;
           const stats    = _geneStatsMap.get(a.toLowerCase()) || { teamCount: 0, teamBusiness: 0 };
           const rowLabel = (typeof _labelCache !== 'undefined' && _labelCache.get(a.toLowerCase())) || a;
-          return `<div class="gene-addr-row" data-addr="${a}" style="justify-content:space-between;gap:12px;cursor:default;flex-wrap:wrap;">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          return `<div class="gene-addr-row" data-addr="${a}" style="justify-content:space-between;gap:12px;cursor:default;flex-wrap:nowrap;">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
               <div class="gene-addr-dot"></div>
               <a href="https://amoy.polygonscan.com/address/${a}" target="_blank" rel="noopener"
-                 style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:12px;word-break:break-all;"
+                 style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                  onclick="event.stopPropagation()">${rowLabel}</a>
               <button onclick="event.stopPropagation();copyAddr('${a}',this)" title="Copy address"
                 style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
             </div>
             <div style="display:flex;align-items:center;flex-shrink:0;">
-              <div style="width:120px;text-align:right;padding-right:20px;">
+              <div class="gene-col-invested" style="width:120px;text-align:right;padding-right:20px;">
                 <div style="font-size:9px;color:var(--muted);letter-spacing:.07em;margin-bottom:2px;">INVESTED</div>
                 <div style="font-size:11px;font-family:var(--font-mono);color:${inv > 0 ? 'var(--gold)' : 'var(--muted)'};">${inv > 0 ? fmtUSDT(inv,{noEth:true}) : '—'}</div>
               </div>
-              <div style="width:90px;text-align:right;padding-right:20px;">
+              <div class="gene-col-teamvol" style="width:90px;text-align:right;padding-right:20px;">
                 <div style="font-size:9px;color:var(--muted);letter-spacing:.07em;margin-bottom:2px;">TEAM VOL</div>
                 <div style="font-size:11px;font-family:var(--font-mono);color:var(--cream);">${stats.teamCount} user${stats.teamCount !== 1 ? 's' : ''}</div>
               </div>
@@ -299,10 +349,12 @@ async function loadGenealogy() {
             style="cursor:pointer;user-select:none;">
             <span class="gene-level-badge">LEVEL ${level}</span>
             <span class="gene-commission-rate">${rate} commission</span>
-            <span style="${eligStyle}">${eligLabel}</span>
-            <span class="gene-count-pill" style="margin-left:auto;">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
-            <span style="margin-left:8px;font-size:10px;color:var(--gold);font-family:var(--font-mono);">${fmtUSDT(levelTotal,{noEth:true})} invested</span>
-            <span id="${blockId}-arrow" style="margin-left:10px;font-size:11px;color:var(--muted);">▶</span>
+            <span class="gene-elig-label" style="${eligStyle}">${eligLabel}</span>
+            <span style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0;">
+              <span class="gene-count-pill">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
+              <span style="font-size:10px;color:var(--gold);font-family:var(--font-mono);white-space:nowrap;">${fmtUSDT(levelTotal,{noEth:true})} invested</span>
+              <span id="${blockId}-arrow" style="font-size:11px;color:var(--muted);">▶</span>
+            </span>
           </div>
           <div id="${blockId}" style="display:none;">
             ${memberRows}
@@ -312,6 +364,7 @@ async function loadGenealogy() {
     }
 
     // ── Tree view ───────────────────────────────────────────────────────────
+    _geneRootNid = 'gnd' + _geneTree.addr.slice(2).toLowerCase();
     treeEl.innerHTML = `
       <div class="gene-tree">
         <ul style="padding-left:0;">${_geneBuildNodeHtml(_geneTree, 0)}</ul>
@@ -325,9 +378,10 @@ async function loadGenealogy() {
   }
 }
 
-window.switchGeneView       = switchGeneView;
-window.loadGenealogy        = loadGenealogy;
-window.geneNodeClick        = geneNodeClick;
-window.geneShowTooltip      = geneShowTooltip;
-window.geneHideTooltip      = geneHideTooltip;
-window.geneListLevelToggle  = geneListLevelToggle;
+window.switchGeneView          = switchGeneView;
+window.loadGenealogy           = loadGenealogy;
+window.geneNodeTap             = geneNodeTap;
+window.geneShowTooltip         = geneShowTooltip;
+window.geneHideTooltip         = geneHideTooltip;
+window.geneListLevelToggle     = geneListLevelToggle;
+window._geneCloseMobileDetail  = _geneCloseMobileDetail;
