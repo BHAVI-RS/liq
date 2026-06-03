@@ -34,7 +34,7 @@ contract LiquidityFacet is LiquidityStorage {
     address private immutable WETH;
     address public  immutable platformToken;
 
-    uint256 private constant LP_LOCK_DURATION  = 90 days;
+    uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
     uint256 private constant USDT_PER_ETH      = 1000;
     uint256 private constant TWAP_PERIOD       = 30 seconds;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
@@ -609,7 +609,7 @@ contract LiquidityFacet is LiquidityStorage {
             lock.streakBaseEth = lock.ethInvested;
         }
 
-        uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / 1 days : 90;
+        uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / 2 : 90;
         uint256 prevDIdx    = LiquidityMath.getDurationIndex(stakingDurations, prevDurDays);
         uint256 sIdx;
         if (dIdx == prevDIdx) {
@@ -622,7 +622,7 @@ contract LiquidityFacet is LiquidityStorage {
         }
 
         lock.lockedAt         = block.timestamp;
-        lock.unlockTime       = block.timestamp + _durationDays * 1 days;
+        lock.unlockTime       = block.timestamp + _durationDays * 2;
         lock.rewardClaimedETH = 0;
         lock.rewardRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationDays, sIdx);
 

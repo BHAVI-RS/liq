@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1780367216714"></script>
+  <script src="contract-config.js?v=1780454038603"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -502,17 +502,15 @@
         <!-- category tabs -->
         <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:16px;">
           <button id="pkgBtnBasic"         onclick="switchPkgCat('basic')"         class="pkg-cat-btn pkg-cat-active">BASIC</button>
-          <button id="pkgBtnElite"         onclick="switchPkgCat('elite')"         class="pkg-cat-btn">ELITE</button>
-          <button id="pkgBtnInstitutional" onclick="switchPkgCat('institutional')" class="pkg-cat-btn">INSTITUTIONAL</button>
+          <button id="pkgBtnElite"         onclick="switchPkgCat('elite')"         class="pkg-cat-btn">PRIME</button>
+          <button id="pkgBtnInstitutional" onclick="switchPkgCat('institutional')" class="pkg-cat-btn">ELITE</button>
         </div>
 
         <!-- package cards grid -->
         <div id="pkgGrid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px;"></div>
 
         <!-- terms -->
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px 16px;font-size:11px;line-height:1.75;color:var(--muted);">
-          ✅ By investing you acknowledge that all transactions on the blockchain are irreversible and LP tokens will be locked for the selected duration.
-        </div>
+        <div id="investTermsBox" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px 16px;font-size:11px;line-height:1.75;color:var(--muted);"></div>
       </div>
 
       <!-- hidden fields read by invest() -->
@@ -1069,7 +1067,11 @@
         <div id="removeLPUsdtAmt" style="font-family:var(--font-mono);font-size:15px;color:#4ade80;">—</div>
       </div>
     </div>
-    <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px;line-height:1.6;">Actual amounts may vary slightly due to pool price changes at transaction time.</div>
+    <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-bottom:16px;line-height:1.6;">Actual amounts may vary slightly due to pool price changes at transaction time.</div>
+    <div style="background:rgba(248,113,113,0.07);border:1px solid rgba(248,113,113,0.3);border-radius:6px;padding:12px 14px;margin-bottom:20px;">
+      <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:1.5px;color:#f87171;margin-bottom:6px;">⚠ PERMANENT ACTION</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--cream);line-height:1.7;">Removing LP will immediately stop all <span style="color:#f87171;">staking commissions</span> and <span style="color:#f87171;">LP fee earnings</span> for this position. Your remaining <span style="color:#f87171;">referral commission cap</span> will no longer be usable.</div>
+    </div>
     <div style="display:flex;gap:10px;">
       <button onclick="closeRemoveLPModal()" style="flex:1;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;">CANCEL</button>
       <button onclick="confirmRemoveLP()" style="flex:1;padding:12px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;background:#f87171;border:none;border-radius:4px;color:#fff;cursor:pointer;font-weight:700;">CONFIRM REMOVE</button>

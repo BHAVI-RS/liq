@@ -63,7 +63,7 @@ abstract contract LiquidityStorage {
     // getROIAccrued/getROIPending can read directly from inherited storage instead of calling
     // the ROI facet as a regular CALL (which would read the facet's own empty storage).
     uint256 internal constant _ROI_DENOM         = 50_000_000_000;
-    uint256 internal constant _ROI_LOCK_DURATION = 90 days;
+    uint256 internal constant _ROI_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
 
     function _calcAccrued(
         ROIStream storage stream,

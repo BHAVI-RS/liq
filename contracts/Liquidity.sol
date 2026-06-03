@@ -36,7 +36,7 @@ contract Liquidity is LiquidityStorage {
     address private immutable _facet;
     address private immutable _roiFacet;
 
-    uint256 private constant LP_LOCK_DURATION = 90 days;
+    uint256 private constant LP_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
     uint256 private constant USDT_PER_ETH     = 1000;
     uint256 private constant TWAP_MAX_STALE   = 2 hours;
 

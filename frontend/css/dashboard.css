@@ -41,6 +41,7 @@
 }
 .dash-stat-label { font-size: 10px; letter-spacing: 1px; color: var(--muted); margin-bottom: 8px; }
 .dash-stat-val   { font-family: var(--font-display); font-size: 20px; line-height: 1.1; }
+.dash-stat-val > span { font-size: 20px; font-family: var(--font-display); }
 .dash-stat-sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .dash-stat-chart-hint {
   color: var(--gold); opacity: 0.5; font-size: 9px; margin-left: 3px; letter-spacing: 0;
@@ -311,7 +312,8 @@
     flex: 0 0 100%;
     margin-bottom: 6px;
   }
-  .dash-stat-val  { font-size: 21px; line-height: 1; }
+  .dash-stat-val,
+  .dash-stat-val > span { font-size: 21px; line-height: 1; font-family: var(--font-display); }
   .dash-stat-sub  { font-size: 11px; margin-top: 0; }
 
   .dash-inv-card  { padding: 18px 16px; }
@@ -381,6 +383,26 @@
 
   /* Dashboard stat cards: hide sub-text except referral and staking */
   .dash-stat-card:not(#dashCard-referral):not(#dashCard-staking) .dash-stat-sub { display: none; }
+
+  /* Unlocked + claimable: stake and claim side by side in one row */
+  .inv-unlocked-claim .dis-col-action {
+    flex-direction: row;
+    justify-content: stretch;
+    gap: 8px;
+  }
+  .inv-unlocked-claim .dis-col-action .inv-action-btn {
+    flex: 1;
+    margin-top: 0;
+  }
+  .inv-unlocked-claim .inv-mobile-claim {
+    display: block;
+    white-space: nowrap;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    padding: 8px 6px;
+  }
+  /* Hide the entire staking section — claim is in the action row, nothing else is visible here */
+  .inv-unlocked-claim .dash-inv-staking { display: none; }
 }
 
 /* ── RESPONSIVE — phone (≤ 480px) ── */

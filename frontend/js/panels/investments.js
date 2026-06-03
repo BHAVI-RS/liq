@@ -171,7 +171,8 @@ async function loadInvestments() {
         expandedIndices.add(Number(card.dataset.lockIndex));
     });
 
-    const cards = [];
+    const activeCards = [];
+    const removedCards = [];
 
     for (let i = 0; i < lpLocks.length; i++) {
       const lock = lpLocks[i];
@@ -323,8 +324,12 @@ async function loadInvestments() {
           <div class="dis-sub" style="text-align:center;">LP in wallet</div>
         </div>`;
       } else if (isUnlocked) {
+        const _mobileClaimBtn = canClaimStaking
+          ? `<button id="claimStakingMobileBtn-${i}" class="inv-action-btn inv-btn-claim-staking inv-mobile-claim" onclick="claimStakingRewardForLock(${i})">CLAIM ${fmtNum(claimableTokensAtPrice)} ${tokenSymbol}</button>`
+          : '';
         actionColHtml = `<div id="${cdId}" class="dis-col dis-col-action" style="gap:8px;">
           <button onclick="openStakeModal(${i})" class="inv-action-btn inv-btn-stake">${rewardTotalETH === 0 ? 'LOCK-IN' : 'STAKE'}</button>
+          ${_mobileClaimBtn}
         </div>`;
       } else {
         const cd = _dashFmtCountdown(secsLeft);
@@ -349,8 +354,8 @@ async function loadInvestments() {
       const _sRow2 = [[3,'90d'],[4,'180d'],[5,'360d']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
       const streakLabel = `<div class="inv-streak-wrap"><span>${_sRow1}</span><span>${_sRow2}</span></div>`;
 
-      cards.push(`
-        <div class="dash-inv-card${isClaimed ? ' claimed' : ''}" data-lock-index="${i}" data-eth-invested="${ethInvested.toFixed(12)}" data-eth-invested-wei="${lock.ethInvested.toHexString()}" data-restake-counts='${JSON.stringify(restakeCounts)}' data-lock-dur-secs="${lockDurSecs}">
+      (isRemoved ? removedCards : activeCards).push(`
+        <div class="dash-inv-card${isClaimed ? ' claimed' : ''}${(isUnlocked && canClaimStaking) ? ' inv-unlocked-claim' : ''}" data-lock-index="${i}" data-eth-invested="${ethInvested.toFixed(12)}" data-eth-invested-wei="${lock.ethInvested.toHexString()}" data-restake-counts='${JSON.stringify(restakeCounts)}' data-lock-dur-secs="${lockDurSecs}">
           <div class="dash-inv-header">
             <div class="dash-inv-logo">${logoSrc}</div>
             <div class="dash-inv-title"><div class="sym">${td.symbol}</div><div class="nm">${td.name}</div></div>
@@ -415,7 +420,7 @@ async function loadInvestments() {
         </div>`);
     }
 
-    el.innerHTML = cards.slice().reverse().join('');
+    el.innerHTML = [...activeCards.reverse(), ...removedCards.reverse()].join('');
 
     expandedIndices.forEach(idx => {
       const card = el.querySelector(`.dash-inv-card[data-lock-index="${idx}"]`);
@@ -807,8 +812,10 @@ async function claimStakingRewardForLock(lockIndex) {
     }
   }
 
-  const btn = document.getElementById('claimStakingBtn-' + lockIndex);
-  if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
+  const btn       = document.getElementById('claimStakingBtn-' + lockIndex);
+  const mobileBtn = document.getElementById('claimStakingMobileBtn-' + lockIndex);
+  if (btn)       { btn.disabled = true;       btn.textContent = 'CLAIMING…'; }
+  if (mobileBtn) { mobileBtn.disabled = true; mobileBtn.textContent = 'CLAIMING…'; }
   _txBegin();
   try {
     toast('Confirm staking reward claim in MetaMask…', 'info');
@@ -821,7 +828,8 @@ async function claimStakingRewardForLock(lockIndex) {
     loadInvestments();
   } catch(e) {
     _txDone();
-    if (btn) { btn.disabled = false; btn.textContent = 'CLAIM REWARDS'; }
+    if (btn)       { btn.disabled = false;       btn.textContent = 'CLAIM REWARDS'; }
+    if (mobileBtn) { mobileBtn.disabled = false; mobileBtn.textContent = 'CLAIM REWARDS'; }
     toast('Claim failed: ' + _fmtContractError(e), 'error');
   }
 }

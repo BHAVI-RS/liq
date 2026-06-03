@@ -715,6 +715,16 @@ window.fetchEthPrice          = fetchEthPrice;
 window._investStartPoll       = _investStartPoll;
 window._investStopPoll        = _investStopPoll;
 window.switchPkgCat           = switchPkgCat;
+document.addEventListener('DOMContentLoaded', () => {
+  const box = document.getElementById('investTermsBox');
+  if (!box) return;
+  box.innerHTML =
+    `✅ By investing, you acknowledge that the generated LP tokens will be locked in the Hordex Smart Contract at ` +
+    `<span style="color:var(--gold);word-break:break-all;">${CONTRACT_ADDRESS}</span> ` +
+    `(<span style="color:var(--muted);">${CHAIN_NAME}</span>) ` +
+    `for default period of 90 days.`;
+});
+
 window.renderPkgGrid          = renderPkgGrid;
 window.selectPackage          = selectPackage;
 window.computeInvestPreview   = computeInvestPreview;

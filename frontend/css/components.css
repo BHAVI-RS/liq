@@ -178,6 +178,8 @@ input[type="email"]::placeholder { color: var(--muted); }
   color: #000 !important;
   font-weight: 600;
 }
+#pkgBtnElite.pkg-cat-active         { background: #4ade80 !important; color: #000 !important; }
+#pkgBtnInstitutional.pkg-cat-active { background: #a78bfa !important; color: #000 !important; }
 .pkg-card {
   cursor: pointer;
   border: 1.5px solid var(--border);
@@ -905,6 +907,7 @@ input[type="email"]::placeholder { color: var(--muted); }
 .inv-btn-claim-staking { background:var(--gold); border-color:var(--gold); color:#0a0a0a; font-weight:700; margin-top:6px; }
 .inv-btn-claim-staking:hover { opacity:0.85; }
 .inv-btn-claim-staking:disabled { opacity:0.45; cursor:not-allowed; }
+.inv-mobile-claim { display: none; }
 
 /* ── LP FEES MOBILE ── */
 @media (max-width: 640px) {

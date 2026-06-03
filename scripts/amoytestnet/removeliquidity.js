@@ -6,7 +6,7 @@
 //   Phase 2 — Remove seed LP from Uniswap pools (only LP in deployer wallet from seedPool)
 //
 // NOTE: User-invested LP tokens are locked in the contract and cannot be swept — only
-//       each user can claim/remove their own LP after the 90-day lock period expires.
+//       each user can claim/remove their own LP after the lock period expires (3 min in testing).
 //
 // RUN:
 //   npx hardhat run scripts/amoytestnet/removeliquidity.js --network polygonAmoy

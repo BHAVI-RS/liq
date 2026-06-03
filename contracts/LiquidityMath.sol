@@ -14,7 +14,7 @@ interface IUniV2FactoryMin {
 
 library LiquidityMath {
     uint256 private constant USDT_PER_ETH    = 1000;
-    uint256 private constant LP_LOCK_DURATION = 90 days;
+    uint256 private constant LP_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
 
     function getTierIndex(uint32[12] memory tiers, uint256 ethInvestedWei)
         public pure returns (uint256 best)
