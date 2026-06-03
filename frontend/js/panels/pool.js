@@ -5,10 +5,9 @@ const DEX_WETH    = WETH_ADDRESS;
 const ROUTER_ABI = [
   "function getAmountsOut(uint256 amountIn, address[] memory path) view returns (uint256[] memory)",
   "function getAmountsIn(uint256 amountOut, address[] memory path) view returns (uint256[] memory)",
-  "function swapExactETHForTokens(uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) payable returns (uint256[] memory)",
-  "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory)",
-  "function addLiquidityETH(address token, uint256 amountTokenDesired, uint256 amountTokenMin, uint256 amountETHMin, address to, uint256 deadline) payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity)",
-  "function removeLiquidityETH(address token, uint256 liquidity, uint256 amountTokenMin, uint256 amountETHMin, address to, uint256 deadline) returns (uint256 amountToken, uint256 amountETH)"
+  "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory)",
+  "function addLiquidity(address tokenA, address tokenB, uint256 amountADesired, uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) returns (uint256, uint256, uint256)",
+  "function removeLiquidity(address tokenA, address tokenB, uint256 liquidity, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) returns (uint256, uint256)"
 ];
 const FACTORY_ABI = [
   "function getPair(address tokenA, address tokenB) view returns (address)"
@@ -377,12 +376,13 @@ async function loadPoolInfo(tokenAddr) {
 
 async function updateBalances(tokenAddr, dec) {
   try {
-    const [tokenBal, ethBal] = await Promise.all([
+    const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+    const [tokenBal, usdtBal] = await Promise.all([
       new ethers.Contract(tokenAddr, ERC20_ABI, provider).balanceOf(walletAddress),
-      provider.getBalance(walletAddress)
+      new ethers.Contract(usdtAddr, ERC20_ABI, provider).balanceOf(walletAddress),
     ]);
     const tokenF = parseFloat(ethers.utils.formatUnits(tokenBal, dec));
-    const usdtF  = parseFloat(ethers.utils.formatEther(ethBal)) * USDT_PER_ETH;
+    const usdtF  = parseFloat(ethers.utils.formatEther(usdtBal));
     const sellEl = document.getElementById('poolSellBal');
     const buyEl  = document.getElementById('poolBuyUsdtBal');
     if (sellEl) sellEl.textContent = fmtNum(tokenF);
@@ -613,14 +613,19 @@ async function poolBuyTokens() {
   if (!window._poolSelectedToken) { toast('Select a token first', 'warn'); return; }
   _txBegin();
   try {
-    const router  = getRouter();
-    const ethIn   = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
-    const amounts = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
-    const minOut  = amounts[1].mul(990).div(1000); // 1% slippage
-    toast('Confirm transaction in MetaMask…', 'info');
+    const router    = getRouter();
+    const usdtAddr  = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+    const usdtAbi   = ['function approve(address,uint256) returns (bool)'];
+    const usdtCt    = new ethers.Contract(usdtAddr, usdtAbi, signer);
+    const ethIn     = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
+    const amounts   = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
+    const minOut    = amounts[1].mul(990).div(1000); // 1% slippage
+    toast('Step 1/2 — Approve USDT in MetaMask…', 'info');
+    await (await usdtCt.approve(CONTRACT_ADDRESS, ethIn, _GAS)).wait();
+    toast('Step 2/2 — Confirm buy in MetaMask…', 'info');
     // Route through contract so the trade is recorded in getTradeHistory
     const tx = await contract.connect(signer).swapBuy(
-      window._poolSelectedToken, minOut, { value: ethIn, ..._GAS }
+      window._poolSelectedToken, ethIn, minOut, _GAS
     );
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();

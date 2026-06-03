@@ -37,7 +37,7 @@ contract Liquidity is LiquidityStorage {
     address private immutable _roiFacet;
 
     uint256 private constant LP_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
-    uint256 private constant USDT_PER_ETH     = 1000;
+    uint256 private constant USDT_PER_ETH     = 1;
     uint256 private constant TWAP_MAX_STALE   = 2 hours;
 
     // ── Errors ────────────────────────────────────────────────────────────────
@@ -48,6 +48,8 @@ contract Liquidity is LiquidityStorage {
     error CannotReferSelf();
     error ReferrerNotRegistered();
     error MustSendETH();
+    error MustSendUSDT();
+    error USDTTransferFailed();
     error MustSpecifyTokenAmount();
     error InsufficientContractTokenBalance();
     error ETHReturnFailed();
@@ -216,15 +218,18 @@ contract Liquidity is LiquidityStorage {
     }
 
     // ── Token management ──────────────────────────────────────────────────────
-    function seedPool(address _token, uint256 _tokenAmount) external payable onlyOwner nonReentrant {
-        if (msg.value == 0) revert MustSendETH();
+    function seedPool(address _token, uint256 _tokenAmount, uint256 _usdtAmount) external onlyOwner nonReentrant {
+        if (_usdtAmount == 0) revert MustSendUSDT();
         if (_tokenAmount == 0) revert MustSpecifyTokenAmount();
         if (IERC20(_token).balanceOf(address(this)) < _tokenAmount) revert InsufficientContractTokenBalance();
+        if (IERC20(WETH).balanceOf(address(this)) < _usdtAmount) revert InsufficientContractTokenBalance();
         IERC20(_token).approve(UNISWAP_ROUTER, _tokenAmount);
-        (,, uint256 lpReceived) = IUniswapV2Router02(UNISWAP_ROUTER).addLiquidityETH{value: msg.value}(
-            _token, _tokenAmount, 0, 0, owner, block.timestamp + 300
+        IERC20(WETH).approve(UNISWAP_ROUTER, _usdtAmount);
+        (,, uint256 lpReceived) = IUniswapV2Router02(UNISWAP_ROUTER).addLiquidity(
+            _token, WETH, _tokenAmount, _usdtAmount, 0, 0, owner, block.timestamp + 300
         );
         IERC20(_token).approve(UNISWAP_ROUTER, 0);
+        IERC20(WETH).approve(UNISWAP_ROUTER, 0);
         {
             address _pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
             if (_pair != address(0)) {
@@ -237,12 +242,7 @@ contract Liquidity is LiquidityStorage {
                 }));
             }
         }
-        uint256 remaining = address(this).balance;
-        if (remaining > 0) {
-            (bool ok,) = payable(owner).call{value: remaining}("");
-            if (!ok) revert ETHReturnFailed();
-        }
-        emit PoolSeeded(_token, msg.value, _tokenAmount, lpReceived);
+        emit PoolSeeded(_token, _usdtAmount, _tokenAmount, lpReceived);
     }
 
     function addToken(address _tokenAddress, string calldata _name, string calldata _symbol) external onlyOwner {
@@ -290,23 +290,25 @@ contract Liquidity is LiquidityStorage {
     }
 
     // ── Invest ────────────────────────────────────────────────────────────────
-    function invest(address _token) external payable onlyRegistered nonReentrant {
-        if (!validPackageAmounts[msg.value]) revert InvalidPackageAmount();
+    function invest(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+        if (!validPackageAmounts[_usdtAmount]) revert InvalidPackageAmount();
         if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
         if (tokens[_token].removed) revert TokenDelisted();
         if (bytes(tokens[_token].inProgressLabel).length != 0) revert TokenInProgress();
         if (IERC20(_token).balanceOf(address(this)) == 0) revert InsufficientContractTokenBalance();
+
+        if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
 
         _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
         _callFacet(abi.encodeCall(LiquidityFacet.updateTokenTWAPExt, (_token)));
         if (!_tokenTwapReady[_token]) revert PriceUnavailable();
         if (block.timestamp - _tokenTwapLastUpdated[_token] > TWAP_MAX_STALE) revert TokenTWAPStale();
 
-        uint256 T         = msg.value;
+        uint256 T         = _usdtAmount;
         uint256 rewardPPM = _getRewardRatePPM(T, 90, 0);
         bool wasQualifying = _qualifies(msg.sender);
 
-        _callFacet(abi.encodeCall(LiquidityFacet.investExt, (_token, rewardPPM)));
+        _callFacet(abi.encodeCall(LiquidityFacet.investExt, (_token, rewardPPM, T)));
 
         userTotalInvested[msg.sender] += T;
         totalEthInvested              += T;
@@ -639,24 +641,27 @@ contract Liquidity is LiquidityStorage {
     }
 
     // ── Direct swap functions (records every trade in _tradeHistory) ─────────
-    function swapBuy(address _token, uint256 _minTokensOut) external payable nonReentrant {
-        if (msg.value == 0) revert MustSendETH();
+    function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant {
+        if (_usdtIn == 0) revert MustSendUSDT();
+        if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtIn)) revert USDTTransferFailed();
+        IERC20(WETH).approve(UNISWAP_ROUTER, _usdtIn);
         address[] memory path = new address[](2);
         path[0] = WETH;
         path[1] = _token;
         uint256[] memory amounts = IUniswapV2Router02(UNISWAP_ROUTER)
-            .swapExactETHForTokens{value: msg.value}(
-                _minTokensOut, path, msg.sender, block.timestamp + 300
+            .swapExactTokensForTokens(
+                _usdtIn, _minTokensOut, path, msg.sender, block.timestamp + 300
             );
+        IERC20(WETH).approve(UNISWAP_ROUTER, 0);
         _tradeHistory[_token].push(TradeSnap({
             ts:     uint64(block.timestamp),
             isBuy:  true,
-            ethAmt: uint128(msg.value),
+            ethAmt: uint128(_usdtIn),
             tokAmt: uint128(amounts[1])
         }));
     }
 
-    function swapSell(address _token, uint256 _tokensIn, uint256 _minEthOut) external nonReentrant {
+    function swapSell(address _token, uint256 _tokensIn, uint256 _minUsdtOut) external nonReentrant {
         if (_tokensIn == 0) revert MustSpecifyTokenAmount();
         IERC20(_token).transferFrom(msg.sender, address(this), _tokensIn);
         IERC20(_token).approve(UNISWAP_ROUTER, _tokensIn);
@@ -664,8 +669,8 @@ contract Liquidity is LiquidityStorage {
         path[0] = _token;
         path[1] = WETH;
         uint256[] memory amounts = IUniswapV2Router02(UNISWAP_ROUTER)
-            .swapExactTokensForETH(
-                _tokensIn, _minEthOut, path, msg.sender, block.timestamp + 300
+            .swapExactTokensForTokens(
+                _tokensIn, _minUsdtOut, path, msg.sender, block.timestamp + 300
             );
         IERC20(_token).approve(UNISWAP_ROUTER, 0);
         _tradeHistory[_token].push(TradeSnap({
@@ -680,18 +685,19 @@ contract Liquidity is LiquidityStorage {
 }
 
 interface IUniswapV2Router02 {
-    function addLiquidityETH(
-        address token, uint amountTokenDesired, uint amountTokenMin,
-        uint amountETHMin, address to, uint deadline
-    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
-    function swapExactETHForTokens(
-        uint amountOutMin, address[] calldata path, address to, uint deadline
-    ) external payable returns (uint[] memory amounts);
-    function swapExactTokensForETH(
-        uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline
-    ) external returns (uint[] memory amounts);
-    function removeLiquidityETH(
-        address token, uint liquidity, uint amountTokenMin, uint amountETHMin,
+    function addLiquidity(
+        address tokenA, address tokenB,
+        uint amountADesired, uint amountBDesired,
+        uint amountAMin, uint amountBMin,
         address to, uint deadline
-    ) external returns (uint amountToken, uint amountETH);
+    ) external returns (uint amountA, uint amountB, uint liquidity);
+    function swapExactTokensForTokens(
+        uint amountIn, uint amountOutMin,
+        address[] calldata path, address to, uint deadline
+    ) external returns (uint[] memory amounts);
+    function removeLiquidity(
+        address tokenA, address tokenB, uint liquidity,
+        uint amountAMin, uint amountBMin,
+        address to, uint deadline
+    ) external returns (uint amountA, uint amountB);
 }

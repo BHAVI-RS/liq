@@ -13,6 +13,15 @@ const TOTAL          = 60;
 const FUND_TARGET    = hre.ethers.parseEther("5");   // top-up target per sub-wallet
 const FUND_THRESHOLD = hre.ethers.parseEther("0.5"); // skip if already has this much
 
+// ── USDT ──────────────────────────────────────────────────────────────────────
+const USDT_ADDRESS       = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const USDT_PER_ACCOUNT   = hre.ethers.parseEther("2000000"); // 10 lakh USDT (18 decimals)
+const USDT_THRESHOLD     = hre.ethers.parseEther("1000000");  // skip if already has ≥ 9 lakh
+const USDT_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address to, uint256 amount) returns (bool)",
+];
+
 function sep(c = "─", n = 60) { return c.repeat(n); }
 
 // account[0]  = rawKey itself
@@ -36,81 +45,73 @@ async function main() {
     process.exit(1);
   }
 
-  const provider = hre.ethers.provider;
-  const wallets  = deriveWallets(rawKey, provider);
-  const deployer = wallets[0];
+  const provider     = hre.ethers.provider;
+  const wallets      = deriveWallets(rawKey, provider);
+  const deployer     = wallets[0];
+  const usdtContract = new hre.ethers.Contract(USDT_ADDRESS, USDT_ABI, deployer);
 
   console.log(sep("═"));
   console.log("  AMOY NODE — 60 Derived Accounts");
   console.log(sep("═"));
-  console.log(`  Funder (account[00]): ${deployer.address}\n`);
 
-  // ── Print all 60 addresses, private keys, and balances ──────────────────────
-  console.log("  All derived accounts:");
-  console.log(sep());
+  let maticFunded = 0, maticSkipped = 0;
+  let usdtFunded  = 0, usdtSkipped  = 0;
+
   for (let i = 0; i < TOTAL; i++) {
-    const bal = await provider.getBalance(wallets[i].address);
-    const tag = i === 0 ? "  ← your wallet" : "";
-    console.log(
-      `  [${String(i).padStart(2, "0")}] ${wallets[i].address}` +
-      `  ${hre.ethers.formatEther(bal).padStart(12)} POL${tag}`
-    );
-    console.log(
-      `       PK: ${wallets[i].privateKey}`
-    );
-  }
+    const wallet = wallets[i];
+    const tag    = i === 0 ? " (funder)" : "";
 
-  // ── Balance check ─────────────────────────────────────────────────────────
-  const deployerBal = await provider.getBalance(deployer.address);
-  const required    = FUND_TARGET * BigInt(TOTAL - 1) + hre.ethers.parseEther("3"); // worst-case gas buffer
-  console.log(sep());
-  console.log(`  account[00] balance : ${hre.ethers.formatEther(deployerBal)} POL`);
-  console.log(`  Required (worst case): ${hre.ethers.formatEther(required)} POL`);
-  console.log(`    (59 × 2 POL to fund + ~3 POL gas buffer)`);
+    const [maticBal, usdtBal] = await Promise.all([
+      provider.getBalance(wallet.address),
+      usdtContract.balanceOf(wallet.address),
+    ]);
 
-  if (deployerBal < required) {
-    console.error(`\n❌  Insufficient POL in account[00].`);
-    console.error(`   Need at least ${hre.ethers.formatEther(required)} POL.`);
-    console.error(`   Get testnet POL: https://faucet.polygon.technology/`);
-    process.exit(1);
-  }
+    console.log(`\n  Account [${String(i).padStart(2, "0")}]${tag}`);
+    console.log(sep());
+    console.log(`  Address     : ${wallet.address}`);
+    console.log(`  Private Key : ${wallet.privateKey}`);
+    console.log(`  USDT Balance: ${hre.ethers.formatEther(usdtBal)} USDT`);
+    console.log(`  ETH Balance : ${hre.ethers.formatEther(maticBal)} POL`);
 
-  // ── Fund accounts [1..59] ─────────────────────────────────────────────────
-  console.log(`\n  Funding accounts [01..59] — target 2 POL, skip if ≥ 0.5 POL…`);
-  console.log(sep());
+    if (i === 0) continue; // deployer is the funder — never refill
 
-  let funded = 0;
-  let skipped = 0;
-
-  for (let i = 1; i < TOTAL; i++) {
-    const bal = await provider.getBalance(wallets[i].address);
-
-    if (bal >= FUND_THRESHOLD) {
-      console.log(
-        `  [${String(i).padStart(2, "0")}] already has ${hre.ethers.formatEther(bal)} POL — skipped`
-      );
-      skipped++;
-      continue;
+    // ── MATIC top-up ──────────────────────────────────────────────────────
+    if (maticBal >= FUND_THRESHOLD) {
+      console.log(`  POL         : sufficient — skipped`);
+      maticSkipped++;
+    } else {
+      const toSend = FUND_TARGET - maticBal;
+      const tx = await deployer.sendTransaction({ to: wallet.address, value: toSend });
+      await tx.wait();
+      console.log(`  POL         : sent ${hre.ethers.formatEther(toSend)} POL ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      maticFunded++;
     }
 
-    const toSend = FUND_TARGET - bal; // top up to exactly 2 POL
-    const tx = await deployer.sendTransaction({
-      to: wallets[i].address,
-      value: toSend,
-    });
-    await tx.wait();
-    console.log(
-      `  [${String(i).padStart(2, "0")}] funded ✓  sent ${hre.ethers.formatEther(toSend)} POL` +
-      `  (tx: ${tx.hash.slice(0, 18)}…)`
-    );
-    funded++;
+    // ── USDT top-up ───────────────────────────────────────────────────────
+    if (usdtBal >= USDT_THRESHOLD) {
+      console.log(`  USDT        : sufficient — skipped`);
+      usdtSkipped++;
+    } else {
+      const toSend = USDT_PER_ACCOUNT - usdtBal;
+      const tx = await usdtContract.transfer(wallet.address, toSend);
+      await tx.wait();
+      console.log(`  USDT        : sent ${hre.ethers.formatEther(toSend)} USDT ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      usdtFunded++;
+    }
   }
 
-  const finalBal = await provider.getBalance(deployer.address);
-  console.log(sep());
-  console.log(`  Funded  : ${funded} accounts`);
-  console.log(`  Skipped : ${skipped} accounts (already had ≥ 0.5 POL)`);
-  console.log(`  account[00] remaining: ${hre.ethers.formatEther(finalBal)} POL`);
+  const [finalMatic, finalUSDT] = await Promise.all([
+    provider.getBalance(deployer.address),
+    usdtContract.balanceOf(deployer.address),
+  ]);
+
+  console.log("\n" + sep("═"));
+  console.log("  SUMMARY");
+  console.log(sep("═"));
+  console.log(`  POL  funded : ${maticFunded}  skipped: ${maticSkipped}`);
+  console.log(`  USDT funded : ${usdtFunded}  skipped: ${usdtSkipped}`);
+  console.log(`  account[00] POL  remaining: ${hre.ethers.formatEther(finalMatic)} POL`);
+  console.log(`  account[00] USDT remaining: ${hre.ethers.formatEther(finalUSDT)} USDT`);
   console.log(sep("═"));
   console.log("  Done. Run simulateamoy.js next:");
   console.log("  npx hardhat run scripts/amoytestnet/simulateamoy.js --network polygonAmoy");

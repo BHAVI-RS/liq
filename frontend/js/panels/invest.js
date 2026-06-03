@@ -11,41 +11,26 @@ const PKG_CAT_RGB = {
   institutional: [167, 139, 250],  // purple
 };
 const PKG_CATS = ['basic', 'elite', 'institutional'];
-let _ethPriceUSD      = null;
 let _activePkgCat     = 'basic';
 let _selectedPkgUSD   = null;
 let _selectedInvestAddr = null;
-let _ethPricePollInterval = null;
 
-async function fetchEthPrice() {
-  try {
-    const res  = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
-    const data = await res.json();
-    _ethPriceUSD = data.ethereum.usd;
-    const el = document.getElementById('ethPriceVal');
-    if (el) el.textContent = '$' + _ethPriceUSD.toLocaleString();
-    renderPkgGrid();
-    // Recompute invest preview if one is shown, since price affects display
-    if (parseFloat(document.getElementById('investAmount')?.value) > 0) computeInvestPreview();
-  } catch(_) {
-    const el = document.getElementById('ethPriceVal');
-    if (el) el.textContent = 'unavailable';
-  }
+// Mirror of LiquidityMath.calcMaxPoolBuy — returns the max ETH (as BigNumber wei) that can
+// be swapped into the pool while keeping the resulting spot within TWAP_GUARD_BPS of TWAP.
+// Uses spot price as TWAP approximation (valid for a recently-warmed stable pool).
+function calcMaxPoolBuyWei(resToken, resETH, twapPrice, twapGuardBps = 500) {
+  if (twapPrice.isZero()) return ethers.BigNumber.from(0);
+  const alphaBps = 10000 - twapGuardBps;
+  const numer = ethers.BigNumber.from(997).mul(resToken).mul(twapPrice).mul(10000);
+  const sub   = ethers.utils.parseEther('1').mul(alphaBps).mul(resETH).mul(1000);
+  if (numer.lte(sub)) return ethers.BigNumber.from(0);
+  const denom = ethers.BigNumber.from(997).mul(ethers.utils.parseEther('1')).mul(alphaBps);
+  return numer.sub(sub).div(denom);
 }
 
-function _investStopPoll() {
-  if (_ethPricePollInterval) { clearInterval(_ethPricePollInterval); _ethPricePollInterval = null; }
-}
-
-function _investStartPoll() {
-  _investStopPoll();
-  // Refresh ETH price every 30 s while invest tab is active
-  _ethPricePollInterval = setInterval(() => {
-    const panel = document.getElementById('panel-invest');
-    if (!panel || !panel.classList.contains('active')) { _investStopPoll(); return; }
-    fetchEthPrice();
-  }, 30000);
-}
+function fetchEthPrice() {}   // USDT is always $1 — no price fetch needed
+function _investStopPoll() {}
+function _investStartPoll() {}
 
 function switchPkgCat(cat) {
   _activePkgCat = cat;
@@ -153,8 +138,8 @@ async function computeInvestPreview() {
 
   try {
     const totalWei = ethers.utils.parseEther(ethAmtStr);
-    const A60 = totalWei.div(2).mul(60).div(100);
-    const A40 = totalWei.div(2).mul(40).div(100);
+    const A60max = totalWei.div(2).mul(60).div(100);  // max 30% for pool buy
+    const A40eth = totalWei.div(2).mul(40).div(100);  // fixed 20% for commissions
 
     const routerAbi  = ['function getAmountsOut(uint256,address[]) view returns (uint256[])'];
     const factoryAbi = ['function getPair(address,address) view returns (address)'];
@@ -164,10 +149,8 @@ async function computeInvestPreview() {
     const router  = new ethers.Contract(ROUTER_ADDRESS,  routerAbi,  provider);
     const factory = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, provider);
 
-    const amountsOut   = await router.getAmountsOut(A60, [WETH_ADDRESS, tokenAddr]);
-    const poolTokensBN = amountsOut[1];
-
     const pairAddr = await factory.getPair(tokenAddr, WETH_ADDRESS);
+    let poolTokensF = 0;
     let platformTokensF = 0;
     let dec = 18;
 
@@ -176,15 +159,24 @@ async function computeInvestPreview() {
       const erc20 = new ethers.Contract(tokenAddr, erc20Abi, provider);
       const [[r0, r1], tok0, d] = await Promise.all([pair.getReserves(), pair.token0(), erc20.decimals().catch(() => 18)]);
       dec = Number(d);
-      const isToken0 = tok0.toLowerCase() === tokenAddr.toLowerCase();
-      const resToken = isToken0 ? r0 : r1;
-      const resETH   = isToken0 ? r1 : r0;
-      if (!resETH.isZero()) {
-        platformTokensF = parseFloat(ethers.utils.formatUnits(A40.mul(resToken).div(resETH), dec));
+      const isToken0  = tok0.toLowerCase() === tokenAddr.toLowerCase();
+      const resToken  = isToken0 ? r0 : r1;
+      const resETH    = isToken0 ? r1 : r0;
+      if (!resETH.isZero() && !resToken.isZero()) {
+        const twapPrice   = resETH.mul(ethers.utils.parseEther('1')).div(resToken);
+        const maxFeasible = calcMaxPoolBuyWei(resToken, resETH, twapPrice);
+        const A60actual   = A60max.lt(maxFeasible) ? A60max : maxFeasible;
+        const excess      = A60max.sub(A60actual);
+        if (A60actual.gt(0)) {
+          const out = await router.getAmountsOut(A60actual, [WETH_ADDRESS, tokenAddr]);
+          poolTokensF = parseFloat(ethers.utils.formatUnits(out[1], dec));
+        }
+        platformTokensF = parseFloat(ethers.utils.formatUnits(
+          A40eth.add(excess).mul(resToken).div(resETH), dec
+        ));
       }
     }
 
-    const poolTokensF  = parseFloat(ethers.utils.formatUnits(poolTokensBN, dec));
     const totalTokensF = poolTokensF + platformTokensF;
     const td  = typeof investTokenData !== 'undefined' ? investTokenData.get(tokenAddr.toLowerCase()) : null;
     const sym = td ? td.symbol : '—';
@@ -245,8 +237,8 @@ async function showInvestConfirmModal() {
 
   try {
     const totalWei     = ethers.utils.parseEther(ethAmtStr);
-    const A60          = totalWei.div(2).mul(60).div(100);
-    const A40          = totalWei.div(2).mul(40).div(100);
+    const A60max       = totalWei.div(2).mul(60).div(100);  // max 30% for pool buy
+    const A40eth       = totalWei.div(2).mul(40).div(100);  // fixed 20% for commissions
     const liquidityETH = totalWei.div(2);
 
     const routerAbi  = ['function getAmountsOut(uint256,address[]) view returns (uint256[])'];
@@ -261,14 +253,13 @@ async function showInvestConfirmModal() {
     const router  = new ethers.Contract(ROUTER_ADDRESS,  routerAbi,  provider);
     const factory = new ethers.Contract(FACTORY_ADDRESS, factoryAbi, provider);
 
-    const [amountsOut, pairAddr] = await Promise.all([
-      router.getAmountsOut(A60, [WETH_ADDRESS, tokenAddr]),
-      factory.getPair(tokenAddr, WETH_ADDRESS),
-    ]);
-    const poolTokensBN = amountsOut[1];
+    const pairAddr = await factory.getPair(tokenAddr, WETH_ADDRESS);
 
+    let poolTokensBN     = ethers.BigNumber.from(0);
     let platformTokensBN = ethers.BigNumber.from(0);
-    let lpMintedF = null;
+    let excessBN         = ethers.BigNumber.from(0);
+    let A60actual        = ethers.BigNumber.from(0);
+    let lpMintedF        = null;
     let dec = 18;
 
     if (pairAddr && pairAddr !== ethers.constants.AddressZero) {
@@ -279,14 +270,27 @@ async function showInvestConfirmModal() {
       ]);
       dec = Number(d);
       const isToken0 = tok0.toLowerCase() === tokenAddr.toLowerCase();
-      const resToken = isToken0 ? r0 : r1;
-      const resETH   = isToken0 ? r1 : r0;
-      if (!resETH.isZero()) {
-        platformTokensBN = A40.mul(resToken).div(resETH);
-        if (!lpSupply.isZero() && !resToken.isZero()) {
+      const resToken  = isToken0 ? r0 : r1;
+      const resETH    = isToken0 ? r1 : r0;
+      if (!resETH.isZero() && !resToken.isZero()) {
+        const twapPrice   = resETH.mul(ethers.utils.parseEther('1')).div(resToken);
+        const maxFeasible = calcMaxPoolBuyWei(resToken, resETH, twapPrice);
+        A60actual         = A60max.lt(maxFeasible) ? A60max : maxFeasible;
+        excessBN          = A60max.sub(A60actual);
+        platformTokensBN  = A40eth.add(excessBN).mul(resToken).div(resETH);
+
+        if (A60actual.gt(0)) {
+          const out    = await router.getAmountsOut(A60actual, [WETH_ADDRESS, tokenAddr]);
+          poolTokensBN = out[1];
+        }
+
+        if (!lpSupply.isZero()) {
           const totalTokensBN = poolTokensBN.add(platformTokensBN);
-          const lpFromTokens  = lpSupply.mul(totalTokensBN).div(resToken);
-          const lpFromETH     = lpSupply.mul(liquidityETH).div(resETH);
+          // Post-swap reserves for accurate LP estimate
+          const resETH_post   = resETH.add(A60actual);
+          const resToken_post = resToken.sub(poolTokensBN);
+          const lpFromTokens  = lpSupply.mul(totalTokensBN).div(resToken_post.gt(0) ? resToken_post : resToken);
+          const lpFromETH     = lpSupply.mul(liquidityETH).div(resETH_post);
           const lpMintedBN    = lpFromTokens.lt(lpFromETH) ? lpFromTokens : lpFromETH;
           lpMintedF = parseFloat(ethers.utils.formatEther(lpMintedBN));
         }
@@ -295,6 +299,8 @@ async function showInvestConfirmModal() {
 
     const poolTokensF     = parseFloat(ethers.utils.formatUnits(poolTokensBN, dec));
     const platformTokensF = parseFloat(ethers.utils.formatUnits(platformTokensBN, dec));
+    const excessUSDT      = parseFloat(ethers.utils.formatEther(excessBN)) * USDT_PER_ETH;
+    const poolCapped      = excessBN.gt(0);
     const totalTokensF    = poolTokensF + platformTokensF;
 
     let stakingBox = '';
@@ -381,10 +387,17 @@ async function invest() {
 
   _txBegin();
   try {
-    const totalWei = ethers.utils.parseEther(ethAmtStr);
+    const totalWei  = ethers.utils.parseEther(ethAmtStr);
+    const usdtAddr  = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+    const usdtAbi   = ['function approve(address spender, uint256 amount) external returns (bool)'];
+    const usdtToken = new ethers.Contract(usdtAddr, usdtAbi, signer);
 
-    toast('Confirm transaction in MetaMask…', 'info');
-    const tx = await contract.connect(signer).invest(tokenAddr, { value: totalWei, ..._GAS });
+    toast('Step 1/2 — Approve USDT spending in MetaMask…', 'info');
+    const approveTx = await usdtToken.approve(CONTRACT_ADDRESS, totalWei, _GAS);
+    await approveTx.wait();
+
+    toast('Step 2/2 — Confirm investment in MetaMask…', 'info');
+    const tx = await contract.connect(signer).invest(tokenAddr, totalWei, _GAS);
 
     toast('Transaction sent — waiting for confirmation…', 'info');
 

@@ -13,7 +13,7 @@ interface IUniV2FactoryMin {
 }
 
 library LiquidityMath {
-    uint256 private constant USDT_PER_ETH    = 1000;
+    uint256 private constant USDT_PER_ETH    = 1;
     uint256 private constant LP_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
 
     function getTierIndex(uint32[12] memory tiers, uint256 ethInvestedWei)
@@ -97,6 +97,24 @@ library LiquidityMath {
                 }
             }
         }
+    }
+
+    // Returns the maximum ETH that can be swapped in a single invest() call while
+    // keeping the resulting spot price within TWAP_GUARD_BPS of the TWAP price.
+    // Derived by solving: spotExpected(A60) >= A60 * (1e18/twapPrice) * alphaBPS/10000
+    // for A60, cancelling the common A60 factor and rearranging.
+    function calcMaxPoolBuy(
+        uint256 resToken,
+        uint256 resETH,
+        uint256 twapPrice,
+        uint256 twapGuardBPS
+    ) public pure returns (uint256 maxA60) {
+        if (twapPrice == 0) return 0;
+        uint256 alphaBPS = 10000 - twapGuardBPS;
+        uint256 numer    = 997 * resToken * twapPrice * 10000;
+        uint256 sub      = 1e18 * alphaBPS * resETH * 1000;
+        if (numer <= sub) return 0;
+        maxA60 = (numer - sub) / (997 * 1e18 * alphaBPS);
     }
 
     // Pure AMM math for the invest() swap+liquidity calculation.

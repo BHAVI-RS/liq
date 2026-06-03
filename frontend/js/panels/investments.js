@@ -601,7 +601,7 @@ async function _execRemoveLP(lockIndex, tokenAddr, lpAmountHex) {
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
-    toast('LP removed! ETH and tokens have been returned to your wallet.', 'success');
+    toast('LP removed! USDT and tokens have been returned to your wallet.', 'success');
     invalidateTabs('dashboard', 'investments');
     loadInvestments();
     loadDashboard();
@@ -622,7 +622,7 @@ async function _execRemoveLPDirect(lockIndex) {
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
     _txDone();
-    toast('LP removed! ETH and tokens returned to your wallet.', 'success');
+    toast('LP removed! USDT and tokens returned to your wallet.', 'success');
     invalidateTabs('dashboard', 'investments');
     loadInvestments();
     loadDashboard();

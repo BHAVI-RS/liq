@@ -1,9 +1,10 @@
 // ── USDT DISPLAY SYSTEM ──
-// Platform fixed rate: 1,000 USDT = 1 ETH  (testnet only — not market price)
-const USDT_PER_ETH = 1000;
+// Investments are denominated directly in USDT (18-decimal ERC-20).
+// USDT_PER_ETH = 1 means: 1 unit of base currency = 1 USDT.
+const USDT_PER_ETH = 1;
 
-function ethToUSDT(ethFloat) {
-  return ethFloat * USDT_PER_ETH;
+function ethToUSDT(usdtFloat) {
+  return usdtFloat * USDT_PER_ETH;
 }
 
 // Format a number with max 5 decimal places, stripping trailing zeros

@@ -334,7 +334,7 @@ async function loadOwnerStats() {
     const [totalUsersBN, totalInvestedWei] = await contract.getPlatformStats();
     const totalUsers        = totalUsersBN.toNumber();
     const totalInvestedETH  = parseFloat(ethers.utils.formatEther(totalInvestedWei));
-    const totalInvestedUSDT = totalInvestedETH * 1000;
+    const totalInvestedUSDT = totalInvestedETH * USDT_PER_ETH;
 
     const tokenAddrs = await contract.getRegisteredTokens();
     let totalPoolUSDT = 0;
@@ -344,9 +344,9 @@ async function loadOwnerStats() {
       try {
         const t    = await contract.getToken(addr);
         const pool = await _dashGetPoolPrice(addr);
-        const usdtSide  = pool ? pool.resETH   * 1000 : 0;
-        const tokenSide = pool ? pool.resToken         : 0;
-        totalPoolUSDT  += pool ? pool.resETH * 2 * 1000 : 0;
+        const usdtSide  = pool ? pool.resETH   * USDT_PER_ETH : 0;
+        const tokenSide = pool ? pool.resToken                : 0;
+        totalPoolUSDT  += pool ? pool.resETH * 2 * USDT_PER_ETH : 0;
         poolRows.push({ symbol: t.symbol, addr, usdtSide, tokenSide, hasPool: !!pool });
       } catch(_) {
         poolRows.push({ symbol: addr, addr, usdtSide: 0, tokenSide: 0, hasPool: false });
@@ -368,7 +368,7 @@ async function loadOwnerStats() {
         <div class="info-cell">
           <div class="info-cell-label">USDT IN POOLS</div>
           <div class="info-cell-value" style="color:var(--gold);font-size:22px;">$${fmtNum(totalUSDTSide)}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px;">${tokenAddrs.length} pool${tokenAddrs.length!==1?'s':''} · ETH side only</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px;">${tokenAddrs.length} pool${tokenAddrs.length!==1?'s':''} · USDT side only</div>
         </div>
         <div class="info-cell">
           <div class="info-cell-label">TOTAL POOL VALUE</div>
@@ -506,7 +506,7 @@ async function onOwnerLiqTokenChange(addr) {
         _ownerLiqIsNewPool = false;
         newPoolSec.style.display = 'none';
         const pool = await _dashGetPoolPrice(addr);
-        const priceUSDT = pool ? fmtNum(pool.priceEth * 1000) : '—';
+        const priceUSDT = pool ? fmtNum(pool.priceEth) : '—';
         statusEl.style.color = 'var(--success)';
         statusEl.textContent = `Pool found — current price: $${priceUSDT} USDT per ${t.symbol}`;
       }
@@ -524,18 +524,17 @@ function onOwnerLiqUSDTChange() {
   const ethEl   = document.getElementById('ownerLiqETH');
   const tokEl   = document.getElementById('ownerLiqTokenAmt');
   if (!addr || usdtVal <= 0) { ethEl.textContent = '—'; tokEl.textContent = '—'; return; }
-  const ethAmt = usdtVal / 1000;
-  ethEl.textContent = (ethAmt * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
+  ethEl.textContent = usdtVal.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
 
   if (_ownerLiqIsNewPool) {
     const priceUSDT = parseFloat(document.getElementById('ownerInitialPrice').value) || 0;
     if (priceUSDT <= 0) { tokEl.textContent = 'Enter price above'; return; }
-    const tokAmt = ethAmt / (priceUSDT / 1000);
+    const tokAmt = usdtVal / priceUSDT;
     tokEl.textContent = tokAmt.toLocaleString(undefined, { maximumFractionDigits: 4 }) + ' ' + _ownerLiqTokenSym;
   } else {
     _dashGetPoolPrice(addr).then(pool => {
       if (!pool || pool.priceEth === 0) { tokEl.textContent = '—'; return; }
-      const tokAmt = ethAmt / pool.priceEth;
+      const tokAmt = usdtVal / pool.priceEth;
       tokEl.textContent = tokAmt.toLocaleString(undefined, { maximumFractionDigits: 4 }) + ' ' + _ownerLiqTokenSym;
     });
   }
@@ -551,24 +550,30 @@ async function ownerAddLiquidity() {
   const btn = document.getElementById('ownerAddLiqBtn');
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
-    const ethAmt = usdtVal / 1000;
-    const ethWei = ethers.utils.parseEther(ethAmt.toFixed(18));
+    const usdtWei = ethers.utils.parseEther(usdtVal.toFixed(18));
     let tokenWei;
 
     if (_ownerLiqIsNewPool) {
       const priceUSDT = parseFloat(document.getElementById('ownerInitialPrice').value) || 0;
-      if (priceUSDT <= 0) { toast('Enter initial price', 'warn'); return; }
-      const tokAmt = ethAmt / (priceUSDT / 1000);
+      if (priceUSDT <= 0) { toast('Enter initial price (USDT per token)', 'warn'); return; }
+      const tokAmt = usdtVal / priceUSDT;
       tokenWei = ethers.utils.parseUnits(tokAmt.toFixed(_ownerLiqTokenDec), _ownerLiqTokenDec);
     } else {
       const pool = await _dashGetPoolPrice(addr);
       if (!pool) { toast('Could not fetch pool price', 'error'); return; }
-      const tokAmt = ethAmt / pool.priceEth;
+      const tokAmt = usdtVal / pool.priceEth;
       tokenWei = ethers.utils.parseUnits(tokAmt.toFixed(_ownerLiqTokenDec), _ownerLiqTokenDec);
     }
 
-    toast('Confirm in MetaMask — sending ETH to seed the pool…', 'info');
-    await (await contract.connect(signer).seedPool(addr, tokenWei, { value: ethWei, ..._GAS })).wait();
+    const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+    const usdtAbi  = ['function transfer(address to, uint256 amount) external returns (bool)'];
+    const usdtCt   = new ethers.Contract(usdtAddr, usdtAbi, signer);
+
+    toast('Step 1/2 — Transfer USDT to contract in MetaMask…', 'info');
+    await (await usdtCt.transfer(CONTRACT_ADDRESS, usdtWei, _GAS)).wait();
+
+    toast('Step 2/2 — Seed pool in MetaMask…', 'info');
+    await (await contract.connect(signer).seedPool(addr, tokenWei, usdtWei, _GAS)).wait();
 
     toast('Liquidity added successfully!', 'success');
     document.getElementById('ownerLiqUSDT').value          = '';
@@ -689,9 +694,10 @@ async function ownerRemoveLiquidity() {
     await (await lpToken.approve(DEX_ROUTER, lpWei, _GAS)).wait();
 
     toast('Step 2/2 — Remove liquidity in MetaMask…', 'info');
-    const router = getRouter();
-    await (await router.removeLiquidityETH(
-      addr, lpWei, minTok, minETH, walletAddress, deadline, _GAS
+    const removeLiqAbi = ['function removeLiquidity(address tokenA, address tokenB, uint liquidity, uint amountAMin, uint amountBMin, address to, uint deadline) external returns (uint amountA, uint amountB)'];
+    const router = new ethers.Contract(DEX_ROUTER, removeLiqAbi, signer);
+    await (await router.removeLiquidity(
+      addr, DEX_WETH, lpWei, minTok, minETH, walletAddress, deadline, _GAS
     )).wait();
 
     toast('Liquidity removed successfully!', 'success');
@@ -712,10 +718,13 @@ let _ownerWithdrawTokenSym = '';
 async function ownerLoadWithdrawBals() {
   const el = document.getElementById('ownerETHBal');
   try {
-    const wei = await provider.getBalance(contract.address);
-    const eth = parseFloat(ethers.utils.formatEther(wei));
-    el.textContent = `Contract balance: $${fmtNum(eth * USDT_PER_ETH)} USDT`;
-    el.style.color = eth > 0 ? 'var(--gold)' : 'var(--muted)';
+    const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+    const usdtAbi  = ['function balanceOf(address account) view returns (uint256)'];
+    const usdtCt   = new ethers.Contract(usdtAddr, usdtAbi, provider);
+    const usdtWei  = await usdtCt.balanceOf(contract.address);
+    const usdtBal  = parseFloat(ethers.utils.formatEther(usdtWei));
+    el.textContent = `Contract USDT balance: ${fmtNum(usdtBal)} USDT`;
+    el.style.color = usdtBal > 0 ? 'var(--gold)' : 'var(--muted)';
   } catch(e) {
     el.textContent = 'Failed to load balance.';
   }

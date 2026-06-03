@@ -12,9 +12,9 @@ interface IERC20F {
 }
 
 interface IRouterF {
-    function swapExactETHForTokens(uint, address[] calldata, address, uint) external payable returns (uint[] memory);
-    function addLiquidityETH(address, uint, uint, uint, address, uint) external payable returns (uint, uint, uint);
-    function removeLiquidityETH(address, uint, uint, uint, address, uint) external returns (uint, uint);
+    function swapExactTokensForTokens(uint, uint, address[] calldata, address, uint) external returns (uint[] memory);
+    function addLiquidity(address, address, uint, uint, uint, uint, address, uint) external returns (uint, uint, uint);
+    function removeLiquidity(address, address, uint, uint, uint, address, uint) external returns (uint, uint);
 }
 
 interface IFactoryF { function getPair(address, address) external view returns (address); }
@@ -35,7 +35,7 @@ contract LiquidityFacet is LiquidityStorage {
     address public  immutable platformToken;
 
     uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
-    uint256 private constant USDT_PER_ETH      = 1000;
+    uint256 private constant USDT_PER_ETH      = 1;
     uint256 private constant TWAP_PERIOD       = 30 seconds;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant MAX_REFERRAL_HOPS = 15;
@@ -192,14 +192,12 @@ contract LiquidityFacet is LiquidityStorage {
             uint256 deployerCut = amount * 5 / 100;
             toRecipient = amount - deployerCut;
             if (deployerCut > 0) {
-                (bool ok,) = payable(owner).call{value: deployerCut}("");
-                if (!ok) revert CommissionTransferFailed();
+                if (!IERC20F(WETH).transfer(owner, deployerCut)) revert CommissionTransferFailed();
             }
         }
-        (bool success,) = payable(recipient).call{value: toRecipient}("");
+        bool success = IERC20F(WETH).transfer(recipient, toRecipient);
         if (!success) {
-            (bool ok,) = payable(owner).call{value: toRecipient}("");
-            if (!ok) revert CommissionTransferFailed();
+            if (!IERC20F(WETH).transfer(owner, toRecipient)) revert CommissionTransferFailed();
         } else {
             userCommissionsEarned[recipient] += toRecipient;
             _commissionRecords[recipient].push(CommissionRecord({
@@ -383,63 +381,77 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── invest ────────────────────────────────────────────────────────────────
 
-    function investExt(address _token, uint256 rewardPPM) external payable {
-        uint256 T   = msg.value;
-        uint256 A   = T / 2;
-        uint256 B   = T - A;
-        uint256 A60 = (A * 60) / 100;
-        uint256 A40 = A - A60;
+    function investExt(address _token, uint256 rewardPPM, uint256 T) external {
+        uint256 A      = T / 2;
+        uint256 B      = T - A;
+        uint256 A60max = (A * 60) / 100;  // max 30% of T for pool buy
+        uint256 A40eth = A - A60max;       // fixed 20% of T (referral commission source)
 
         address pair = IFactoryF(UNISWAP_FACTORY).getPair(_token, WETH);
         if (pair == address(0)) revert PoolNotFound();
 
         uint256 platformBuyTokens;
         uint256 swapAmountOutMin;
+        uint256 A60actual;
         {
             (uint112 r0, uint112 r1,) = IPairF(pair).getReserves();
             address t0 = IPairF(pair).token0();
             uint256 resToken = t0 == _token ? uint256(r0) : uint256(r1);
-            uint256 resETH   = t0 == _token ? uint256(r1) : uint256(r0);
-            if (resETH == 0) revert PriceUnavailable();
+            uint256 resUSDT  = t0 == _token ? uint256(r1) : uint256(r0);
+            if (resUSDT == 0) revert PriceUnavailable();
 
-            uint256 spotExpected;
-            (platformBuyTokens, spotExpected) = LiquidityMath.calcInvestAmounts(A60, A40, resToken, resETH, 0);
+            uint256 maxFeasible = LiquidityMath.calcMaxPoolBuy(
+                resToken, resUSDT, _tokenTwapPrice[_token], TWAP_GUARD_BPS
+            );
+            A60actual = A60max < maxFeasible ? A60max : maxFeasible;
 
-            uint256 twapFloor = A60 * 1e18 / _tokenTwapPrice[_token]
-                                * (10000 - TWAP_GUARD_BPS) / 10000;
-            if (spotExpected < twapFloor) revert PriceDeviationTooHigh();
-            swapAmountOutMin = spotExpected * (10000 - MAX_SLIPPAGE_BPS) / 10000;
+            platformBuyTokens = (A40eth + (A60max - A60actual)) * resToken / resUSDT;
+
+            if (A60actual > 0) {
+                uint256 a60Fee       = A60actual * 997;
+                uint256 spotExpected = (a60Fee * resToken) / (resUSDT * 1000 + a60Fee);
+                swapAmountOutMin     = spotExpected * (10000 - MAX_SLIPPAGE_BPS) / 10000;
+            }
         }
 
         if (IERC20F(_token).balanceOf(address(this)) < platformBuyTokens) revert InsufficientContractTokenBalance();
 
-        address[] memory path = new address[](2);
-        path[0] = WETH;
-        path[1] = _token;
+        uint256 poolBuyTokens = 0;
+        if (A60actual > 0) {
+            address[] memory path = new address[](2);
+            path[0] = WETH;   // USDT
+            path[1] = _token;
 
-        uint256 balanceBefore = IERC20F(_token).balanceOf(address(this));
+            uint256 balanceBefore = IERC20F(_token).balanceOf(address(this));
 
-        IRouterF(UNISWAP_ROUTER).swapExactETHForTokens{value: A60}(
-            swapAmountOutMin, path, address(this), block.timestamp + 300
-        );
+            IERC20F(WETH).approve(UNISWAP_ROUTER, A60actual);
+            IRouterF(UNISWAP_ROUTER).swapExactTokensForTokens(
+                A60actual, swapAmountOutMin, path, address(this), block.timestamp + 300
+            );
+            IERC20F(WETH).approve(UNISWAP_ROUTER, 0);
 
-        uint256 poolBuyTokens = IERC20F(_token).balanceOf(address(this)) - balanceBefore;
-        uint256 totalTokens   = poolBuyTokens + platformBuyTokens;
+            poolBuyTokens = IERC20F(_token).balanceOf(address(this)) - balanceBefore;
+        }
+        uint256 totalTokens = poolBuyTokens + platformBuyTokens;
 
         if (IERC20F(_token).balanceOf(address(this)) < totalTokens) revert InsufficientContractTokenBalance();
 
         IERC20F(_token).approve(UNISWAP_ROUTER, totalTokens);
+        IERC20F(WETH).approve(UNISWAP_ROUTER, B);
 
-        (,, uint256 lpReceived) = IRouterF(UNISWAP_ROUTER).addLiquidityETH{value: B}(
+        (,, uint256 lpReceived) = IRouterF(UNISWAP_ROUTER).addLiquidity(
             _token,
+            WETH,
             totalTokens,
-            totalTokens * (10000 - MAX_SLIPPAGE_BPS) / 10000,
-            B           * (10000 - MAX_SLIPPAGE_BPS) / 10000,
+            B,
+            0,                                              // token min = 0: post-swap ratio determines actual usage
+            B * (10000 - MAX_SLIPPAGE_BPS) / 10000,
             address(this),
             block.timestamp + 300
         );
 
         IERC20F(_token).approve(UNISWAP_ROUTER, 0);
+        IERC20F(WETH).approve(UNISWAP_ROUTER, 0);
 
         if (lpReceived == 0) revert NoLPTokens();
 
@@ -449,7 +461,7 @@ contract LiquidityFacet is LiquidityStorage {
             _tradeHistory[_token].push(TradeSnap({
                 ts:     uint64(block.timestamp),
                 isBuy:  true,
-                ethAmt: uint128(A60),
+                ethAmt: uint128(A60actual),
                 tokAmt: uint128(poolBuyTokens)
             }));
             _priceHistory[_token].push(PriceSnap({
@@ -457,12 +469,6 @@ contract LiquidityFacet is LiquidityStorage {
                 resETH:   uint112(pt0 == _token ? pr1 : pr0),
                 resToken: uint112(pt0 == _token ? pr0 : pr1)
             }));
-        }
-
-        uint256 surplus = address(this).balance > A40 ? address(this).balance - A40 : 0;
-        if (surplus > 0) {
-            (bool ok,) = payable(owner).call{value: surplus}("");
-            if (!ok) revert SurplusTransferFailed();
         }
 
         userLPLocks[msg.sender].push(LPLock({
@@ -558,15 +564,14 @@ contract LiquidityFacet is LiquidityStorage {
             (minTokenOut, minETHOut) = LiquidityMath.calcRemoveLPAmounts(resTok, resETH, supply, lpAmount, MAX_SLIPPAGE_BPS);
         }
 
-        (uint256 tokensReturned, uint256 ethReturned) = IRouterF(UNISWAP_ROUTER)
-            .removeLiquidityETH(lock.token, lpAmount, minTokenOut, minETHOut, address(this), block.timestamp + 300);
+        (uint256 tokensReturned, uint256 usdtReturned) = IRouterF(UNISWAP_ROUTER)
+            .removeLiquidity(lock.token, WETH, lpAmount, minTokenOut, minETHOut, address(this), block.timestamp + 300);
 
         if (tokensReturned > 0) {
             if (!IERC20F(lock.token).transfer(msg.sender, tokensReturned)) revert TokenReturnFailed();
         }
-        if (ethReturned > 0) {
-            (bool ok,) = payable(msg.sender).call{value: ethReturned}("");
-            if (!ok) revert ETHReturnFailed();
+        if (usdtReturned > 0) {
+            if (!IERC20F(WETH).transfer(msg.sender, usdtReturned)) revert ETHReturnFailed();
         }
 
         _lpEventRecords[msg.sender].push(LPEventRecord({
@@ -574,10 +579,10 @@ contract LiquidityFacet is LiquidityStorage {
             ts:          uint64(block.timestamp),
             isClaim:     false,
             lpAmount:    uint128(lpAmount),
-            ethReturned: uint128(ethReturned)
+            ethReturned: uint128(usdtReturned)
         }));
 
-        emit LPRemoved(msg.sender, lock.token, lpAmount, ethReturned, tokensReturned);
+        emit LPRemoved(msg.sender, lock.token, lpAmount, usdtReturned, tokensReturned);
     }
 
     // ── restakeLP ─────────────────────────────────────────────────────────────

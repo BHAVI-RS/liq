@@ -6,8 +6,8 @@ const UNI_ROUTER  = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
 const UNI_FACTORY = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f";
 const UNI_WETH    = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 
-const USDT_PER_ETH = 1000;
-const PACKAGE_ETH  = hre.ethers.parseEther("0.1"); // 100 USDT
+const USDT_PER_ETH = 10000;
+const PACKAGE_ETH  = hre.ethers.parseEther("0.01"); // 100 USDT
 
 // BPS rates applied to A40 (= 20% of T). Divide by 500 for % of total investment.
 const COMM_RATES_BPS = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];

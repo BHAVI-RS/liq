@@ -2,7 +2,7 @@ const hre  = require("hardhat");
 const fs   = require("fs");
 const path = require("path");
 
-const USDT_PER_ETH  = 1000;
+const USDT_PER_ETH  = 10000;
 const RESTAKE_SECS  = 360;
 const LOCK_INDEX    = 0;   // each account has exactly one investment from simulate.js
 const FIRST_ACCOUNT = 0;

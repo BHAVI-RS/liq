@@ -1,8 +1,8 @@
-// Removes all liquidity from the Amoy testnet simulation and returns POL to deployer.
+// Removes all liquidity from the Amoy testnet simulation and returns USDT/tokens to deployer.
 // Addresses are loaded automatically from contract-config.js (written by simulateamoy.js).
 //
 // What it does:
-//   Phase 1 — Withdraw MATIC and tokens held inside the Liquidity contract
+//   Phase 1 — Withdraw USDT and platform tokens held inside the Liquidity contract
 //   Phase 2 — Remove seed LP from Uniswap pools (only LP in deployer wallet from seedPool)
 //
 // NOTE: User-invested LP tokens are locked in the contract and cannot be swept — only
@@ -18,7 +18,6 @@ const fs   = require("fs");
 // Pre-deployed Uniswap V2 on Polygon Amoy — do not edit
 const UNI_ROUTER  = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
 const UNI_FACTORY = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
-const UNI_WETH    = "0x7Bd0A72d3A07353C91dDA48D2B78454248d281E6";
 
 // ─── Load deployed addresses from contract-config.js ──────────────────────────
 const CONFIG_PATH = path.join(__dirname, "..", "..", "contract-config.js");
@@ -38,6 +37,7 @@ function loadConfig() {
     TOKEN_ADDRESS:          extract("TOKEN_ADDRESS"),
     TOKEN_ADDRESS_JIGGY:    extract("TOKEN_ADDRESS_JIGGY"),
     TOKEN_ADDRESS_PANWORLD: extract("TOKEN_ADDRESS_PANWORLD"),
+    USDT_ADDRESS:           extract("USDT_ADDRESS") || extract("WETH_ADDRESS"),
   };
 }
 
@@ -50,10 +50,9 @@ const FACTORY_ABI = [
   "function getPair(address tokenA, address tokenB) external view returns (address pair)",
 ];
 const ROUTER_ABI = [
-  "function removeLiquidityETH(address token, uint256 liquidity, uint256 amountTokenMin, uint256 amountETHMin, address to, uint256 deadline) external returns (uint256 amountToken, uint256 amountETH)",
+  "function removeLiquidity(address tokenA, address tokenB, uint256 liquidity, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) external returns (uint256 amountA, uint256 amountB)",
 ];
 const LIQUIDITY_ABI = [
-  "function withdrawETH(uint256 amount) external",
   "function withdrawToken(address token, uint256 amount) external",
 ];
 
@@ -65,8 +64,7 @@ const TX_OVERRIDES = {
 };
 
 function sep(c = "─", n = 62) { return c.repeat(n); }
-function fmt(wei) { return hre.ethers.formatEther(wei) + " POL"; }
-function fmtTok(wei, sym) { return hre.ethers.formatEther(wei) + " " + sym; }
+function fmt(wei, sym = "USDT") { return hre.ethers.formatEther(wei) + " " + sym; }
 
 async function main() {
   const rawKey = process.env.PRIVATE_KEY;
@@ -81,6 +79,12 @@ async function main() {
   const LIQUIDITY_ADDRESS = cfg.CONTRACT_ADDRESS;
   if (!LIQUIDITY_ADDRESS) {
     console.error("❌  CONTRACT_ADDRESS not found in contract-config.js");
+    process.exit(1);
+  }
+
+  const USDT_ADDRESS = cfg.USDT_ADDRESS;
+  if (!USDT_ADDRESS) {
+    console.error("❌  USDT_ADDRESS / WETH_ADDRESS not found in contract-config.js");
     process.exit(1);
   }
 
@@ -109,26 +113,29 @@ async function main() {
   console.log(sep("═"));
   console.log("  REMOVE LIQUIDITY — Polygon Amoy");
   console.log(sep("═"));
+  const usdtToken = new hre.ethers.Contract(USDT_ADDRESS, ERC20_ABI, deployer);
+
   console.log(`  Deployer  : ${deployer.address}`);
   console.log(`  Liquidity : ${LIQUIDITY_ADDRESS}`);
+  console.log(`  USDT      : ${USDT_ADDRESS}`);
   console.log(`  Tokens    : ${tokenDefs.map(t => t.name).join(", ")}`);
-  const balBefore = await provider.getBalance(deployer.address);
-  console.log(`  POL before: ${fmt(balBefore)}\n`);
+  const usdtBefore = await usdtToken.balanceOf(deployer.address);
+  console.log(`  USDT before: ${fmt(usdtBefore)}\n`);
 
   // ─────────────────────────────────────────────────────────────
-  // PHASE 1 — Withdraw MATIC and tokens from Liquidity contract
+  // PHASE 1 — Withdraw USDT and tokens from Liquidity contract
   // ─────────────────────────────────────────────────────────────
   console.log(sep());
-  console.log("  PHASE 1 — Withdraw MATIC + tokens from Liquidity contract");
+  console.log("  PHASE 1 — Withdraw USDT + tokens from Liquidity contract");
   console.log(sep());
 
-  const contractMATIC = await provider.getBalance(LIQUIDITY_ADDRESS);
-  if (contractMATIC > 0n) {
-    console.log(`  Contract MATIC: ${fmt(contractMATIC)} → withdrawing…`);
-    await (await liquidityContract.withdrawETH(0, TX_OVERRIDES)).wait();
-    console.log(`  ✓ MATIC withdrawn`);
+  const contractUSDT = await usdtToken.balanceOf(LIQUIDITY_ADDRESS);
+  if (contractUSDT > 0n) {
+    console.log(`  Contract USDT: ${fmt(contractUSDT)} → withdrawing…`);
+    await (await liquidityContract.withdrawToken(USDT_ADDRESS, 0, TX_OVERRIDES)).wait();
+    console.log(`  ✓ USDT withdrawn`);
   } else {
-    console.log(`  Contract MATIC: 0`);
+    console.log(`  Contract USDT: 0`);
   }
 
   for (const t of tokenDefs) {
@@ -153,7 +160,7 @@ async function main() {
   const pairAddresses = [];
 
   for (const t of tokenDefs) {
-    const pairAddr = await factory.getPair(t.address, UNI_WETH);
+    const pairAddr = await factory.getPair(t.address, USDT_ADDRESS);
     if (pairAddr === hre.ethers.ZeroAddress) {
       console.log(`  ${t.name}: no Uniswap pair found — skipping`);
       pairAddresses.push(null);
@@ -184,58 +191,56 @@ async function main() {
     await (await lpToken.approve(UNI_ROUTER, deployerLP, TX_OVERRIDES)).wait();
     console.log(`    ✓ Approved`);
 
-    console.log(`    Calling removeLiquidityETH…`);
-    const tx = await router.removeLiquidityETH(
+    console.log(`    Calling removeLiquidity…`);
+    const tx = await router.removeLiquidity(
       t.address,
+      USDT_ADDRESS,
       deployerLP,
-      0,                  // amountTokenMin  (0 = accept any, testnet only)
-      0,                  // amountETHMin
+      0,              // amountTokenMin (0 = accept any, testnet only)
+      0,              // amountUSDTMin
       deployer.address,
       deadline(),
       TX_OVERRIDES
     );
     const receipt = await tx.wait();
 
-    const routerIface = new hre.ethers.Interface([
+    const transferIface = new hre.ethers.Interface([
       "event Transfer(address indexed from, address indexed to, uint256 value)",
     ]);
     let tokensReceived = 0n;
+    let usdtReceived   = 0n;
     for (const log of receipt.logs) {
       try {
-        const parsed = routerIface.parseLog({ topics: log.topics, data: log.data });
-        if (
-          parsed?.name === "Transfer" &&
-          parsed.args.to.toLowerCase() === deployer.address.toLowerCase() &&
-          log.address.toLowerCase() === t.address.toLowerCase()
-        ) {
-          tokensReceived = parsed.args.value;
+        const parsed = transferIface.parseLog({ topics: log.topics, data: log.data });
+        if (parsed?.name === "Transfer" && parsed.args.to.toLowerCase() === deployer.address.toLowerCase()) {
+          if (log.address.toLowerCase() === t.address.toLowerCase())
+            tokensReceived = parsed.args.value;
+          else if (log.address.toLowerCase() === USDT_ADDRESS.toLowerCase())
+            usdtReceived = parsed.args.value;
         }
       } catch (_) {}
     }
     console.log(`    ✓ LP removed  (tx: ${receipt.hash.slice(0, 20)}…)`);
-    if (tokensReceived > 0n) {
-      console.log(`    ↳ ${fmtTok(tokensReceived, t.name)} returned to deployer`);
-    }
+    if (tokensReceived > 0n) console.log(`    ↳ ${fmt(tokensReceived, t.name)} returned to deployer`);
+    if (usdtReceived   > 0n) console.log(`    ↳ ${fmt(usdtReceived)} returned to deployer`);
   }
 
   // ─────────────────────────────────────────────────────────────
   // SUMMARY
   // ─────────────────────────────────────────────────────────────
-  const balAfter = await provider.getBalance(deployer.address);
+  const usdtAfter = await usdtToken.balanceOf(deployer.address);
 
   console.log("\n" + sep("═"));
   console.log("  COMPLETE");
   console.log(sep("═"));
-  console.log(`  POL before : ${fmt(balBefore)}`);
-  console.log(`  POL after  : ${fmt(balAfter)}`);
-
-  if (balAfter >= balBefore) {
-    console.log(`  Net gain   : +${fmt(balAfter - balBefore)}  (gas already deducted)`);
-  } else {
-    console.log(`  Net gas    : -${fmt(balBefore - balAfter)}`);
+  console.log(`  USDT before : ${fmt(usdtBefore)}`);
+  console.log(`  USDT after  : ${fmt(usdtAfter)}`);
+  if (usdtAfter >= usdtBefore) {
+    console.log(`  USDT gained : +${fmt(usdtAfter - usdtBefore)}`);
   }
 
-  console.log(`\n  Deployer token balances after:`);
+  console.log(`\n  Deployer balances after:`);
+  console.log(`    ${"USDT".padEnd(10)}: ${hre.ethers.formatEther(usdtAfter)}`);
   for (const t of tokenDefs) {
     const tok = new hre.ethers.Contract(t.address, ERC20_ABI, deployer);
     const bal = await tok.balanceOf(deployer.address);

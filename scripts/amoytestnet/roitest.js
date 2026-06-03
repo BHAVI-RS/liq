@@ -35,18 +35,24 @@ const hre  = require("hardhat");
 const fs   = require("fs");
 const path = require("path");
 
-const UNI_ROUTER  = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
-const UNI_FACTORY = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
-const UNI_WETH    = "0x7Bd0A72d3A07353C91dDA48D2B78454248d281E6";
+const UNI_ROUTER     = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
+const UNI_FACTORY    = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
+const DEPLOYED_USDT  = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const USDT_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address,uint256) returns (bool)",
+  "function approve(address,uint256) returns (bool)",
+];
 
 const TOTAL_WALLETS  = 7;
-const SEED_ETH       = hre.ethers.parseEther("100");     // 100 MATIC seed (must be large enough so
-const SEED_TOKENS    = hre.ethers.parseEther("100000");  // that each 0.1 MATIC invest causes < 5%
-                                                          // spot price drift from TWAP (guard bps=500)
-const PACKAGE_ETH    = hre.ethers.parseEther("0.1");     // 0.1 MATIC = $100
-const FUND_AMOUNT    = hre.ethers.parseEther("0.5");     // fund each sub-wallet
-const FUND_THRESHOLD = hre.ethers.parseEther("0.38");    // skip if already above this
-const TWAP_WAIT_SECS = 31;                               // 31 s testnet; use 31*60 for mainnet
+const SEED_USDT      = hre.ethers.parseEther("100"); // 100 USDT + 100 tokens → 1 HORDEX = 1 USDT = $1
+const SEED_TOKENS    = hre.ethers.parseEther("100");
+const PACKAGE_USDT   = hre.ethers.parseEther("100");    // 100 USDT = $100
+const FUND_AMOUNT    = hre.ethers.parseEther("0.05");   // POL for gas
+const FUND_THRESHOLD = hre.ethers.parseEther("0.04");
+const FUND_USDT      = hre.ethers.parseEther("110");    // USDT per sub-wallet (100 + 10 buffer)
+const USDT_THRESH    = hre.ethers.parseEther("90");     // skip USDT top-up if already has this
+const TWAP_WAIT_SECS = 31;                              // 31 s testnet; use 31*60 for mainnet
 
 const DEPLOY_OVERRIDES = {
   maxFeePerGas:         hre.ethers.parseUnits("60", "gwei"),
@@ -74,7 +80,7 @@ const LEVEL_RATES = [50, 25, 10, 3, 2.5, 2.25, 2, 2, 1.75, 1.5];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function sep(c = "─", n = 64) { return c.repeat(n); }
 function toUSD(wei) {
-  return "$" + (parseFloat(hre.ethers.formatEther(wei)) * 1000).toFixed(2);
+  return "$" + parseFloat(hre.ethers.formatEther(wei)).toFixed(2);
 }
 
 function deriveWallets(rawKey, provider) {
@@ -113,6 +119,28 @@ async function mine(txFn, maxRetries = 6) {
     }
   }
   throw new Error("mine(): exceeded retries");
+}
+
+const MAX_ATTEMPTS   = 3;
+const RETRY_DELAY_MS = 30_000;
+
+async function mineOrSkip(txFn, label) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await mine(txFn);
+    } catch (e) {
+      const reason = e.reason || e?.error?.message || e.message || String(e);
+      if (attempt < MAX_ATTEMPTS) {
+        console.log(`\n  ⚠  ${label} — attempt ${attempt}/${MAX_ATTEMPTS} failed: ${reason}`);
+        console.log(`     Waiting 30s before retry…`);
+        await sleep(RETRY_DELAY_MS);
+      } else {
+        console.log(`\n  ✗  ${label} — failed after ${MAX_ATTEMPTS} attempts, skipping.`);
+        console.log(`     Last error: ${reason}`);
+      }
+    }
+  }
+  return null;
 }
 
 async function waitForTwap(provider, firstTimestamp) {
@@ -160,7 +188,7 @@ async function printROITable(liquidity, signers) {
         : recvIdx >= 0                            ? `acc[${recvIdx}]`
         :                                            "acc[0] (Owner)";
 
-      const cap    = parseFloat(hre.ethers.formatEther(info.capETH)) * 1000;
+      const cap    = parseFloat(hre.ethers.formatEther(info.capETH));
       const capStr = cap === 0 ? "—" : `$${cap.toFixed(2)}`;
 
       console.log(
@@ -185,8 +213,8 @@ async function printROIPending(liquidity, signers) {
   for (let idx = 0; idx < signers.length; idx++) {
     const pending = await liquidity.getROIPending(signers[idx].address);
     if (pending === 0n) continue;
-    const usd = (parseFloat(hre.ethers.formatEther(pending)) * 1000).toFixed(6);
-    console.log(`  acc[${idx}]  ${hre.ethers.formatEther(pending)} MATIC  (~$${usd})`);
+    const usdt = parseFloat(hre.ethers.formatEther(pending)).toFixed(6);
+    console.log(`  acc[${idx}]  ${usdt} USDT`);
   }
 }
 
@@ -211,24 +239,34 @@ async function main() {
 
   const bal0 = await provider.getBalance(deployer.address);
   console.log(`  Balance  : ${hre.ethers.formatEther(bal0)} POL\n`);
-  if (bal0 < hre.ethers.parseEther("10")) {
-    console.error("❌  account[0] needs ≥ 10 POL"); process.exit(1);
+  if (bal0 < hre.ethers.parseEther("3")) {
+    console.error("❌  account[0] needs ≥ 3 POL for gas"); process.exit(1);
   }
 
   // ── PHASE 0: Fund sub-wallets ──────────────────────────────────────────────
   console.log(sep()); console.log("  PHASE 0 — FUND SUB-WALLETS [1..6]"); console.log(sep());
+  const usdtCt = new hre.ethers.Contract(DEPLOYED_USDT, USDT_ABI, deployer);
   for (let i = 1; i < TOTAL_WALLETS; i++) {
-    const bal = await provider.getBalance(signers[i].address);
-    if (bal >= FUND_THRESHOLD) {
-      console.log(`  [${i}] ${hre.ethers.formatEther(bal).padStart(8)} POL — skip`);
-      continue;
+    const [maticBal, usdtBal] = await Promise.all([
+      provider.getBalance(signers[i].address),
+      usdtCt.balanceOf(signers[i].address),
+    ]);
+    if (maticBal < FUND_THRESHOLD) {
+      await mine(() => deployer.sendTransaction({
+        to: signers[i].address, value: FUND_AMOUNT,
+        maxFeePerGas: TX_OVERRIDES.maxFeePerGas,
+        maxPriorityFeePerGas: TX_OVERRIDES.maxPriorityFeePerGas,
+      }));
+      console.log(`  [${i}] funded ${hre.ethers.formatEther(FUND_AMOUNT)} POL ✓`);
+    } else {
+      console.log(`  [${i}] ${hre.ethers.formatEther(maticBal).padStart(8)} POL — skip`);
     }
-    await mine(() => deployer.sendTransaction({
-      to: signers[i].address, value: FUND_AMOUNT,
-      maxFeePerGas: TX_OVERRIDES.maxFeePerGas,
-      maxPriorityFeePerGas: TX_OVERRIDES.maxPriorityFeePerGas,
-    }));
-    console.log(`  [${i}] funded ${hre.ethers.formatEther(FUND_AMOUNT)} POL ✓`);
+    if (usdtBal < USDT_THRESH) {
+      await mine(() => usdtCt.transfer(signers[i].address, FUND_USDT, TX_OVERRIDES));
+      console.log(`  [${i}] funded 110 USDT ✓`);
+    } else {
+      console.log(`  [${i}] ${hre.ethers.formatEther(usdtBal)} USDT — skip`);
+    }
   }
 
   // ── PHASE 1: Platform token ────────────────────────────────────────────────
@@ -260,7 +298,7 @@ async function main() {
     signer: deployer, libraries: { LiquidityMath: libAddress },
   });
   const liquidityFacet = await LiquidityFacet.deploy(
-    UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, DEPLOY_OVERRIDES
+    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress, DEPLOY_OVERRIDES
   );
   await liquidityFacet.waitForDeployment();
   const facetAddress = await liquidityFacet.getAddress();
@@ -277,7 +315,7 @@ async function main() {
     libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
   });
   const liquidity = await Liquidity.deploy(
-    UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress,
+    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress,
     facetAddress, roiFacetAddress, DEPLOY_OVERRIDES
   );
   await liquidity.waitForDeployment();
@@ -296,9 +334,11 @@ async function main() {
   console.log(`  ${hre.ethers.formatEther(supply)} HORDEX → Liquidity ✓`);
   await mine(() => liq.addToken(tokenAddress, "Hordex", "HDX", TX_OVERRIDES));
   console.log(`  Token registered ✓`);
-  await mine(() => liq.seedPool(tokenAddress, SEED_TOKENS, { value: SEED_ETH, ...TX_OVERRIDES }));
-  console.log(`  Pool seeded: ${hre.ethers.formatEther(SEED_ETH)} MATIC + ${hre.ethers.formatEther(SEED_TOKENS)} HORDEX`);
-  console.log(`  Price: 1 HORDEX = 0.001 MATIC = $1.00 ✓`);
+  await mine(() => usdtCt.transfer(liquidityAddress, SEED_USDT, TX_OVERRIDES));
+  console.log(`  Transferred ${hre.ethers.formatEther(SEED_USDT)} USDT → Liquidity ✓`);
+  await mine(() => liq.seedPool(tokenAddress, SEED_TOKENS, SEED_USDT, TX_OVERRIDES));
+  console.log(`  Pool seeded: ${hre.ethers.formatEther(SEED_USDT)} USDT + ${hre.ethers.formatEther(SEED_TOKENS)} HORDEX`);
+  console.log(`  Price: 1 HORDEX = 1 USDT = $1.00 ✓`);
 
   // ── PHASE 4: TWAP warm-up ─────────────────────────────────────────────────
   console.log("\n" + sep()); console.log("  PHASE 4 — TWAP WARM-UP"); console.log(sep());
@@ -322,7 +362,7 @@ async function main() {
 
   // ── PHASE 6: Invest ───────────────────────────────────────────────────────
   console.log("\n" + sep());
-  console.log("  PHASE 6 — INVEST  (0.1 MATIC = $100 each, BFS order)");
+  console.log("  PHASE 6 — INVEST  (100 USDT = $100 each, BFS order)");
   console.log(sep());
 
   const commIface = new hre.ethers.Interface([
@@ -330,8 +370,20 @@ async function main() {
   ]);
 
   for (const idx of INVEST_ORDER) {
-    const ct = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[idx]);
-    const receipt = await mine(() => ct.invest(tokenAddress, { value: PACKAGE_ETH, ...TX_OVERRIDES }));
+    const ct    = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[idx]);
+    const label = `acc[${idx}]`;
+
+    const approveR = await mineOrSkip(
+      () => usdtCt.connect(signers[idx]).approve(liquidityAddress, PACKAGE_USDT, TX_OVERRIDES),
+      `approve USDT for ${label}`
+    );
+    if (!approveR) continue;
+
+    const receipt = await mineOrSkip(
+      () => ct.invest(tokenAddress, PACKAGE_USDT, TX_OVERRIDES),
+      `invest ${label}`
+    );
+    if (!receipt) continue;
 
     const comms = [];
     for (const log of receipt.logs) {
@@ -372,7 +424,8 @@ const TOKEN_ADDRESS_JIGGY     = "";
 const TOKEN_ADDRESS_PANWORLD  = "";
 const ROUTER_ADDRESS          = "${UNI_ROUTER}";
 const FACTORY_ADDRESS         = "${UNI_FACTORY}";
-const WETH_ADDRESS            = "${UNI_WETH}";
+const WETH_ADDRESS            = "${DEPLOYED_USDT}";
+const USDT_ADDRESS            = "${DEPLOYED_USDT}";
 const DEPLOY_BLOCK            = ${deployBlock};
 const FACET_ADDRESS           = "${facetAddress}";
 const ROI_FACET_ADDRESS       = "${roiFacetAddress}";
@@ -392,6 +445,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   const outPath = path.join(__dirname, "deploy-output.json");
   fs.writeFileSync(outPath, JSON.stringify({
     network, deployedAt: new Date().toISOString(), deployBlock,
+    usdtAddress: DEPLOYED_USDT,
     tokenAddress, liquidityAddress, facetAddress, roiFacetAddress,
     libAddress, libViewAddress,
     accounts: signers.map((s, i) => ({

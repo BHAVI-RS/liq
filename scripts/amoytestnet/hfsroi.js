@@ -31,21 +31,28 @@ const fs   = require("fs");
 const path = require("path");
 
 // ── Uniswap V2 on Polygon Amoy ────────────────────────────────────────────────
-const UNI_ROUTER  = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
-const UNI_FACTORY = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
-const UNI_WETH    = "0x7Bd0A72d3A07353C91dDA48D2B78454248d281E6";
+const UNI_ROUTER    = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
+const UNI_FACTORY   = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
+const DEPLOYED_USDT = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const USDT_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address,uint256) returns (bool)",
+  "function approve(address,uint256) returns (bool)",
+];
 
-const USDT_PER_ETH   = 1000;
-const PACKAGE_ETH    = hre.ethers.parseEther("0.1");
-const SEED_ETH       = hre.ethers.parseEther("100");
+const USDT_PER_ETH   = 1;
+const PACKAGE_USDT   = hre.ethers.parseEther("100");    // 100 USDT = $100
+const SEED_USDT      = hre.ethers.parseEther("100000"); // 100,000 USDT → 1 token = $1
 const SEED_TOKENS    = hre.ethers.parseEther("100000");
+const FUND_USDT      = hre.ethers.parseEther("110");    // USDT per sub-wallet
+const USDT_THRESH    = hre.ethers.parseEther("90");
 const TWAP_WAIT_SECS = 31;
 
 const TOTAL_WALLETS = 32;
 
-// All sub-wallets invest — fund each with 0.5 POL
-const FUND_AMOUNT = hre.ethers.parseEther("0.5");
-const FUND_THRESH = hre.ethers.parseEther("0.4");   // skip top-up if already has this
+// All sub-wallets invest — fund each with 0.05 POL
+const FUND_AMOUNT = hre.ethers.parseEther("0.05");
+const FUND_THRESH = hre.ethers.parseEther("0.04");   // skip top-up if already has this
 
 // ── Referral tree (identical to deployamoy.js) ────────────────────────────────
 const groups = [
@@ -187,11 +194,8 @@ async function main() {
   const balBefore = await provider.getBalance(deployer.address);
   console.log(`  Balance  : ${hre.ethers.formatEther(balBefore)} POL\n`);
 
-  if (balBefore < hre.ethers.parseEther("325")) {
-    console.error(
-      "❌  account[0] needs ≥ 325 POL\n" +
-      "   (3 × 100 MATIC pool seeds + ~16 POL to fund [1..31] + gas)"
-    );
+  if (balBefore < hre.ethers.parseEther("3")) {
+    console.error("❌  account[0] needs ≥ 3 POL for gas");
     process.exit(1);
   }
 
@@ -202,23 +206,30 @@ async function main() {
   console.log("  PHASE 0 — FUND SUB-WALLETS  [1..31]");
   console.log(sep());
 
+  const usdtCt = new hre.ethers.Contract(DEPLOYED_USDT, USDT_ABI, deployer);
   let funded = 0;
   for (let i = 1; i < TOTAL_WALLETS; i++) {
-    const bal = await provider.getBalance(signers[i].address);
-    if (bal >= FUND_THRESH) {
-      console.log(`  [${String(i).padStart(2)}]  ${hre.ethers.formatEther(bal).padStart(10)} POL — skip`);
-      continue;
+    const [maticBal, usdtBal] = await Promise.all([
+      provider.getBalance(signers[i].address),
+      usdtCt.balanceOf(signers[i].address),
+    ]);
+    if (maticBal < FUND_THRESH) {
+      await mine(() => deployer.sendTransaction({
+        to: signers[i].address, value: FUND_AMOUNT,
+        maxFeePerGas: TX_OVERRIDES.maxFeePerGas,
+        maxPriorityFeePerGas: TX_OVERRIDES.maxPriorityFeePerGas,
+      }));
+      console.log(`  [${String(i).padStart(2)}]  funded ${hre.ethers.formatEther(FUND_AMOUNT)} POL ✓`);
+      funded++;
+    } else {
+      console.log(`  [${String(i).padStart(2)}]  ${hre.ethers.formatEther(maticBal).padStart(10)} POL — skip`);
     }
-    await mine(() => deployer.sendTransaction({
-      to:    signers[i].address,
-      value: FUND_AMOUNT,
-      maxFeePerGas:         TX_OVERRIDES.maxFeePerGas,
-      maxPriorityFeePerGas: TX_OVERRIDES.maxPriorityFeePerGas,
-    }));
-    console.log(`  [${String(i).padStart(2)}]  funded ${hre.ethers.formatEther(FUND_AMOUNT)} POL ✓`);
-    funded++;
+    if (usdtBal < USDT_THRESH) {
+      await mine(() => usdtCt.transfer(signers[i].address, FUND_USDT, TX_OVERRIDES));
+      console.log(`  [${String(i).padStart(2)}]  funded 110 USDT ✓`);
+    }
   }
-  console.log(`\n  ${funded} wallets funded, ${TOTAL_WALLETS - 1 - funded} already had enough POL.\n`);
+  console.log(`\n  ${funded} wallets funded with POL.\n`);
 
   // ─────────────────────────────────────────────────────────────
   // PHASE 1 — DEPLOY
@@ -267,7 +278,7 @@ async function main() {
     libraries: { LiquidityMath: libAddress },
   });
   const liquidityFacet = await LiquidityFacet.deploy(
-    UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, DEPLOY_OVERRIDES
+    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress, DEPLOY_OVERRIDES
   );
   await liquidityFacet.waitForDeployment();
   const facetAddress = await liquidityFacet.getAddress();
@@ -284,7 +295,7 @@ async function main() {
     libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
   });
   const liquidity = await Liquidity.deploy(
-    UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, facetAddress, roiFacetAddress,
+    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress, facetAddress, roiFacetAddress,
     DEPLOY_OVERRIDES
   );
   await liquidity.waitForDeployment();
@@ -304,8 +315,10 @@ async function main() {
     await mine(() => liq.addToken(t.address, t.name, t.symbol, TX_OVERRIDES));
     console.log(`  ${t.symbol} registered in platform ✓`);
 
-    await mine(() => liq.seedPool(t.address, SEED_TOKENS, { value: SEED_ETH, ...TX_OVERRIDES }));
-    console.log(`  Pool seeded: 100 MATIC + 100,000 ${t.symbol}  (1 ${t.symbol} = 0.001 MATIC = $1.00) ✓`);
+    await mine(() => usdtCt.transfer(liquidityAddress, SEED_USDT, TX_OVERRIDES));
+    console.log(`  Transferred ${hre.ethers.formatEther(SEED_USDT)} USDT → Liquidity ✓`);
+    await mine(() => liq.seedPool(t.address, SEED_TOKENS, SEED_USDT, TX_OVERRIDES));
+    console.log(`  Pool seeded: ${hre.ethers.formatEther(SEED_USDT)} USDT + 100,000 ${t.symbol}  (1 ${t.symbol} = 1 USDT = $1.00) ✓`);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -342,7 +355,8 @@ const TOKEN_ADDRESS_JIGGY     = "${deployedTokens[1].address}";
 const TOKEN_ADDRESS_PANWORLD  = "${deployedTokens[2].address}";
 const ROUTER_ADDRESS          = "${UNI_ROUTER}";
 const FACTORY_ADDRESS         = "${UNI_FACTORY}";
-const WETH_ADDRESS            = "${UNI_WETH}";
+const WETH_ADDRESS            = "${DEPLOYED_USDT}";
+const USDT_ADDRESS            = "${DEPLOYED_USDT}";
 const DEPLOY_BLOCK            = ${deployBlock};
 const FACET_ADDRESS           = "${facetAddress}";
 const ROI_FACET_ADDRESS       = "${roiFacetAddress}";
@@ -391,7 +405,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   // PHASE 3 — INVEST  (BFS order: parents before children)
   // ─────────────────────────────────────────────────────────────
   console.log(sep());
-  console.log(`  PHASE 3 — INVESTMENTS  (100 USDT = 0.1 MATIC each, all ${TOTAL_WALLETS} accounts)`);
+  console.log(`  PHASE 3 — INVESTMENTS  (100 USDT = $100 each, all ${TOTAL_WALLETS} accounts)`);
   console.log(sep());
 
   const commIface = new hre.ethers.Interface([
@@ -412,8 +426,9 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
     const lockIndex   = locksBefore.length;
     lockIndexOf.set(idx, lockIndex);
 
-    const receipt = await mine(() => ct.invest(tokenAddress, { value: PACKAGE_ETH, ...TX_OVERRIDES }));
-    totalInvested += PACKAGE_ETH;
+    await mine(() => usdtCt.connect(account).approve(liquidityAddress, PACKAGE_USDT, TX_OVERRIDES));
+    const receipt = await mine(() => ct.invest(tokenAddress, PACKAGE_USDT, TX_OVERRIDES));
+    totalInvested += PACKAGE_USDT;
 
     const comms = [];
     for (const log of receipt.logs) {
@@ -479,10 +494,10 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
       const info    = await liq.getROIStreamInfo(s.investor, s.lockIndex, s.level);
       console.log(
         `    ${LEVEL_NAMES[Number(s.level)].padEnd(12)}  investor=${investorLabel}` +
-        `  lock=${s.lockIndex}  accrued=${toETH(accrued)} MATIC  cap=$${toUSDT(info.capETH)}`
+        `  lock=${s.lockIndex}  accrued=${toUSDT(accrued)} USDT  cap=$${toUSDT(info.capETH)}`
       );
     }
-    console.log(`  Pending (settled): ${toETH(pending)} MATIC\n`);
+    console.log(`  Pending (settled): ${toUSDT(pending)} USDT\n`);
   }
 
   console.log("  ── Stream recipients per investment (levels 1–5) ──\n");
@@ -496,7 +511,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
       console.log(`  account[${String(idx).padStart(2)}]  (owner — no referrer chain, no ROI streams)`);
       continue;
     }
-    console.log(`  account[${String(idx).padStart(2)}] lock#${lockIndex}  ethInvested=${toETH(lock.ethInvested)} MATIC`);
+    console.log(`  account[${String(idx).padStart(2)}] lock#${lockIndex}  usdtInvested=${toUSDT(lock.ethInvested)} USDT`);
     for (let lvl = 0; lvl < 5; lvl++) {
       const info = await liq.getROIStreamInfo(addr, lockIndex, lvl);
       const recvIdx   = signers.findIndex(w => w.address.toLowerCase() === info.recipient.toLowerCase());
@@ -518,6 +533,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
       network,
       deployedAt:       new Date().toISOString(),
       deployBlock,
+      usdtAddress:      DEPLOYED_USDT,
       platformToken:    tokenAddress,
       tokens:           deployedTokens.map(t => ({ symbol: t.symbol, address: t.address })),
       liquidityAddress,
@@ -550,7 +566,7 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
   console.log(`  Liquidity        : ${liquidityAddress}`);
   console.log(`  Deploy block     : ${deployBlock}`);
   console.log(`  Accounts         : ${TOTAL_WALLETS}  (accounts[0..${TOTAL_WALLETS - 1}])`);
-  console.log(`  Package          : 100 USDT (0.1 MATIC) each`);
+  console.log(`  Package          : 100 USDT each`);
   console.log(`  Total invested   : $${toUSDT(totalInvested)} USDT`);
   console.log(`  Total comms      : $${toUSDT(totalCommissions)} USDT`);
   console.log(`  POL spent        : ~${hre.ethers.formatEther(balBefore - balAfter)} POL`);
@@ -566,9 +582,9 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
     );
   }
 
-  const contractBal = await provider.getBalance(liquidityAddress);
+  const usdtContractBal = await usdtCt.balanceOf(liquidityAddress);
   console.log(`\n  Contract balances:`);
-  console.log(`    MATIC    : ${hre.ethers.formatEther(contractBal)}`);
+  console.log(`    USDT     : ${hre.ethers.formatEther(usdtContractBal)}`);
   for (const t of deployedTokens) {
     const bal = await t.contract.balanceOf(liquidityAddress);
     console.log(`    ${t.symbol.padEnd(8)}: ${hre.ethers.formatEther(bal)}`);
