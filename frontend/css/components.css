@@ -1093,6 +1093,31 @@ input[type="email"]::placeholder { color: var(--muted); }
   }
 }
 
+/* ── MY INFO PANEL — MOBILE ALIGNMENT ── */
+@media (max-width: 640px) {
+  /* Referral link: force link to its own row, copy button full-width below */
+  #myRefLinkText {
+    flex: 0 0 100% !important;
+  }
+  #copyRefBtn {
+    width: 100% !important;
+    flex-shrink: 1 !important;
+    text-align: center;
+  }
+
+  /* Referral list items: truncate long addresses instead of overflowing */
+  .referral-item {
+    min-width: 0;
+  }
+  .referral-item > span:not(.referral-level) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* Responsive tweaks for components */
 @media (max-width: 768px) {
   /* Main container — full width */
