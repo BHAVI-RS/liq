@@ -45,11 +45,27 @@ async function main() {
   const libViewAddress = await liquidityViewLib.getAddress();
   console.log("LiquidityViewLib deployed to:", libViewAddress);
 
+  // ── Deploy LiquidityFacet (linked to LiquidityMath) ──
+  const LiquidityFacet = await hre.ethers.getContractFactory("LiquidityFacet", {
+    libraries: { LiquidityMath: libAddress },
+  });
+  const liquidityFacet = await LiquidityFacet.deploy(UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress);
+  await liquidityFacet.waitForDeployment();
+  const facetAddress = await liquidityFacet.getAddress();
+  console.log("LiquidityFacet deployed to:", facetAddress);
+
+  // ── Deploy LiquidityROIFacet ──
+  const LiquidityROIFacet = await hre.ethers.getContractFactory("LiquidityROIFacet");
+  const liquidityROIFacet = await LiquidityROIFacet.deploy();
+  await liquidityROIFacet.waitForDeployment();
+  const roiFacetAddress = await liquidityROIFacet.getAddress();
+  console.log("LiquidityROIFacet deployed to:", roiFacetAddress);
+
   // ── Deploy Liquidity (linked to both libraries) ──
   const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
     libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
   });
-  const liquidity = await Liquidity.deploy(UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress);
+  const liquidity = await Liquidity.deploy(UNI_ROUTER, UNI_FACTORY, UNI_WETH, tokenAddress, facetAddress, roiFacetAddress);
   await liquidity.waitForDeployment();
   const liquidityAddress = await liquidity.getAddress();
   console.log("Liquidity  deployed to:", liquidityAddress);
@@ -75,7 +91,18 @@ async function main() {
   const seedETH    = hre.ethers.parseEther("100");
   const seedTokens = hre.ethers.parseEther("100000");
   console.log("\nSeeding Uniswap pool with 100 ETH + 100,000 HORDEX...");
-  const tx3 = await liquidity.seedPool(tokenAddress, seedTokens, { value: seedETH });
+
+  // seedPool needs WETH (not raw ETH) in the Liquidity contract — wrap then transfer.
+  const weth9Abi = ["function deposit() external payable", "function transfer(address to, uint256 amount) external returns (bool)"];
+  const weth9 = new hre.ethers.Contract(UNI_WETH, weth9Abi, deployer);
+  const txWrap = await weth9.deposit({ value: seedETH });
+  await txWrap.wait();
+  console.log("  Wrapped 100 ETH → WETH ✓");
+  const txWethTransfer = await weth9.transfer(liquidityAddress, seedETH);
+  await txWethTransfer.wait();
+  console.log("  Transferred WETH to Liquidity contract ✓");
+
+  const tx3 = await liquidity.seedPool(tokenAddress, seedTokens, seedETH);
   await tx3.wait();
   console.log("  seedPool confirmed ✓");
   console.log("  Pool: 100 ETH ($100,000 USDT) + 100,000 HORDEX");

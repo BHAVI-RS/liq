@@ -104,6 +104,24 @@ async function main() {
   const pk       = rawKey.startsWith("0x") ? rawKey : "0x" + rawKey;
   const deployer = new hre.ethers.Wallet(pk, provider);
 
+  // Verify critical contracts exist on the current network before making any calls.
+  // BAD_DATA / 'could not decode result data' means a contract has no code at that address —
+  // typically a wrong network or a stale contract-config.js from a different deploy.
+  const contractChecks = [
+    { label: "Liquidity (contract-config.js CONTRACT_ADDRESS)", address: LIQUIDITY_ADDRESS },
+    { label: "USDT / WETH (contract-config.js USDT_ADDRESS / WETH_ADDRESS)",  address: USDT_ADDRESS },
+    { label: "Uniswap Factory (hardcoded in script)", address: UNI_FACTORY },
+  ];
+  for (const { label, address } of contractChecks) {
+    const code = await provider.getCode(address);
+    if (code === "0x") {
+      console.error(`❌  No contract found at ${address} (${label}).`);
+      console.error(`    Make sure you are on the correct network and contract-config.js`);
+      console.error(`    was written by a deploy targeting this same network.`);
+      process.exit(1);
+    }
+  }
+
   const factory           = new hre.ethers.Contract(UNI_FACTORY,       FACTORY_ABI,   deployer);
   const router            = new hre.ethers.Contract(UNI_ROUTER,        ROUTER_ABI,    deployer);
   const liquidityContract = new hre.ethers.Contract(LIQUIDITY_ADDRESS, LIQUIDITY_ABI, deployer);
@@ -139,6 +157,11 @@ async function main() {
   }
 
   for (const t of tokenDefs) {
+    const tokenCode = await provider.getCode(t.address);
+    if (tokenCode === "0x") {
+      console.log(`  Contract ${t.name.padEnd(8)}: no contract at ${t.address} — skipping`);
+      continue;
+    }
     const tok = new hre.ethers.Contract(t.address, ERC20_ABI, deployer);
     const bal = await tok.balanceOf(LIQUIDITY_ADDRESS);
     if (bal > 0n) {

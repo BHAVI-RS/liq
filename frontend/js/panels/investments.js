@@ -652,7 +652,7 @@ async function openStakeModal(lockIndex) {
   let restakeCounts = [0,0,0,0,0,0];
   let lockDurDays   = 90; // default to 90 days if not stored
   try { if (card && card.dataset.restakeCounts) restakeCounts = JSON.parse(card.dataset.restakeCounts); } catch(_) {}
-  try { if (card && card.dataset.lockDurSecs)   lockDurDays   = Math.round(Number(card.dataset.lockDurSecs) / 86400); } catch(_) {}
+  try { if (card && card.dataset.lockDurSecs)   lockDurDays   = Math.round(Number(card.dataset.lockDurSecs) / LP_DAY_SCALE); } catch(_) {}
 
   // Reset buttons to loading state
   document.querySelectorAll('.stake-day-btn').forEach(b => {

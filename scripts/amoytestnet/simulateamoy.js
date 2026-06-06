@@ -303,9 +303,6 @@ async function main() {
   console.log(`  Liquidity       : ${liquidityAddress}  (block ${deployBlock})`);
 
   // Transfer full supply + register + seed pool for all 3 tokens
-  const seedETH    = SEED_ETH;
-  const seedTokens = SEED_TOKENS;
-
   for (const t of deployedTokens) {
     const supply = await t.contract.totalSupply();
     await mine(() => t.contract.transfer(liquidityAddress, supply, TX_OVERRIDES));

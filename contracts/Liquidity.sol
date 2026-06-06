@@ -326,6 +326,10 @@ contract Liquidity is LiquidityStorage {
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
         _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, lockIndex)));
 
+        if (justQualified) {
+            _callROI(abi.encodeCall(LiquidityROIFacet.onFirstQualifyExt, (msg.sender)));
+        }
+
         uint256 A   = T / 2;
         uint256 A40 = A - (A * 60 / 100);
         _callFacet(abi.encodeCall(LiquidityFacet.distributeCommissionsExt, (msg.sender, A40, _token)));
@@ -443,6 +447,33 @@ contract Liquidity is LiquidityStorage {
             ts:            uint64(block.timestamp)
         }));
         emit ROIClaimed(msg.sender, roiTokens, streamEth);
+    }
+
+    // Settles a batch of ROI streams [fromIndex, fromIndex+count) into _roiPendingETH
+    // without claiming. For users whose _activeROIStreams is too large for claimAllROI
+    // to fit in one block: call this repeatedly until all streams are covered, then
+    // call claimPendingROI() once to receive the accumulated tokens.
+    function settleROIStreams(uint256 fromIndex, uint256 count) external nonReentrant onlyRegistered {
+        _callROI(abi.encodeCall(LiquidityROIFacet.settleStreamsRangeExt, (msg.sender, fromIndex, count)));
+    }
+
+    // Claims whatever has accumulated in _roiPendingETH[msg.sender] without settling
+    // any additional streams. Use after one or more settleROIStreams() calls.
+    function claimPendingROI() external nonReentrant onlyRegistered {
+        uint256 ethAmount = _roiPendingETH[msg.sender];
+        if (ethAmount == 0) revert NothingToClaim();
+        _roiPendingETH[msg.sender] = 0;
+        _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
+        uint256 price = getTWAPPrice();
+        uint256 roiTokens = (ethAmount * 1e18) / price;
+        if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
+        if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
+        _roiClaimRecords[msg.sender].push(ClaimRecord({
+            tokensAmount:  uint128(roiTokens),
+            ethEquivalent: uint128(ethAmount),
+            ts:            uint64(block.timestamp)
+        }));
+        emit ROIClaimed(msg.sender, roiTokens, ethAmount);
     }
 
     // ── TWAP ─────────────────────────────────────────────────────────────────
@@ -663,7 +694,7 @@ contract Liquidity is LiquidityStorage {
 
     function swapSell(address _token, uint256 _tokensIn, uint256 _minUsdtOut) external nonReentrant {
         if (_tokensIn == 0) revert MustSpecifyTokenAmount();
-        IERC20(_token).transferFrom(msg.sender, address(this), _tokensIn);
+        if (!IERC20(_token).transferFrom(msg.sender, address(this), _tokensIn)) revert TokenTransferFailed();
         IERC20(_token).approve(UNISWAP_ROUTER, _tokensIn);
         address[] memory path = new address[](2);
         path[0] = _token;

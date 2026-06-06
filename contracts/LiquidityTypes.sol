@@ -120,11 +120,12 @@ struct LPEventRecord {
 
 // ROI commission stream — one per level per LP lock.
 struct ROIStream {
-    address recipient;       // who is currently accumulating this stream
-    uint64  recipientSince;  // timestamp when current recipient started
-    bool    ended;           // true once the underlying lock is removed
-    uint128 roiPaidETH;      // cumulative ETH-equiv settled to ALL past recipients
-    uint128 capETH;          // absolute ceiling = ethInvested * commissionRate / 10_000
+    address recipient;           // who is currently accumulating this stream
+    uint64  recipientSince;      // timestamp when current recipient started
+    bool    ended;               // true once the underlying lock is removed
+    uint128 roiPaidETH;          // ETH-equiv settled in the CURRENT lock period
+    uint128 capETH;              // cap for the CURRENT period = ethInvested * commissionRate / 10_000
+    uint128 historicalPaidETH;   // cumulative ETH-equiv paid across ALL previous periods (restakes)
 }
 
 // Pointer stored in _activeROIStreams / _skippedROIStreams per address.

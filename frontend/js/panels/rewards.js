@@ -42,14 +42,21 @@ function _rwROIStreamsHtml() {
     const d = slice[j];
     const i = start + j;   // global index — matches ticker element IDs
 
-    const paidPct    = d.capETH > 0 ? Math.min(100, d.roiPaidETH / d.capETH * 100) : 0;
-    const accruedPct = d.capETH > 0 ? Math.min(100 - paidPct, d.accruedETH / d.capETH * 100) : 0;
+    // histPaid = ETH paid to A across all previous restake periods (from contract field).
+    // Bar reference = current period max + historical paid, giving a continuous bar across restakes.
+    const histPaid   = d.histPaidETH || 0;
+    const _curRef    = (d.periodMax > 0 ? d.periodMax : d.capETH);
+    const _barRef    = _curRef + histPaid;
+    const paidPct    = _barRef > 0 ? Math.min(100, (histPaid + d.roiPaidETH) / _barRef * 100) : 0;
+    const accruedPct = _barRef > 0 ? Math.min(100 - paidPct, d.accruedETH / _barRef * 100) : 0;
     const totalPct   = paidPct + accruedPct;
-    const isAtCap    = totalPct >= 99.99;
+    const isAtCap    = d.capETH > 0 && (d.roiPaidETH + d.accruedETH) / d.capETH >= 0.9999;
     const levelRate  = ROI_LEVEL_RATES[d.level] !== undefined ? ROI_LEVEL_RATES[d.level] : '—';
-    const paidTokens = _rwROITokenPrice > 0 && d.roiPaidNonZero ? d.roiPaidETH / _rwROITokenPrice : 0;
-    const claimedLine = d.roiPaidNonZero
-      ? `<div style="font-size:9px;color:#4ade80;margin-top:3px;">✓ ${paidTokens > 0 ? fmtNum(paidTokens) + ' ' + _rwROITokenSym : '$' + fmtNum(d.roiPaidETH * USDT_PER_ETH) + ' USDT'} claimed</div>`
+    const totalClaimed = histPaid + d.roiPaidETH;
+    const hasClaimed   = d.roiPaidNonZero || histPaid > 0;
+    const paidTokens   = _rwROITokenPrice > 0 && hasClaimed ? totalClaimed / _rwROITokenPrice : 0;
+    const claimedLine  = hasClaimed
+      ? `<div style="font-size:9px;color:#4ade80;margin-top:3px;">✓ ${paidTokens > 0 ? fmtNum(paidTokens) + ' ' + _rwROITokenSym : '$' + fmtNum(totalClaimed * USDT_PER_ETH) + ' USDT'} claimed</div>`
       : `<div style="font-size:9px;color:var(--muted);margin-top:3px;">0 ${_rwROITokenSym} claimed</div>`;
 
     rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
@@ -62,7 +69,7 @@ function _rwROIStreamsHtml() {
       </td>
       <td style="padding:8px 8px;min-width:160px;">
         <div style="display:flex;align-items:baseline;gap:6px;">
-          <span id="rwROIStreamAccrued-${i}" style="color:var(--gold);">$${((d.roiPaidETH + d.accruedETH) * USDT_PER_ETH).toFixed(5)}</span>
+          <span id="rwROIStreamAccrued-${i}" style="color:var(--gold);">$${((histPaid + d.roiPaidETH + d.accruedETH) * USDT_PER_ETH).toFixed(5)}</span>
           <span id="rwROIStreamPct-${i}" class="rw-roi-stream-pct" style="font-size:9px;color:var(--muted);">${totalPct >= 100 ? '100' : totalPct.toFixed(2)}%</span>${isAtCap ? '<span style="font-size:9px;color:var(--gold);"> cap reached</span>' : ''}
         </div>
         <div style="margin-top:5px;" class="dis-bar-track">
@@ -72,11 +79,19 @@ function _rwROIStreamsHtml() {
         ${claimedLine}
       </td>
       <td style="padding:8px 8px;text-align:right;">
-        <button onclick="claimROIFromStreamBtn('${d.investor}',${d.lockIndex},${d.level},this)"
-          id="rwROIStreamClaimBtn-${i}"
-          style="padding:5px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
-                 border:1px solid var(--gold);background:rgba(201,168,76,0.12);color:var(--gold);
-                 border-radius:3px;cursor:pointer;white-space:nowrap;">${(() => { const _t = _rwROITokenPrice > 0 && d.accruedETH > 0 ? d.accruedETH / _rwROITokenPrice : 0; return _t > 0 ? 'CLAIM · ' + _t.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM'; })()}</button>
+        ${(() => {
+          const _t       = _rwROITokenPrice > 0 && d.accruedETH > 0 ? d.accruedETH / _rwROITokenPrice : 0;
+          const _canClaim = d.accruedETH > 0;
+          const _label   = _t > 0 ? 'CLAIM · ' + _t.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM';
+          return `<button onclick="claimROIFromStreamBtn('${d.investor}',${d.lockIndex},${d.level},this)"
+            id="rwROIStreamClaimBtn-${i}"
+            style="padding:5px 10px;font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;
+                   border:1px solid ${_canClaim ? 'var(--gold)' : 'var(--border)'};
+                   background:${_canClaim ? 'rgba(201,168,76,0.12)' : 'rgba(255,255,255,0.04)'};
+                   color:${_canClaim ? 'var(--gold)' : 'var(--muted)'};
+                   border-radius:3px;cursor:${_canClaim ? 'pointer' : 'not-allowed'};white-space:nowrap;"
+            ${_canClaim ? '' : 'disabled'}>${_label}</button>`;
+        })()}
       </td>
     </tr>`;
   }
@@ -188,24 +203,33 @@ function _rwStartROITicker() {
       const _capL = Math.max(0, _d.capETH - _d.roiPaidETH);
       const _a    = Math.min(_capL, Math.max(0, _d.accruedETH + elapsed * _d.streamRate));
 
+      const _histP   = _d.histPaidETH || 0;
       const _accEl = document.getElementById('rwROIStreamAccrued-' + _si);
-      if (_accEl) _accEl.textContent = '$' + ((_d.roiPaidETH + _a) * USDT_PER_ETH).toFixed(5);
+      if (_accEl) _accEl.textContent = '$' + ((_histP + _d.roiPaidETH + _a) * USDT_PER_ETH).toFixed(5);
 
       const _claimBtn = document.getElementById('rwROIStreamClaimBtn-' + _si);
       if (_claimBtn && _claimBtn.textContent !== 'CLAIMING…') {
-        const _bt = _rwROITokenPrice > 0 && _a > 0 ? _a / _rwROITokenPrice : 0;
-        _claimBtn.textContent = _bt > 0 ? 'CLAIM · ' + _bt.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM';
+        const _canClaim = _a > 0;
+        const _bt       = _rwROITokenPrice > 0 && _canClaim ? _a / _rwROITokenPrice : 0;
+        _claimBtn.textContent        = _bt > 0 ? 'CLAIM · ' + _bt.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM';
+        _claimBtn.disabled           = !_canClaim;
+        _claimBtn.style.borderColor  = _canClaim ? 'var(--gold)'               : 'var(--border)';
+        _claimBtn.style.background   = _canClaim ? 'rgba(201,168,76,0.12)'     : 'rgba(255,255,255,0.04)';
+        _claimBtn.style.color        = _canClaim ? 'var(--gold)'               : 'var(--muted)';
+        _claimBtn.style.cursor       = _canClaim ? 'pointer'                   : 'not-allowed';
       }
 
-      if (_d.capETH > 0) {
-        const _paidPct = Math.min(100, _d.roiPaidETH / _d.capETH * 100);
-        const _accPct  = Math.min(100 - _paidPct, _a / _d.capETH * 100);
+      const _curRef2 = _d.periodMax > 0 ? _d.periodMax : _d.capETH;
+      const _barRef2 = _curRef2 + _histP;
+      if (_barRef2 > 0) {
+        const _paidPct = Math.min(100, (_histP + _d.roiPaidETH) / _barRef2 * 100);
+        const _accPct  = Math.min(100 - _paidPct, _a / _barRef2 * 100);
         const _barEl   = document.getElementById('rwROIStreamBar-' + _si);
-        if (_barEl) _barEl.style.width = _accPct.toFixed(3) + '%';
+        if (_barEl) { _barEl.style.left = _paidPct.toFixed(3) + '%'; _barEl.style.width = _accPct.toFixed(3) + '%'; }
         const _pctEl   = document.getElementById('rwROIStreamPct-' + _si);
         if (_pctEl) {
           const _tot = _paidPct + _accPct;
-          _pctEl.textContent = (_tot >= 100 ? '100' : _tot.toFixed(2)) + '% of cap';
+          _pctEl.textContent = (_tot >= 100 ? '100' : _tot.toFixed(2)) + '%';
         }
       }
     }
@@ -1015,18 +1039,37 @@ async function loadRwROI(silent = false) {
         const roiPaidNonZero = roiPaidRaw.gt(0);
         const recSince       = streamInfo ? Number(streamInfo.recipientSince) : lockedAt;
 
-        // Accrue from recipientSince (more accurate than from lockedAt), capped by remaining cap
-        const startTs    = Math.max(lockedAt, recSince);
-        const elapsed2   = Math.max(0, Math.min(unlockTime, effNow) - startTs);
-        const capLeft    = Math.max(0, capETH - roiPaidETH);
-        const accruedETH = lockDur > 0 && ratePPM > 0
-          ? Math.min(capLeft, ethInv * ratePPM * elapsed2 * commRate / (50_000_000_000 * lockDur))
+        // historicalPaidETH: cumulative ETH paid across all previous restake periods.
+        // The contract accumulates this in ROIStream.historicalPaidETH so history
+        // survives the per-period reset that happens on each restake.
+        const histPaidRaw = streamInfo && streamInfo.historicalPaidETH
+          ? streamInfo.historicalPaidETH : ethers.BigNumber.from(0);
+        const histPaidETH = parseFloat(ethers.utils.formatEther(histPaidRaw));
+
+        // Incremental accrual since last settlement = total(from recipientSince) − already paid,
+        // capped by remaining cap. Using total − paid avoids the bar filling to 100% after a
+        // claim (where formula(elapsed) > roiPaidETH so min(capLeft, total) = capLeft).
+        const startTs         = Math.max(lockedAt, recSince);
+        const elapsed2        = Math.max(0, Math.min(unlockTime, effNow) - startTs);
+        const capLeft         = Math.max(0, capETH - roiPaidETH);
+        const totalSinceStart = lockDur > 0 && ratePPM > 0
+          ? ethInv * ratePPM * elapsed2 * commRate / (50_000_000_000 * lockDur)
           : 0;
+        const accruedETH = Math.max(0, Math.min(capLeft, totalSinceStart - roiPaidETH));
+
+        // Max accrual this lock period — used as bar denominator so the bar fills
+        // proportionally to time elapsed (same behaviour as the staking bar).
+        // Computed from ratePPM directly so it stays correct even after lock expiry
+        // (when streamRate becomes 0 and streamRate * lockDur would give 0).
+        const periodMax = ratePPM > 0 && commRate > 0
+          ? ethInv * ratePPM * commRate / 50_000_000_000
+          : capETH;
 
         ratePerSec += streamRate;
         _rwROIStreamDetails.push({
           investor: ref.investor, lockIndex: Number(ref.lockIndex), level: Number(ref.level),
-          commRate, ethInv, capETH, accruedETH, streamRate, roiPaidETH, roiPaidNonZero
+          commRate, ethInv, capETH, periodMax, accruedETH, streamRate, roiPaidETH, roiPaidNonZero,
+          histPaidETH,
         });
       }
     }

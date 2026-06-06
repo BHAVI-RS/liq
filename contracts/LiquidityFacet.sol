@@ -33,6 +33,7 @@ contract LiquidityFacet is LiquidityStorage {
     address private immutable UNISWAP_FACTORY;
     address private immutable WETH;
     address public  immutable platformToken;
+    address private immutable _self;
 
     uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
     uint256 private constant USDT_PER_ETH      = 1;
@@ -43,6 +44,7 @@ contract LiquidityFacet is LiquidityStorage {
     uint256 private constant TWAP_GUARD_BPS    = 500;
 
     // Errors (must match Liquidity.sol exactly so revert data is correct)
+    error NotDelegatecall();
     error NotOwner();
     error Reentrant();
     error MustSendETH();
@@ -89,15 +91,23 @@ contract LiquidityFacet is LiquidityStorage {
         UNISWAP_FACTORY = _factory;
         WETH            = _weth;
         platformToken   = _platform;
+        _self           = address(this);
+    }
+
+    // In delegatecall context address(this) == Liquidity.sol != _self → passes.
+    // In a direct call address(this) == this facet == _self → reverts.
+    modifier onlyDelegatecall() {
+        if (address(this) == _self) revert NotDelegatecall();
+        _;
     }
 
     // ── TWAP ─────────────────────────────────────────────────────────────────
 
-    function updateTokenTWAPExt(address _token) external payable {
+    function updateTokenTWAPExt(address _token) external payable onlyDelegatecall {
         _updateTokenTWAP(_token);
     }
 
-    function updateTWAPExt() external payable {
+    function updateTWAPExt() external payable onlyDelegatecall {
         uint256 priceBefore = _tokenTwapPrice[platformToken];
         _updateTokenTWAP(platformToken);
         uint256 priceAfter = _tokenTwapPrice[platformToken];
@@ -149,7 +159,7 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── Commissions ───────────────────────────────────────────────────────────
 
-    function distributeCommissionsExt(address _from, uint256 _amount, address _token) external payable {
+    function distributeCommissionsExt(address _from, uint256 _amount, address _token) external payable onlyDelegatecall {
         _distributeReferralCommissions(_from, _amount, _token);
     }
 
@@ -290,7 +300,7 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── Staking reward ────────────────────────────────────────────────────────
 
-    function settleStakingRewardExt(address _user, uint256 _lockIndex) external payable {
+    function settleStakingRewardExt(address _user, uint256 _lockIndex) external payable onlyDelegatecall {
         _settleStakingReward(_user, _lockIndex);
     }
 
@@ -334,7 +344,7 @@ contract LiquidityFacet is LiquidityStorage {
         }
     }
 
-    function claimStakingRewardExt() external payable {
+    function claimStakingRewardExt() external payable onlyDelegatecall {
         _updateTokenTWAP(platformToken);
         uint256 price = _twapPrice();
         if (price == 0) revert PriceUnavailable();
@@ -360,7 +370,7 @@ contract LiquidityFacet is LiquidityStorage {
         emit StakingRewardClaimed(msg.sender, totalTokens, totalPendingETH);
     }
 
-    function claimStakingRewardForLockExt(uint256 _lockIndex) external payable {
+    function claimStakingRewardForLockExt(uint256 _lockIndex) external payable onlyDelegatecall {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
         if (lock.removed) revert AlreadyRemoved();
         _updateTokenTWAP(platformToken);
@@ -381,7 +391,7 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── invest ────────────────────────────────────────────────────────────────
 
-    function investExt(address _token, uint256 rewardPPM, uint256 T) external {
+    function investExt(address _token, uint256 rewardPPM, uint256 T) external onlyDelegatecall {
         uint256 A      = T / 2;
         uint256 B      = T - A;
         uint256 A60max = (A * 60) / 100;  // max 30% of T for pool buy
@@ -444,7 +454,7 @@ contract LiquidityFacet is LiquidityStorage {
             WETH,
             totalTokens,
             B,
-            0,                                              // token min = 0: post-swap ratio determines actual usage
+            0,
             B * (10000 - MAX_SLIPPAGE_BPS) / 10000,
             address(this),
             block.timestamp + 300
@@ -513,7 +523,7 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── removeLPCore ──────────────────────────────────────────────────────────
 
-    function removeLPCoreExt(uint256 _lockIndex, bool direct) external payable {
+    function removeLPCoreExt(uint256 _lockIndex, bool direct) external payable onlyDelegatecall {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
         if (direct) {
             if (lock.removed)  revert AlreadyRemoved();
@@ -587,7 +597,7 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── restakeLP ─────────────────────────────────────────────────────────────
 
-    function restakeLPExt(uint256 _lockIndex, uint256 _durationDays) external payable {
+    function restakeLPExt(uint256 _lockIndex, uint256 _durationDays) external payable onlyDelegatecall {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
         if (lock.claimed)  revert LPAlreadyClaimed();
         if (lock.removed)  revert AlreadyRemoved();

@@ -16,6 +16,18 @@ import "./LiquidityStorage.sol";
 contract LiquidityROIFacet is LiquidityStorage {
 
     uint256 private constant MAX_ROI_HOPS = 15;
+    address private immutable _self;
+
+    error NotDelegatecall();
+
+    constructor() {
+        _self = address(this);
+    }
+
+    modifier onlyDelegatecall() {
+        if (address(this) == _self) revert NotDelegatecall();
+        _;
+    }
 
     // ── Low-level storage helpers ─────────────────────────────────────────────
 
@@ -142,8 +154,8 @@ contract LiquidityROIFacet is LiquidityStorage {
                 return;
             }
 
-            if (activeReferralCount[current] <= level) {
-                // Ineligible at this level
+            if (activeReferralCount[current] <= level || !_qualifies(current)) {
+                // Ineligible: insufficient referral count or no personal investment
                 _skippedROIStreams[current][level].push(ref);
                 current = users[current].referrer;
                 continue;
@@ -228,13 +240,17 @@ contract LiquidityROIFacet is LiquidityStorage {
 
     // ── External (DELEGATECALL) mutators ──────────────────────────────────────
 
-    // Called by invest() after the LP lock is pushed.
-    function initROIStreamsExt(address investor, uint256 lockIndex) external payable {
+    // Called by invest() after the LP lock is pushed, and by restakeLP() after endROIStreamsExt.
+    // On restake, roiPaidETH already holds the fully-settled amount for the period that just
+    // ended (endROIStreamsExt called _settleStream first), so we carry it into
+    // historicalPaidETH before resetting the per-period counters.
+    function initROIStreamsExt(address investor, uint256 lockIndex) external payable onlyDelegatecall {
         LPLock storage lock = userLPLocks[investor][lockIndex];
         uint256 capBase = lock.ethInvested;
 
         for (uint8 i = 0; i < 10; ) {
             ROIStream storage stream = _roiStreams[investor][lockIndex][i];
+            stream.historicalPaidETH += stream.roiPaidETH;  // preserve across restakes (0 on first invest)
             stream.ended          = false;
             stream.roiPaidETH     = 0;
             stream.capETH         = uint128(capBase * referralCommissionRates[i] / 10_000);
@@ -247,7 +263,7 @@ contract LiquidityROIFacet is LiquidityStorage {
     }
 
     // Called by _removeLPCore() before onLossReferralExt.
-    function endROIStreamsExt(address investor, uint256 lockIndex) external payable {
+    function endROIStreamsExt(address investor, uint256 lockIndex) external payable onlyDelegatecall {
         for (uint8 i = 0; i < 10; ) {
             ROIStream storage stream = _roiStreams[investor][lockIndex][i];
             if (!stream.ended) {
@@ -265,9 +281,12 @@ contract LiquidityROIFacet is LiquidityStorage {
     }
 
     // Called after activeReferralCount[referrer] has been incremented.
-    function onGainReferralExt(address referrer) external payable {
+    function onGainReferralExt(address referrer) external payable onlyDelegatecall {
         uint256 cnt = activeReferralCount[referrer];
         if (cnt == 0) return;
+        // Do not redirect streams to a referrer who has never invested.
+        // onFirstQualifyExt will process their skipped array when they invest.
+        if (!_qualifies(referrer)) return;
         uint8 newLevel = uint8(cnt - 1);
 
         StreamRef[] storage skipped = _skippedROIStreams[referrer][newLevel];
@@ -304,8 +323,49 @@ contract LiquidityROIFacet is LiquidityStorage {
         delete _skippedROIStreams[referrer][newLevel];
     }
 
+    // Called on a user's first qualifying investment.
+    // Processes all skipped ROI streams across every level the user is now eligible for,
+    // redirecting them away from whoever currently holds them (usually owner).
+    function onFirstQualifyExt(address user) external payable onlyDelegatecall {
+        for (uint8 level = 0; level < 10; ) {
+            if (activeReferralCount[user] <= level) { unchecked { level++; } continue; }
+
+            StreamRef[] storage skipped = _skippedROIStreams[user][level];
+            uint256 len = skipped.length;
+            if (len == 0) { unchecked { level++; } continue; }
+
+            for (uint256 i = 0; i < len; ) {
+                StreamRef memory ref = skipped[i];
+                ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
+                unchecked { i++; }
+                if (stream.ended) continue;
+                if (stream.recipient == user) continue;
+
+                if (_holdsLowerLevel(ref.investor, ref.lockIndex, level, user)) {
+                    _deferredROIStreams[user].push(ref);
+                    continue;
+                }
+
+                address oldHolder = stream.recipient;
+                _settleStream(stream, ref.investor, ref.lockIndex, ref.level);
+                if (oldHolder != address(0)) {
+                    _removeFromActive(oldHolder, ref.investor, ref.lockIndex, ref.level);
+                }
+                stream.recipient      = user;
+                stream.recipientSince = uint64(block.timestamp);
+                _activeROIStreams[user].push(ref);
+
+                if (oldHolder != address(0) && oldHolder != owner) {
+                    _cascadeDeferred(oldHolder, ref.investor, ref.lockIndex, ref.level);
+                }
+            }
+            delete _skippedROIStreams[user][level];
+            unchecked { level++; }
+        }
+    }
+
     // Called after activeReferralCount[referrer] has been decremented.
-    function onLossReferralExt(address referrer) external payable {
+    function onLossReferralExt(address referrer) external payable onlyDelegatecall {
         uint8 lostLevel = uint8(activeReferralCount[referrer]); // new lower count = lost level (0-indexed)
 
         StreamRef[] storage active = _activeROIStreams[referrer];
@@ -334,7 +394,7 @@ contract LiquidityROIFacet is LiquidityStorage {
 
     // Settle all active streams for recipient into _roiPendingETH.
     // Called by claimAllROI() before reading _roiPendingETH.
-    function settleAllStreamsExt(address recipient) external payable {
+    function settleAllStreamsExt(address recipient) external payable onlyDelegatecall {
         StreamRef[] storage arr = _activeROIStreams[recipient];
         uint256 len = arr.length;
         for (uint256 i = 0; i < len; ) {
@@ -345,8 +405,23 @@ contract LiquidityROIFacet is LiquidityStorage {
         }
     }
 
+    // Settles a range of active streams [fromIndex, fromIndex+count) into _roiPendingETH.
+    // Called by settleROIStreams() to allow large networks to settle in multiple transactions.
+    function settleStreamsRangeExt(address recipient, uint256 fromIndex, uint256 count) external payable onlyDelegatecall {
+        StreamRef[] storage arr = _activeROIStreams[recipient];
+        uint256 len = arr.length;
+        uint256 end = fromIndex + count;
+        if (end > len) end = len;
+        for (uint256 i = fromIndex; i < end; ) {
+            StreamRef storage ref = arr[i];
+            ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
+            if (!stream.ended) _settleStream(stream, ref.investor, ref.lockIndex, ref.level);
+            unchecked { i++; }
+        }
+    }
+
     // Settle a single stream for msg.sender (called by claimROIFromStream).
-    function settleStreamExt(address investor, uint256 lockIndex, uint8 level) external payable {
+    function settleStreamExt(address investor, uint256 lockIndex, uint8 level) external payable onlyDelegatecall {
         ROIStream storage stream = _roiStreams[investor][lockIndex][level];
         if (!stream.ended && stream.recipient == msg.sender) {
             _settleStream(stream, investor, lockIndex, level);
