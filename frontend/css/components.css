@@ -1253,3 +1253,64 @@ input[type="email"]::placeholder { color: var(--muted); }
   .gene-col-invested    { display: none !important; }
   .gene-col-teamvol     { display: none !important; }
 }
+
+/* ── HISTORY TAB — MOBILE ── */
+@media (max-width: 640px) {
+
+  /* 1. Sub-tab buttons: equal width, compact so they don't overflow */
+  .hist-subtab {
+    flex: 1;
+    padding: 10px 6px;
+    font-size: 10px;
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 2. Pool / reward rows: push the date onto its own full-width line */
+  .ph-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding: 10px 12px;
+    gap: 8px 10px;
+  }
+  .ph-meta {
+    flex: 0 0 100%;
+    text-align: left;
+  }
+
+  /* 3. "REFERRAL SPLIT" button in expanded detail: full-width when it wraps */
+  .hd-tx-row > button {
+    flex: 0 0 100%;
+    text-align: center;
+  }
+
+  /* 4. Referral popup rows: stack to two-row layout (level+addr / badge+amount) */
+  .hd-ref-row {
+    grid-template-columns: 56px 1fr;
+    grid-template-rows: auto auto;
+    gap: 5px 8px;
+  }
+  .hd-ref-badge {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .hd-ref-amt {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  /* 5. Shrink large display values inside the expanded investment-flow cards */
+  .hd-body [style*="font-size:18px"] {
+    font-size: 14px !important;
+  }
+}
+
+/* 6. On very narrow phones: stack the side-by-side investment-flow grid to one column */
+@media (max-width: 480px) {
+  .hd-section [style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+}
