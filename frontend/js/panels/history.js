@@ -334,21 +334,6 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
       </div>
     </div>
 
-    <div class="hd-section">
-      <div class="hd-section-title">TOKEN ACQUISITION</div>
-      <div class="hd-grid2">
-        <div class="hd-kv">
-          <div class="hd-key">POOL BUY</div>
-          <div class="hd-val">${fT(swapTokensOut)} ${tokenSymbol}</div>
-          <div class="hd-sub">${effectiveSwapPrice}</div>
-        </div>
-        <div class="hd-kv">
-          <div class="hd-key">PLATFORM SUPPLY</div>
-          <div class="hd-val">${preSeededTokens.gt(0) ? fT(preSeededTokens) : '—'} ${tokenSymbol}</div>
-          <div class="hd-sub">${fPrice(resBefore)}</div>
-        </div>
-      </div>
-    </div>
 
     <div class="hd-tx-row" style="flex-wrap:wrap;gap:8px;">
       ${txHash
@@ -495,7 +480,7 @@ async function loadRewardHistory() {
           <div class="ph-row">
             <div class="ph-badge" style="background:rgba(167,139,250,0.15);color:#a78bfa;border-color:rgba(167,139,250,0.3);">ROI</div>
             <div class="ph-main">
-              <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT equivalent</div>
+              <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT<span class="hide-mobile"> equivalent</span></div>
               <div class="ph-sub">ROI commission claimed</div>
             </div>
             <div class="ph-meta"><div class="ph-date">${date}</div></div>
@@ -505,7 +490,7 @@ async function loadRewardHistory() {
         <div class="ph-row">
           <div class="ph-badge reward-claim">REWARD</div>
           <div class="ph-main">
-            <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT equivalent</div>
+            <div class="ph-title">${tokensFmt} ${platformSym} &nbsp;·&nbsp; $${usdtVal} USDT<span class="hide-mobile"> equivalent</span></div>
             <div class="ph-sub">Staking reward claimed</div>
           </div>
           <div class="ph-meta"><div class="ph-date">${date}</div></div>

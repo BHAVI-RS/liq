@@ -1315,6 +1315,7 @@ input[type="email"]::placeholder { color: var(--muted); }
   .hd-body [style*="font-size:18px"] {
     font-size: 14px !important;
   }
+
 }
 
 /* 6. On very narrow phones: stack the side-by-side investment-flow grid to one column */
