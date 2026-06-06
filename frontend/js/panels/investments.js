@@ -520,7 +520,7 @@ async function _computeRemoveLPPreview(tokenAddr, lpAmountHex) {
   let sym = tokenAddr;
   try { const t = await contract.getToken(tokenAddr); sym = t.symbol; } catch(_) {}
 
-  return { tokensOut, usdtOut, sym };
+  return { tokensOut: tokensOut * 0.95, usdtOut: usdtOut * 0.95, sym };
 }
 
 async function removeLP(lockIndex, tokenAddr, lpAmountHex) {

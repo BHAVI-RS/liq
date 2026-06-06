@@ -15,8 +15,7 @@ const FUND_THRESHOLD = hre.ethers.parseEther("0.5"); // skip if already has this
 
 // ── USDT ──────────────────────────────────────────────────────────────────────
 const USDT_ADDRESS       = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
-const USDT_PER_ACCOUNT   = hre.ethers.parseEther("2000000"); // 10 lakh USDT (18 decimals)
-const USDT_THRESHOLD     = hre.ethers.parseEther("1000000");  // skip if already has ≥ 9 lakh
+const USDT_PER_ACCOUNT   = hre.ethers.parseEther("2000000"); // exact target per sub-wallet (18 decimals)
 const USDT_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function transfer(address to, uint256 amount) returns (bool)",
@@ -87,15 +86,22 @@ async function main() {
       maticFunded++;
     }
 
-    // ── USDT top-up ───────────────────────────────────────────────────────
-    if (usdtBal >= USDT_THRESHOLD) {
-      console.log(`  USDT        : sufficient — skipped`);
+    // ── USDT exact balance maintenance ────────────────────────────────────
+    if (usdtBal === USDT_PER_ACCOUNT) {
+      console.log(`  USDT        : exact — skipped`);
       usdtSkipped++;
-    } else {
-      const toSend = USDT_PER_ACCOUNT - usdtBal;
-      const tx = await usdtContract.transfer(wallet.address, toSend);
+    } else if (usdtBal > USDT_PER_ACCOUNT) {
+      const excess = usdtBal - USDT_PER_ACCOUNT;
+      const subContract = new hre.ethers.Contract(USDT_ADDRESS, USDT_ABI, wallet);
+      const tx = await subContract.transfer(deployer.address, excess);
       await tx.wait();
-      console.log(`  USDT        : sent ${hre.ethers.formatEther(toSend)} USDT ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      console.log(`  USDT        : returned ${hre.ethers.formatEther(excess)} USDT to account[0] ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      usdtFunded++;
+    } else {
+      const deficit = USDT_PER_ACCOUNT - usdtBal;
+      const tx = await usdtContract.transfer(wallet.address, deficit);
+      await tx.wait();
+      console.log(`  USDT        : sent ${hre.ethers.formatEther(deficit)} USDT ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
       usdtFunded++;
     }
   }

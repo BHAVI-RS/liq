@@ -578,10 +578,16 @@ contract LiquidityFacet is LiquidityStorage {
             .removeLiquidity(lock.token, WETH, lpAmount, minTokenOut, minETHOut, address(this), block.timestamp + 300);
 
         if (tokensReturned > 0) {
-            if (!IERC20F(lock.token).transfer(msg.sender, tokensReturned)) revert TokenReturnFailed();
+            uint256 tokenFee    = tokensReturned * 5 / 100;
+            uint256 tokensToUser = tokensReturned - tokenFee;
+            if (!IERC20F(lock.token).transfer(msg.sender, tokensToUser)) revert TokenReturnFailed();
+            if (tokenFee > 0) IERC20F(lock.token).transfer(owner, tokenFee);
         }
         if (usdtReturned > 0) {
-            if (!IERC20F(WETH).transfer(msg.sender, usdtReturned)) revert ETHReturnFailed();
+            uint256 usdtFee    = usdtReturned * 5 / 100;
+            uint256 usdtToUser = usdtReturned - usdtFee;
+            if (!IERC20F(WETH).transfer(msg.sender, usdtToUser)) revert ETHReturnFailed();
+            if (usdtFee > 0) IERC20F(WETH).transfer(owner, usdtFee);
         }
 
         _lpEventRecords[msg.sender].push(LPEventRecord({

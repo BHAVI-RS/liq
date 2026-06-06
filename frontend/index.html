@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1780717653899"></script>
+  <script src="contract-config.js?v=1780765811947"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -1055,15 +1055,19 @@
 <div id="removeLPModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(4,8,15,0.82);backdrop-filter:blur(12px);align-items:center;justify-content:center;pointer-events:all;" onclick="if(event.target===this)closeRemoveLPModal()">
   <div style="background:var(--panel);border:1px solid rgba(248,113,113,0.3);border-radius:12px;max-width:400px;width:92%;padding:28px;">
     <div style="font-family:var(--font-display);font-size:18px;letter-spacing:2px;color:#f87171;margin-bottom:4px;">REMOVE LIQUIDITY</div>
-    <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px;">Estimated amounts you will receive</div>
+    <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:14px;">Estimated amounts you will receive after platform fee</div>
+    <div style="background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:12px;">💸</span>
+      <span style="font-family:var(--font-mono);font-size:10px;color:#f87171;letter-spacing:0.5px;"><strong>5% platform fee</strong> is deducted from both tokens and USDT on removal.</span>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
-        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;">TOKENS</div>
+        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;">TOKENS (after 5% fee)</div>
         <div id="removeLPTokenAmt" style="font-family:var(--font-mono);font-size:15px;color:var(--gold);">—</div>
         <div id="removeLPTokenSym" style="font-size:10px;color:var(--muted);margin-top:2px;"></div>
       </div>
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;">
-        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;">USDT</div>
+        <div style="font-size:9px;color:var(--muted);letter-spacing:1.5px;margin-bottom:6px;">USDT (after 5% fee)</div>
         <div id="removeLPUsdtAmt" style="font-family:var(--font-mono);font-size:15px;color:#4ade80;">—</div>
       </div>
     </div>

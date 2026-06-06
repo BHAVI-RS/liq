@@ -1,0 +1,24 @@
+{
+  "name": "hordex-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "remotion studio src/Root.tsx",
+    "render": "remotion render src/Root.tsx HordexVideo out/hordex.mp4 --codec=h264 --gl=angle"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.250",
+    "@remotion/google-fonts": "4.0.250",
+    "remotion": "4.0.250",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.2.0",
+    "@types/react-dom": "18.2.0",
+    "typescript": "5.3.3"
+  },
+  "remotion": {
+    "entryPoint": "src/Root.tsx"
+  }
+}
