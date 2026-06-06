@@ -276,7 +276,7 @@
 .stake-day-btn { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 6px; padding: 14px 4px; cursor: pointer; font-family: var(--font-mono); text-align: center; transition: all 0.15s; }
 .stake-day-btn .sdb-num { font-size: 18px; color: var(--cream); display: block; }
 .stake-day-btn .sdb-lbl { font-size: 9px; letter-spacing: 1.5px; color: var(--muted); display: block; margin-top: 2px; }
-.stake-day-btn .sdb-streak { font-size: 8px; letter-spacing: 1px; color: rgba(201,168,76,0.7); display: block; margin-top: 5px; text-transform: uppercase; }
+.stake-day-btn .sdb-streak { font-size: 9px; letter-spacing: 1px; color: rgba(201,168,76,0.7); display: block; margin-top: 5px; text-transform: uppercase; }
 .stake-day-btn .sdb-reward { font-size: 10px; color: var(--gold); display: block; margin-top: 3px; }
 .stake-day-btn .sdb-pct { font-size: 9px; color: var(--muted); display: block; margin-top: 2px; letter-spacing: 0.5px; }
 .stake-day-btn:hover { border-color: var(--gold); }
@@ -326,7 +326,7 @@
 
   /* Direct referral cards — prevent address overflow */
   .dash-dref-addr {
-    font-size: 6px;
+    font-size: 10px;
     font-weight: 400;
     letter-spacing: 0;
     overflow: hidden;

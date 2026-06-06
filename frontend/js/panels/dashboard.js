@@ -267,8 +267,14 @@ function _dashStartStakingTicker() {
       const elapsed      = Math.min(dur, Math.max(0, now - la));
       const ratePPM_tick = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
       const rwEth_tick   = ratePPM_tick > 0 ? eth * ratePPM_tick / 1_000_000 : 0;
-      const earnedETH    = dur > 0 ? rwEth_tick * elapsed / dur : 0;
-      totalETH += earnedETH;
+      const earnedETH      = dur > 0 ? rwEth_tick * elapsed / dur : 0;
+      const claimedEth_i   = lock.rewardClaimedETH    ? parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH))    : 0;
+      const pendingETH_i   = Math.max(0, earnedETH - claimedEth_i);
+      const tokensAcc_i    = lock.tokensAccumulated   ? parseFloat(ethers.utils.formatEther(lock.tokensAccumulated))   : 0;
+      const totalClaimed_i = lock.totalTokensClaimed  ? parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed))  : 0;
+      const priceEth_i     = _dashStakingTickPrices[i] || 0;
+      // pendingETH_i + historical tokens: stable across claims (pendingETH drops = totalClaimed rises by same amount)
+      totalETH += pendingETH_i + (tokensAcc_i + totalClaimed_i) * priceEth_i;
       if (elapsed < dur) { anyStillActive = true; activeLockCount++; }
     }
 
@@ -1081,7 +1087,12 @@ async function loadDashboard(silent = false) {
       const _ratePPM    = _l.rewardRatePPM ? _l.rewardRatePPM.toNumber() : 0;
       const _rwEth      = _ratePPM > 0 ? _eth * _ratePPM / 1_000_000 : 0;
       const _earnedETH  = _dur > 0 ? _rwEth * _el2 / _dur : 0;
-      _initTotalETH += _earnedETH;
+      const _claimedETH = _l.rewardClaimedETH  ? parseFloat(ethers.utils.formatEther(_l.rewardClaimedETH))  : 0;
+      const _pendingETH = Math.max(0, _earnedETH - _claimedETH);
+      const _tokAcc     = _l.tokensAccumulated  ? parseFloat(ethers.utils.formatEther(_l.tokensAccumulated))  : 0;
+      const _totClaimed = _l.totalTokensClaimed ? parseFloat(ethers.utils.formatEther(_l.totalTokensClaimed)) : 0;
+      const _pEth       = (poolCache.get(_l.token.toLowerCase()) || {}).priceEth || 0;
+      _initTotalETH += _pendingETH + (_tokAcc + _totClaimed) * _pEth;
       if (_effNow < _ut && _ratePPM > 0) _initAnyActive = true;
     }
 

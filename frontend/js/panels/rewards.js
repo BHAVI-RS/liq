@@ -278,11 +278,14 @@ function _rwComputeLiveUsdt(now) {
     const elapsed     = Math.min(dur, Math.max(0, now - la));
     const isActive    = elapsed < dur && !lock.removed;
     const earnedEth   = dur > 0 ? rwEth * elapsed / dur : 0;
-    const claimedEth  = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH  || ethers.BigNumber.from(0)));
-    const tokensAcc   = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
-    const priceEth    = _rwStakingPrices[i] || 0;
-    const pendingEth  = Math.max(0, earnedEth - claimedEth);
-    const lockLive    = earnedEth  * USDT_PER_ETH;
+    const claimedEth   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH   || ethers.BigNumber.from(0)));
+    const tokensAcc    = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated  || ethers.BigNumber.from(0)));
+    const totalClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
+    const priceEth     = _rwStakingPrices[i] || 0;
+    const pendingEth   = Math.max(0, earnedEth - claimedEth);
+    // Overall accrued = current-period PENDING + all historical tokens (carry-over + ever-claimed) at current price.
+    // Using pendingEth (not earnedEth) prevents double-count: when claimed, pendingEth drops and totalClaimed rises equally.
+    const lockLive    = (pendingEth + (tokensAcc + totalClaimed) * priceEth) * USDT_PER_ETH;
     const lockPending = pendingEth * USDT_PER_ETH + tokensAcc * priceEth * USDT_PER_ETH;
     const claimableTokens = (priceEth > 0 ? pendingEth / priceEth : 0) + tokensAcc;
     const claimedPct  = rwEth > 0 ? Math.min(100, claimedEth / rwEth * 100) : 0;
@@ -794,8 +797,8 @@ async function loadRwStaking(silent = false) {
       const rewardTotalETH = ratePPM_lock > 0 ? ethInvested * ratePPM_lock / 1_000_000 : 0;
       const earnedETH         = lockDurSecs > 0 ? rewardTotalETH * elapsed / lockDurSecs : 0;
       const pendingETH        = Math.max(0, earnedETH - rewardClaimedETH);
-      // Same formula as investments tab
-      const liveUSDT_lock    = earnedETH * USDT_PER_ETH;
+      // Overall accrued: same formula as ticker — pending current-period + all historical tokens at current price
+      const liveUSDT_lock    = (pendingETH + (tokensAccumulated + totalClaimed) * priceEth) * USDT_PER_ETH;
       const claimableTokens  = (priceEth > 0 ? pendingETH / priceEth : 0) + tokensAccumulated;
       totalClaimableTokens  += claimableTokens;
 

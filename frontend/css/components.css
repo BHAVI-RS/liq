@@ -140,7 +140,7 @@ input[type="email"]::placeholder { color: var(--muted); }
 .token-name { font-size: 11px; color: var(--muted); }
 
 .token-addr {
-  font-size: 8px;
+  font-size: 10px;
   color: var(--gold);
   word-break: break-all;
   max-width: 300px;
@@ -1158,7 +1158,7 @@ input[type="email"]::placeholder { color: var(--muted); }
     min-width: 0;
   }
   .token-addr {
-    font-size: 8px;
+    font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1312,5 +1312,15 @@ input[type="email"]::placeholder { color: var(--muted); }
 @media (max-width: 480px) {
   .hd-section [style*="grid-template-columns:1fr 1fr"] {
     grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── GLOBAL MOBILE FONT-SIZE FLOOR ── */
+/* The body has zoom:0.9 on mobile, making declared 8px render at ~7px visually.
+   This rule lifts all JS-generated inline font-size:8px labels to 10px on mobile. */
+@media (max-width: 640px) {
+  [style*="font-size:8px"] {
+    font-size: 10px !important;
+    letter-spacing: .3px !important;
   }
 }
