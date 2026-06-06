@@ -1025,8 +1025,7 @@ function _initChartHover(canvas) {
 
     if (tooltip) {
       const p       = data[nearest];
-      const dt      = new Date(p.time);
-      const timeStr = dt.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+      const timeStr = String(Math.floor(p.time / 1000));
       const sym     = window._poolTokenSymbol || 'TOKEN';
       const sideClr = p.isBuy === null ? 'var(--muted)' : p.isBuy ? '#4ade80' : '#f87171';
       const sideLabel = p.isBuy === null ? 'LP' : p.isBuy ? 'BUY' : 'SELL';

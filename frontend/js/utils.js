@@ -110,14 +110,8 @@ function copyAddr(addr, btn) {
 window.copyAddr = copyAddr;
 
 // ── TIMESTAMP FORMATTERS ──
-function _fmtTs(ts) {
-  const d = new Date(ts * 1000);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
-}
-function _fmtTsFull(ts) {
-  const d = new Date(ts * 1000);
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: '2-digit', hour: '2-digit', minute: '2-digit' });
-}
+function _fmtTs(ts)     { return String(ts); }
+function _fmtTsFull(ts) { return String(ts); }
 
 // ── REQUIRE CONNECTED ──
 function requireConnected() {

@@ -219,8 +219,8 @@ async function loadInvestments() {
         return Math.round(s/86400) + ' day' + (Math.round(s/86400)!==1?'s':'');
       }
       const lockDurLabel  = lockDurSecs > 0 ? _fmtDur(lockDurSecs) : '—';
-      const lockedAtLabel = lockedAt > 0 ? new Date(lockedAt * 1000).toLocaleString() : '—';
-      const unlockLabel   = new Date(unlockTime * 1000).toLocaleString();
+      const lockedAtLabel = lockedAt > 0 ? String(lockedAt) : '—';
+      const unlockLabel   = String(unlockTime);
 
       // ── Staking reward data ──
       const stakingPriceEth    = pool ? pool.priceEth : 0;
@@ -716,9 +716,9 @@ function selectStakeDays(days) {
   document.querySelectorAll('.stake-day-btn').forEach(b =>
     b.classList.toggle('selected', Number(b.dataset.days) === days)
   );
-  const unlockDate = new Date(Date.now() + days * 86400 * 1000);
+  const unlockTs = Math.floor((Date.now() + days * 86400 * 1000) / 1000);
   document.getElementById('stakeUnlockInfo').innerHTML =
-    `Unlocks: <span>${unlockDate.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' })}</span>`;
+    `Unlocks: <span>${unlockTs}</span>`;
   document.getElementById('stakeConfirmBtn').disabled = false;
 }
 
@@ -860,12 +860,7 @@ async function showLockHistory(lockIndex) {
     if (s < 86400) return (s / 3600).toFixed(1) + ' hr';
     return Math.round(s / 86400) + ' day' + (Math.round(s / 86400) !== 1 ? 's' : '');
   }
-  function fmtTs(ts) {
-    if (!ts) return '—';
-    const d = new Date(ts * 1000);
-    return d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'2-digit' }) +
-      ' ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  }
+  function fmtTs(ts) { return ts ? String(ts) : '—'; }
 
   const existing = document.getElementById('lockHistoryModal');
   if (existing) existing.remove();

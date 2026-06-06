@@ -1141,9 +1141,15 @@ input[type="email"]::placeholder { color: var(--muted); }
 
   /* Info grid — single column */
   .info-grid { grid-template-columns: 1fr !important; }
-  .info-cell       { padding: 14px 16px; }
-  .info-cell-label { font-size: 11px; }
-  .info-cell-value { font-size: 15px; }
+  .info-cell       { padding: 10px 12px; }
+  .info-cell-label { font-size: 9px; }
+  .info-cell-value { font-size: 11px; }
+  /* Direct referrals count has inline font-size:20px — cap it on mobile */
+  .info-cell-value[style*="font-size:20px"] { font-size: 15px !important; }
+  /* Section header and referral list */
+  .section-header { font-size: 10px; letter-spacing: 1.5px; }
+  .referral-item  { font-size: 10px; }
+  .referral-level { font-size: 9px; }
 
   /* Token list */
   .token-item { padding: 12px 10px; gap: 8px; flex-wrap: nowrap; align-items: center; }
@@ -1252,6 +1258,9 @@ input[type="email"]::placeholder { color: var(--muted); }
   .gene-elig-label      { display: none !important; }
   .gene-col-invested    { display: none !important; }
   .gene-col-teamvol     { display: none !important; }
+
+  /* Fixed-width LEVEL badge keeps count pill in the same column across all rows */
+  .gene-level-badge { min-width: 62px; text-align: center; }
 }
 
 /* ── HISTORY TAB — MOBILE ── */
@@ -1261,23 +1270,23 @@ input[type="email"]::placeholder { color: var(--muted); }
   .hist-subtab {
     flex: 1;
     padding: 10px 6px;
-    font-size: 10px;
+    font-size: 12px;
     letter-spacing: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  /* 2. Pool / reward rows: push the date onto its own full-width line */
+  /* 2. Pool / reward rows: timestamp stays inline right-aligned (Unix ts is compact) */
   .ph-row {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    align-items: center;
     padding: 10px 12px;
     gap: 8px 10px;
   }
   .ph-meta {
-    flex: 0 0 100%;
-    text-align: left;
+    flex-shrink: 0;
+    text-align: right;
   }
 
   /* 3. "REFERRAL SPLIT" button in expanded detail: full-width when it wraps */

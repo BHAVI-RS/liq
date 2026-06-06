@@ -348,10 +348,10 @@ async function loadGenealogy() {
             onclick="geneListLevelToggle('${blockId}')"
             style="cursor:pointer;user-select:none;">
             <span class="gene-level-badge">LEVEL ${level}</span>
+            <span class="gene-count-pill">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
             <span class="gene-commission-rate">${rate} commission</span>
             <span class="gene-elig-label" style="${eligStyle}">${eligLabel}</span>
             <span style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0;">
-              <span class="gene-count-pill">${addrs.length} member${addrs.length !== 1 ? 's' : ''}</span>
               <span style="font-size:10px;color:var(--gold);font-family:var(--font-mono);white-space:nowrap;">${fmtUSDT(levelTotal,{noEth:true})} invested</span>
               <span id="${blockId}-arrow" style="font-size:11px;color:var(--muted);">▶</span>
             </span>

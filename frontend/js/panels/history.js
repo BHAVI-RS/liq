@@ -48,7 +48,7 @@ function _buildHistoryItemFromRecord(rec, symCache) {
   const ethAmount = rec.ethAmount;
   const lpTokens  = rec.lpTokens;
   const ts        = rec.ts.toNumber ? rec.ts.toNumber() : Number(rec.ts);
-  const date      = new Date(ts * 1000).toLocaleString();
+  const date      = String(ts);
   const ethRaw    = parseFloat(ethers.utils.formatEther(ethAmount));
   const ethFmt    = fmtNum(ethRaw * USDT_PER_ETH);
   const lpFmt     = fmtNum(parseFloat(ethers.utils.formatEther(lpTokens)));
@@ -96,7 +96,7 @@ async function _buildHistoryItem(ev) {
   try { tokenSymbol = (await contract.getToken(tokenAddr)).symbol; } catch(_) {}
 
   const block = await provider.getBlock(blockNum);
-  const date  = new Date(block.timestamp * 1000).toLocaleString();
+  const date  = String(block.timestamp);
 
   const ethRaw  = parseFloat(ethers.utils.formatEther(ethAmount));
   const ethFmt  = fmtNum(ethRaw * USDT_PER_ETH);
@@ -423,7 +423,7 @@ async function loadPoolHistory() {
 
     el.innerHTML = sorted.map(e => {
       const ts   = e.ts.toNumber ? e.ts.toNumber() : Number(e.ts);
-      const date = new Date(ts * 1000).toLocaleString();
+      const date = String(ts);
       const sym  = symCache[e.token.toLowerCase()] || e.token.slice(0, 10) + '…';
       const lp   = fmtNum(parseFloat(ethers.utils.formatEther(e.lpAmount)));
 
@@ -487,7 +487,7 @@ async function loadRewardHistory() {
     } catch(_) {}
 
     el.innerHTML = all.map(r => {
-      const date      = r.ts ? new Date(r.ts * 1000).toLocaleString() : '';
+      const date      = r.ts ? String(r.ts) : '';
       const usdtVal   = fmtNum(r.ethEq * USDT_PER_ETH);
       const tokensFmt = fmtNum(r.tokens);
       if (r.type === 'roi') {
