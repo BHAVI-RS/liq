@@ -6,12 +6,112 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1780830226523"></script>
-  <link rel="stylesheet" href="css/base.css?v=3"/>
-  <link rel="stylesheet" href="css/nav.css?v=3"/>
-  <link rel="stylesheet" href="css/components.css?v=3"/>
-  <link rel="stylesheet" href="css/dashboard.css?v=3"/>
-  <link rel="stylesheet" href="css/landing.css?v=3"/>
+  <script src="frontend/contract-config.js?v=1780830226523"></script>
+  <link rel="stylesheet" href="frontend/css/base.css?v=3"/>
+  <link rel="stylesheet" href="frontend/css/nav.css?v=3"/>
+  <link rel="stylesheet" href="frontend/css/components.css?v=3"/>
+  <link rel="stylesheet" href="frontend/css/dashboard.css?v=3"/>
+  <link rel="stylesheet" href="frontend/css/landing.css?v=3"/>
+  <style>
+    .launch-timer-panel {
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:12px;
+      flex-wrap:nowrap;
+      width:100%;
+      max-width:1120px;
+      margin:0 auto;
+      padding:18px 20px;
+      background:rgba(255,255,255,0.05);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:16px;
+      box-shadow:0 0 18px rgba(255,255,255,0.08);
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+      box-sizing:border-box;
+      animation: timerGlow 1s ease-in-out infinite alternate;
+    }
+    .launch-timer-inner {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      z-index:1;
+      width:100%;
+      flex-wrap:nowrap;
+    }
+    @keyframes timerGlow {
+      from {
+        box-shadow:0 0 16px rgba(255,255,255,0.06);
+        background:rgba(255,255,255,0.045);
+      }
+      to {
+        box-shadow:0 0 24px rgba(255,255,255,0.11);
+        background:rgba(255,255,255,0.065);
+      }
+    }
+    .launch-timer-unit {
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      min-width:0;
+      flex:1 1 0;
+    }
+    .launch-timer-value {
+      font-family:var(--font-display);
+      font-size:56px;
+      font-weight:500;
+      color:var(--gold);
+      line-height:1;
+      letter-spacing:1px;
+    }
+    .launch-timer-label {
+      font-family:var(--font-mono);
+      font-size:10px;
+      color:var(--muted);
+      letter-spacing:1.5px;
+      margin-top:8px;
+      text-transform:uppercase;
+    }
+    .launch-timer-sep {
+      font-family:var(--font-display);
+      font-size:48px;
+      color:rgba(201,168,76,0.6);
+      line-height:1;
+      margin-bottom:16px;
+      white-space:nowrap;
+    }
+    @media (max-width:860px) {
+      .launch-timer-panel {
+        gap:12px;
+        padding:18px 16px;
+        width:calc(100% - 32px);
+      }
+      .launch-timer-value {
+        font-size:48px;
+      }
+      .launch-timer-sep {
+        font-size:34px;
+      }
+    }
+    @media (max-width:560px) {
+      .launch-timer-panel {
+        padding:14px 12px;
+        width:calc(100% - 24px);
+      }
+      .launch-timer-value {
+        font-size:38px;
+      }
+      .launch-timer-label {
+        font-size:9px;
+        letter-spacing:1.1px;
+      }
+      .launch-timer-sep {
+        font-size:30px;
+      }
+    }
+  </style>
 </head>
 <body>
 
@@ -34,28 +134,6 @@
   <div class="landing-grid"></div>
   <div class="landing-glow"></div>
 
-  <!-- ── Top navigation bar ── -->
-  <div class="landing-topbar">
-    <div class="landing-topbar-left">
-      <button class="landing-hamburger" onclick="toggleLandingMenu()" aria-label="Open menu">
-        <span></span><span></span><span></span>
-      </button>
-      <span class="landing-topbar-brand">HORDEX</span>
-      <!-- Dropdown — anchored below the left group -->
-      <div id="landingMenuDropdown">
-        <button onclick="scrollToLandingSection('landing-what')">What is Hordex? <span class="lnd-arrow">↓</span></button>
-        <button onclick="scrollToLandingSection('landing-brochures')">Brochures &amp; Links <span class="lnd-arrow">↓</span></button>
-        <button onclick="scrollToLandingSection('landing-how')">How Does It Work <span class="lnd-arrow">↓</span></button>
-        <button onclick="scrollToLandingSection('landing-faq')">FAQ <span class="lnd-arrow">↓</span></button>
-        <button onclick="scrollToLandingSection('landing-about')">About <span class="lnd-arrow">↓</span></button>
-        <button onclick="scrollToLandingSection('landing-contract')">Contract Address <span class="lnd-arrow">↓</span></button>
-      </div>
-    </div>
-    <button class="landing-nav-btn" onclick="connectWallet()">
-      <span id="landingBtnLabel">Connect Wallet</span>
-    </button>
-  </div>
-
   <!-- ── Main scrollable area ── -->
   <div class="landing-main-scroll" id="landingMainScroll">
 
@@ -67,30 +145,38 @@
       <div class="landing-logo">HORDEX</div>
       <div class="landing-sub">— <span>Funding the Future</span> —</div>
 
-      <div class="landing-stat-grid">
-        <div class="landing-stat">
-          <div class="landing-stat-val" id="ls-total-users">—</div>
-          <div class="landing-stat-label">Total Users</div>
-        </div>
-        <div class="landing-stat">
-          <div class="landing-stat-val" id="ls-wealth-built">—</div>
-          <div class="landing-stat-label">Wealth Built</div>
-        </div>
-        <div class="landing-stat">
-          <div class="landing-stat-val" id="ls-total-funding">—</div>
-          <div class="landing-stat-label">Total Funding</div>
-        </div>
-        <div class="landing-stat">
-          <div class="landing-stat-val" id="ls-staking-rewards">—</div>
-          <div class="landing-stat-label">Staking Rewards Paid</div>
+      <div style="margin-bottom:48px;">
+        <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--muted);margin-bottom:18px;text-transform:uppercase;">Launching In</div>
+        <div class="launch-timer-panel">
+          <div class="launch-timer-inner">
+            <div class="launch-timer-unit">
+              <div id="launchDays" class="launch-timer-value">00</div>
+              <div class="launch-timer-label">Days</div>
+            </div>
+            <div class="launch-timer-sep">:</div>
+            <div class="launch-timer-unit">
+              <div id="launchHours" class="launch-timer-value">00</div>
+              <div class="launch-timer-label">Hours</div>
+            </div>
+            <div class="launch-timer-sep">:</div>
+            <div class="launch-timer-unit">
+              <div id="launchMinutes" class="launch-timer-value">00</div>
+              <div class="launch-timer-label">Minutes</div>
+            </div>
+            <div class="launch-timer-sep">:</div>
+            <div class="launch-timer-unit">
+              <div id="launchSeconds" class="launch-timer-value">00</div>
+              <div class="launch-timer-label">Seconds</div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div style="margin-bottom:48px;">
-        <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2.5px;color:var(--muted);margin-bottom:14px;">PARTNERS</div>
+        <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:2.5px;color:var(--muted);margin-bottom:14px;">PARTNERING WITH</div>
         <div style="display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;">
           <div class="landing-partner-badge">
-            <img src="logo/Uniswap Logo.png" width="36" height="36" alt="Uniswap" style="flex-shrink:0;border-radius:50%;object-fit:cover;">
+            <img src="frontend/logo/Uniswap Logo.png" width="36" height="36" alt="Uniswap" style="flex-shrink:0;border-radius:50%;object-fit:cover;">
             <div>
               <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:1px;color:#FF007A;line-height:1.2;">UNISWAP</div>
               <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.5px;color:rgba(255,0,122,0.5);">PROTOCOL PARTNER</div>
@@ -98,7 +184,7 @@
           </div>
 
           <div class="landing-partner-badge" style="background:rgba(240,185,11,0.05);border-color:rgba(240,185,11,0.2);">
-            <img src="logo/Binance Logo.png" width="36" height="36" alt="Binance" style="flex-shrink:0;border-radius:50%;object-fit:cover;">
+            <img src="frontend/logo/Binance Logo.png" width="36" height="36" alt="Binance" style="flex-shrink:0;border-radius:50%;object-fit:cover;">
             <div>
               <div style="font-family:var(--font-mono);font-size:12px;letter-spacing:1px;color:#F0B90B;line-height:1.2;">BNB CHAIN</div>
               <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:.5px;color:rgba(240,185,11,0.5);">ECOSYSTEM PARTNER</div>
@@ -150,7 +236,7 @@
         </div>
         <div class="ls-step">
           <div class="ls-step-num">6</div>
-          <div class="ls-step-body"><strong>REMOVING INVESTMENT</strong><p>Investments can be removed once LP positions are unlocked. Removing positions returns tokens and USDT to the user’s wallet according to the ratio of their contribution to the pool. Users are not eligible to receive rewards without an active investment.</p></div>
+          <div class="ls-step-body"><strong>REMOVING INVESTMENT</strong><p>Investments can be removed once LP positions are unlocked. Removing positions returns tokens and USDT to the user's wallet according to the ratio of their contribution to the pool. Users are not eligible to receive rewards without an active investment.</p></div>
         </div>
       </section>
 
@@ -169,7 +255,7 @@
             What do users get in return for their investment?
             <span class="lnd-faq-icon">+</span>
           </button>
-          <div class="lnd-faq-a"><p>Users can earn from three types of income sources: referral commissions, LP fees, and staking rewards.</p><p>~ Referral commissions are given up to 10 levels for each investment and are sent directly to the user’s wallet. If commissions are missed, the levels are skipped and moves upward to the next eligible user.</p><p>~ LP fees of 0.3% are collected on every trade where the user has provided liquidity. The fee is split according to the user’s contribution to the pool.</p><p>~ Staking rewards are calculated every second based on the market price and the chosen package, and can be claimed at any time.</p></div>
+          <div class="lnd-faq-a"><p>Users can earn from three types of income sources: referral commissions, LP fees, and staking rewards.</p><p>~ Referral commissions are given up to 10 levels for each investment and are sent directly to the user's wallet. If commissions are missed, the levels are skipped and moves upward to the next eligible user.</p><p>~ LP fees of 0.3% are collected on every trade where the user has provided liquidity. The fee is split according to the user's contribution to the pool.</p><p>~ Staking rewards are calculated every second based on the market price and the chosen package, and can be claimed at any time.</p></div>
         </div>
         <div class="lnd-faq-item">
           <button class="lnd-faq-q" onclick="toggleFaq(this)">
@@ -217,10 +303,6 @@
 
       <!-- contract address footer -->
       <section class="landing-section" id="landing-contract"></section>
-      <div class="landing-contract-footer">
-        <div class="lcf-label">Contract Address</div>
-        <div class="lcf-addr" id="lcf-contract-addr">—</div>
-      </div>
     </section>
 
     </div><!-- /#landingConnectScreen -->
@@ -359,8 +441,6 @@
 
   <!-- DASHBOARD PANEL -->
   <div id="panel-dashboard" class="panel active">
-
-
 
     <!-- MISSED COMMISSIONS NOTIFICATION -->
     <div id="dashMissedCommBanner" class="dash-missed-banner" style="display:none;">
@@ -1106,18 +1186,52 @@
 </div>
 
 <!-- JS — loaded in dependency order -->
-<script src="js/session.js?v=3"></script>
-<script src="js/utils.js?v=3"></script>
-<script src="js/panels/dashboard.js?v=3"></script>
-<script src="js/panels/investments.js?v=3"></script>
-<script src="js/panels/invest.js?v=3"></script>
-<script src="js/panels/pool.js?v=3"></script>
-<script src="js/panels/genealogy.js?v=3"></script>
-<script src="js/panels/rewards.js?v=4"></script>
-<script src="js/panels/myinfo.js?v=3"></script>
-<script src="js/panels/history.js?v=3"></script>
-<script src="js/panels/owner.js?v=3"></script>
-<script src="js/app.js?v=3"></script>
+<script src="frontend/js/session.js?v=3"></script>
+<script src="frontend/js/utils.js?v=3"></script>
+<script src="frontend/js/panels/dashboard.js?v=3"></script>
+<script src="frontend/js/panels/investments.js?v=3"></script>
+<script src="frontend/js/panels/invest.js?v=3"></script>
+<script src="frontend/js/panels/pool.js?v=3"></script>
+<script src="frontend/js/panels/genealogy.js?v=3"></script>
+<script src="frontend/js/panels/rewards.js?v=4"></script>
+<script src="frontend/js/panels/myinfo.js?v=3"></script>
+<script src="frontend/js/panels/history.js?v=3"></script>
+<script src="frontend/js/panels/owner.js?v=3"></script>
+<script src="frontend/js/app.js?v=3"></script>
+
+<script>
+  function startLaunchCountdown() {
+    const launchDate = new Date('2026-06-24T10:00:00').getTime();
+    
+    function updateTimer() {
+      const now = new Date().getTime();
+      const distance = launchDate - now;
+      
+      if (distance < 0) {
+        document.getElementById('launchDays').textContent = '00';
+        document.getElementById('launchHours').textContent = '00';
+        document.getElementById('launchMinutes').textContent = '00';
+        document.getElementById('launchSeconds').textContent = '00';
+        return;
+      }
+      
+      const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+      
+      document.getElementById('launchDays').textContent = String(days).padStart(2, '0');
+      document.getElementById('launchHours').textContent = String(hours).padStart(2, '0');
+      document.getElementById('launchMinutes').textContent = String(minutes).padStart(2, '0');
+      document.getElementById('launchSeconds').textContent = String(seconds).padStart(2, '0');
+    }
+    
+    updateTimer();
+    setInterval(updateTimer, 1000);
+  }
+  
+  document.addEventListener('DOMContentLoaded', startLaunchCountdown);
+</script>
 
 </body>
 </html>

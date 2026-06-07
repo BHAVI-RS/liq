@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hordex Logo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #04080f;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 60px;
+      font-family: 'Bebas Neue', sans-serif;
+    }
+
+    .variant-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: #3a4a5a;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    /* ── FULL LOGO (mark + wordmark + tagline) ── */
+    .logo-full {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    .logo-mark-wrap {
+      position: relative;
+      width: 90px;
+      height: 90px;
+      margin-bottom: 18px;
+    }
+
+    /* Outer rotating ring */
+    .logo-mark-wrap::before {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg, #c9a84c, #f5d48a, #c9a84c, transparent 60%, transparent 100%);
+      animation: spin 8s linear infinite;
+      opacity: 0.4;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .logo-hex-svg {
+      width: 90px;
+      height: 90px;
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 0 18px rgba(201,168,76,0.35));
+    }
+
+    .logo-wordmark {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 52px;
+      letter-spacing: 10px;
+      line-height: 1;
+      background: linear-gradient(135deg, #f5d48a 0%, #c9a84c 40%, #e8c060 70%, #f5d48a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 0 24px rgba(201,168,76,0.3));
+    }
+
+    .logo-divider {
+      width: 120px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #c9a84c, transparent);
+      margin: 10px 0;
+      opacity: 0.6;
+    }
+
+    .logo-tagline {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 4px;
+      color: #7a8a9a;
+      text-transform: uppercase;
+    }
+
+    /* ── HORIZONTAL VARIANT ── */
+    .logo-horizontal {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .logo-mark-sm {
+      width: 52px;
+      height: 52px;
+      filter: drop-shadow(0 0 12px rgba(201,168,76,0.3));
+    }
+
+    .logo-horizontal-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .logo-wordmark-md {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 36px;
+      letter-spacing: 8px;
+      line-height: 1;
+      background: linear-gradient(135deg, #f5d48a 0%, #c9a84c 50%, #f5d48a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo-tagline-sm {
+      font-family: 'DM Mono', monospace;
+      font-size: 8px;
+      letter-spacing: 3px;
+      color: #5a6a7a;
+    }
+
+    /* ── MARK ONLY ── */
+    .logo-mark-lg {
+      width: 120px;
+      height: 120px;
+      filter: drop-shadow(0 0 28px rgba(201,168,76,0.4));
+    }
+
+    /* ── WORDMARK ONLY ── */
+    .logo-wordmark-only {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 72px;
+      letter-spacing: 16px;
+      background: linear-gradient(135deg, #f5d48a 0%, #c9a84c 40%, #e8c060 70%, #f5d48a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 0 30px rgba(201,168,76,0.25));
+    }
+
+    /* Light background variant */
+    .variant-light {
+      background: #f5f0e8;
+      border-radius: 16px;
+      padding: 36px 48px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    .logo-wordmark-dark {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 52px;
+      letter-spacing: 10px;
+      background: linear-gradient(135deg, #8a5e00 0%, #c9a84c 50%, #8a5e00 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo-tagline-dark {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 4px;
+      color: #9a8060;
+    }
+
+    .logo-divider-dark {
+      width: 120px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #c9a84c, transparent);
+      margin: 10px 0;
+      opacity: 0.4;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Full vertical logo ── -->
+  <div class="section">
+    <div class="variant-label">Full Logo</div>
+    <div class="logo-full">
+      <div class="logo-mark-wrap">
+        <svg class="logo-hex-svg" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="hexGrad" x1="0" y1="0" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#f5d48a"/>
+              <stop offset="50%" stop-color="#c9a84c"/>
+              <stop offset="100%" stop-color="#f5d48a"/>
+            </linearGradient>
+            <linearGradient id="innerGrad" x1="20" y1="20" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#1a2535"/>
+              <stop offset="100%" stop-color="#0d1520"/>
+            </linearGradient>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="2.5" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <!-- Outer hexagon -->
+          <polygon
+            points="45,4 81,24 81,66 45,86 9,66 9,24"
+            fill="none"
+            stroke="url(#hexGrad)"
+            stroke-width="2"
+          />
+
+          <!-- Inner hexagon fill -->
+          <polygon
+            points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5"
+            fill="url(#innerGrad)"
+          />
+
+          <!-- Inner hexagon border (dimmer) -->
+          <polygon
+            points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5"
+            fill="none"
+            stroke="#c9a84c"
+            stroke-width="0.5"
+            opacity="0.3"
+          />
+
+          <!-- H letterform -->
+          <g filter="url(#glow)">
+            <!-- Left vertical bar -->
+            <rect x="28" y="28" width="7" height="34" rx="1" fill="url(#hexGrad)"/>
+            <!-- Right vertical bar -->
+            <rect x="55" y="28" width="7" height="34" rx="1" fill="url(#hexGrad)"/>
+            <!-- Crossbar -->
+            <rect x="28" y="42" width="34" height="6" rx="1" fill="url(#hexGrad)"/>
+          </g>
+
+          <!-- Corner accent dots -->
+          <circle cx="45" cy="5.5" r="2" fill="#c9a84c" opacity="0.8"/>
+          <circle cx="45" cy="84.5" r="2" fill="#c9a84c" opacity="0.8"/>
+          <circle cx="80" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+          <circle cx="10" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+          <circle cx="80" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+          <circle cx="10" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        </svg>
+      </div>
+
+      <div class="logo-wordmark">HORDEX</div>
+      <div class="logo-divider"></div>
+      <div class="logo-tagline">— Funding the Future —</div>
+    </div>
+  </div>
+
+  <!-- ── Horizontal logo ── -->
+  <div class="section">
+    <div class="variant-label">Horizontal</div>
+    <div class="logo-horizontal">
+      <svg class="logo-mark-sm" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="hexGrad2" x1="0" y1="0" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#f5d48a"/>
+            <stop offset="50%" stop-color="#c9a84c"/>
+            <stop offset="100%" stop-color="#f5d48a"/>
+          </linearGradient>
+          <linearGradient id="innerGrad2" x1="20" y1="20" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#1a2535"/>
+            <stop offset="100%" stop-color="#0d1520"/>
+          </linearGradient>
+          <filter id="glow2">
+            <feGaussianBlur stdDeviation="2.5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <polygon points="45,4 81,24 81,66 45,86 9,66 9,24" fill="none" stroke="url(#hexGrad2)" stroke-width="2"/>
+        <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="url(#innerGrad2)"/>
+        <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="none" stroke="#c9a84c" stroke-width="0.5" opacity="0.3"/>
+        <g filter="url(#glow2)">
+          <rect x="28" y="28" width="7" height="34" rx="1" fill="url(#hexGrad2)"/>
+          <rect x="55" y="28" width="7" height="34" rx="1" fill="url(#hexGrad2)"/>
+          <rect x="28" y="42" width="34" height="6" rx="1" fill="url(#hexGrad2)"/>
+        </g>
+        <circle cx="45" cy="5.5" r="2" fill="#c9a84c" opacity="0.8"/>
+        <circle cx="45" cy="84.5" r="2" fill="#c9a84c" opacity="0.8"/>
+        <circle cx="80" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        <circle cx="10" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        <circle cx="80" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        <circle cx="10" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+      </svg>
+      <div class="logo-horizontal-text">
+        <div class="logo-wordmark-md">HORDEX</div>
+        <div class="logo-tagline-sm">— Funding the Future —</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Mark only ── -->
+  <div class="section">
+    <div class="variant-label">Mark Only</div>
+    <svg class="logo-mark-lg" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="hexGrad3" x1="0" y1="0" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#f5d48a"/>
+          <stop offset="50%" stop-color="#c9a84c"/>
+          <stop offset="100%" stop-color="#f5d48a"/>
+        </linearGradient>
+        <linearGradient id="innerGrad3" x1="20" y1="20" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#1a2535"/>
+          <stop offset="100%" stop-color="#0d1520"/>
+        </linearGradient>
+        <filter id="glow3">
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <polygon points="45,4 81,24 81,66 45,86 9,66 9,24" fill="none" stroke="url(#hexGrad3)" stroke-width="2"/>
+      <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="url(#innerGrad3)"/>
+      <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="none" stroke="#c9a84c" stroke-width="0.5" opacity="0.3"/>
+      <g filter="url(#glow3)">
+        <rect x="28" y="28" width="7" height="34" rx="1" fill="url(#hexGrad3)"/>
+        <rect x="55" y="28" width="7" height="34" rx="1" fill="url(#hexGrad3)"/>
+        <rect x="28" y="42" width="34" height="6" rx="1" fill="url(#hexGrad3)"/>
+      </g>
+      <circle cx="45" cy="5.5" r="2" fill="#c9a84c" opacity="0.8"/>
+      <circle cx="45" cy="84.5" r="2" fill="#c9a84c" opacity="0.8"/>
+      <circle cx="80" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+      <circle cx="10" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+      <circle cx="80" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+      <circle cx="10" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+    </svg>
+  </div>
+
+  <!-- ── Wordmark only ── -->
+  <div class="section">
+    <div class="variant-label">Wordmark Only</div>
+    <div class="logo-wordmark-only">HORDEX</div>
+  </div>
+
+  <!-- ── Light background variant ── -->
+  <div class="section">
+    <div class="variant-label">Light Background</div>
+    <div class="variant-light">
+      <svg width="70" height="70" viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-bottom:14px;">
+        <defs>
+          <linearGradient id="hexGrad4" x1="0" y1="0" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#8a5e00"/>
+            <stop offset="50%" stop-color="#c9a84c"/>
+            <stop offset="100%" stop-color="#8a5e00"/>
+          </linearGradient>
+          <linearGradient id="innerGrad4" x1="20" y1="20" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#f0ead8"/>
+            <stop offset="100%" stop-color="#e8dfc8"/>
+          </linearGradient>
+          <filter id="glow4">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <polygon points="45,4 81,24 81,66 45,86 9,66 9,24" fill="none" stroke="url(#hexGrad4)" stroke-width="2"/>
+        <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="url(#innerGrad4)"/>
+        <g filter="url(#glow4)">
+          <rect x="28" y="28" width="7" height="34" rx="1" fill="url(#hexGrad4)"/>
+          <rect x="55" y="28" width="7" height="34" rx="1" fill="url(#hexGrad4)"/>
+          <rect x="28" y="42" width="34" height="6" rx="1" fill="url(#hexGrad4)"/>
+        </g>
+        <circle cx="45" cy="5.5" r="2" fill="#c9a84c" opacity="0.8"/>
+        <circle cx="45" cy="84.5" r="2" fill="#c9a84c" opacity="0.8"/>
+        <circle cx="80" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        <circle cx="10" cy="24.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        <circle cx="80" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+        <circle cx="10" cy="65.5" r="2" fill="#c9a84c" opacity="0.6"/>
+      </svg>
+      <div class="logo-wordmark-dark">HORDEX</div>
+      <div class="logo-divider-dark"></div>
+      <div class="logo-tagline-dark">— Funding the Future —</div>
+    </div>
+  </div>
+
+</body>
+</html>

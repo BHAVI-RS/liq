@@ -261,8 +261,9 @@ document.addEventListener('DOMContentLoaded', loadBrochures);
 async function loadBrochures() {
   const grid = document.getElementById('bro-grid');
   if (!grid) return;
+  const basePath = _brochureBasePath();
   try {
-    const res = await fetch('brochures/manifest.json');
+    const res = await fetch(basePath + 'manifest.json');
     if (!res.ok) throw new Error('no manifest');
     const files = await res.json();
     if (!Array.isArray(files) || files.length === 0) {
@@ -274,15 +275,27 @@ async function loadBrochures() {
       if (typeof filename !== 'string') continue;
       const ext = filename.split('.').pop().toLowerCase();
       if (ext === 'pdf') {
-        grid.appendChild(_makePdfCard(filename));
+        grid.appendChild(_makePdfCard(basePath, filename));
       } else if (ext === 'txt') {
         const card = _makeLinkCardSkeleton(filename);
         grid.appendChild(card);
-        _hydrateLinkCard(card, filename);
+        _hydrateLinkCard(card, filename, basePath);
       }
     }
   } catch (_) {
     grid.innerHTML = '<div class="bro-empty">Documents will be available soon.</div>';
+  }
+}
+
+function _brochureBasePath() {
+  const script = Array.from(document.scripts).find(s => s.src && /\/frontend\/js\/app(?:\.js|\.js\?|\/)/.test(s.src));
+  if (!script) return 'frontend/brochures/';
+  try {
+    const url = new URL(script.src, location.href);
+    const path = url.pathname.replace(/\/js\/app\.js$/, '/brochures/');
+    return path.endsWith('/') ? path : path + '/';
+  } catch (e) {
+    return 'frontend/brochures/';
   }
 }
 
@@ -293,10 +306,10 @@ function _broFileTitle(filename) {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function _makePdfCard(filename) {
+function _makePdfCard(basePath, filename) {
   const a = document.createElement('a');
   a.className = 'bro-card bro-pdf';
-  a.href = 'brochures/' + filename;
+  a.href = basePath + filename;
   a.setAttribute('download', '');
   a.innerHTML =
     '<div class="bro-pdf-icon">📄</div>' +
@@ -330,9 +343,9 @@ function _broGDriveId(url) {
   return m ? m[1] : null;
 }
 
-async function _hydrateLinkCard(card, filename) {
+async function _hydrateLinkCard(card, filename, basePath) {
   try {
-    const txtRes = await fetch('brochures/' + filename);
+    const txtRes = await fetch(basePath + filename);
     if (!txtRes.ok) throw new Error('txt missing');
     const url = (await txtRes.text()).split('\n')[0].trim();
     if (!url || !url.startsWith('http')) throw new Error('bad url');

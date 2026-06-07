@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Hordex — YouTube Banner (2560×1440)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    @page {
+      size: 2560px 1440px;
+      margin: 0;
+    }
+
+    @media print {
+      #exportUI { display: none !important; }
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    body {
+      width: 2560px;
+      height: 1440px;
+      background: #04080f;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── Background grid ── */
+    .grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(201,168,76,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(201,168,76,0.05) 1px, transparent 1px);
+      background-size: 80px 80px;
+    }
+
+    /* ── Glows ── */
+    .glow-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 1800px;
+      height: 800px;
+      background: radial-gradient(ellipse, rgba(201,168,76,0.09) 0%, transparent 60%);
+    }
+    .glow-left {
+      position: absolute;
+      left: -300px; top: 50%;
+      transform: translateY(-50%);
+      width: 900px; height: 900px;
+      background: radial-gradient(circle, rgba(201,168,76,0.05) 0%, transparent 70%);
+    }
+    .glow-right {
+      position: absolute;
+      right: -300px; top: 50%;
+      transform: translateY(-50%);
+      width: 900px; height: 900px;
+      background: radial-gradient(circle, rgba(201,168,76,0.04) 0%, transparent 70%);
+    }
+
+    /* ── Safe zone: 1546×423 centred (x=507, y=508) ── */
+    /* Desktop shows: full width × 423px strip centred vertically          */
+    /* TV shows:      full 2560×1440                                        */
+
+    /* Horizontal gold lines bounding the safe zone strip */
+    .strip-top {
+      position: absolute;
+      top: 508px; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(201,168,76,0.12) 10%,
+        rgba(201,168,76,0.35) 30%,
+        rgba(201,168,76,0.35) 70%,
+        rgba(201,168,76,0.12) 90%,
+        transparent 100%);
+    }
+    .strip-bottom {
+      position: absolute;
+      top: 931px; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(201,168,76,0.12) 10%,
+        rgba(201,168,76,0.35) 30%,
+        rgba(201,168,76,0.35) 70%,
+        rgba(201,168,76,0.12) 90%,
+        transparent 100%);
+    }
+
+    /* ── SAFE ZONE CONTENT ── */
+    .safe {
+      position: absolute;
+      left: 507px;
+      top: 508px;
+      width: 1546px;
+      height: 423px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 48px;
+      gap: 0;
+    }
+
+    /* LEFT — Logo mark + wordmark */
+    .left-block {
+      display: flex;
+      align-items: center;
+      gap: 36px;
+      flex-shrink: 0;
+    }
+
+    .mark svg {
+      width: 200px;
+      height: 200px;
+    }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .wordmark {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 110px;
+      letter-spacing: 18px;
+      line-height: 1;
+      background: linear-gradient(135deg, #f5d48a 0%, #c9a84c 50%, #f5d48a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .tagline {
+      font-family: 'DM Mono', monospace;
+      font-size: 14px;
+      letter-spacing: 5px;
+      color: #5a6a7a;
+      text-transform: uppercase;
+      margin-left: 4px;
+    }
+
+    /* CENTRE divider */
+    .vdivider {
+      width: 1px;
+      height: 220px;
+      flex-shrink: 0;
+      margin: 0 48px;
+      background: linear-gradient(180deg,
+        transparent,
+        rgba(201,168,76,0.4) 25%,
+        rgba(201,168,76,0.4) 75%,
+        transparent);
+    }
+
+    /* RIGHT — features + social */
+    .right-block {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 22px;
+      flex-shrink: 0;
+    }
+
+    .features {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .feature-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .feature-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #c9a84c;
+      flex-shrink: 0;
+    }
+
+    .feature-text {
+      font-family: 'DM Mono', monospace;
+      font-size: 15px;
+      letter-spacing: 2px;
+      color: #9aabb8;
+      text-transform: uppercase;
+    }
+
+    .feature-text span {
+      color: #c9a84c;
+    }
+
+    .features-divider {
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(201,168,76,0.3), transparent);
+    }
+
+    .social-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .social-handle {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      letter-spacing: 1.5px;
+      color: #4a5a6a;
+    }
+
+    .social-sep {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: rgba(201,168,76,0.3);
+    }
+
+    /* ── TV-only decorative elements (outside safe zone) ── */
+
+    /* Large faded HORDEX text behind everything */
+    .bg-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 520px;
+      letter-spacing: 40px;
+      color: rgba(201,168,76,0.025);
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* Decorative hex marks top-left and bottom-right */
+    .deco-hex {
+      position: absolute;
+      opacity: 0.08;
+    }
+    .deco-hex-tl { top: 60px; left: 60px; }
+    .deco-hex-br { bottom: 60px; right: 60px; }
+
+    /* Corner accent brackets */
+    .bracket {
+      position: absolute;
+      width: 50px;
+      height: 50px;
+    }
+    .b-tl { top: 508px;  left: 507px;  border-top: 1px solid rgba(201,168,76,0.4); border-left: 1px solid rgba(201,168,76,0.4); }
+    .b-tr { top: 508px;  right: 507px; border-top: 1px solid rgba(201,168,76,0.4); border-right: 1px solid rgba(201,168,76,0.4); }
+    .b-bl { bottom: 509px; left: 507px;  border-bottom: 1px solid rgba(201,168,76,0.4); border-left: 1px solid rgba(201,168,76,0.4); }
+    .b-br { bottom: 509px; right: 507px; border-bottom: 1px solid rgba(201,168,76,0.4); border-right: 1px solid rgba(201,168,76,0.4); }
+
+    .top-eyebrow {
+      position: absolute;
+      top: 440px;
+      left: 0; right: 0;
+      text-align: center;
+      font-family: 'DM Mono', monospace;
+      font-size: 14px;
+      letter-spacing: 7px;
+      color: rgba(201,168,76,0.25);
+      text-transform: uppercase;
+    }
+
+    /* Bottom row below safe zone */
+    .bottom-strip {
+      position: absolute;
+      top: 980px;
+      left: 507px;
+      width: 1546px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 56px;
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .stat-val {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 28px;
+      letter-spacing: 4px;
+      color: #c9a84c;
+    }
+    .stat-lbl {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      color: #3a4a5a;
+      text-transform: uppercase;
+    }
+    .stat-sep {
+      width: 1px;
+      height: 36px;
+      background: rgba(201,168,76,0.2);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Background layers -->
+  <div class="bg-text">HORDEX</div>
+  <div class="grid"></div>
+  <div class="glow-center"></div>
+  <div class="glow-left"></div>
+  <div class="glow-right"></div>
+
+  <!-- Decorative hex marks (TV visible only) -->
+  <svg class="deco-hex deco-hex-tl" width="220" height="220" viewBox="0 0 90 90" fill="none">
+    <polygon points="45,4 81,24 81,66 45,86 9,66 9,24" fill="none" stroke="#c9a84c" stroke-width="2"/>
+  </svg>
+  <svg class="deco-hex deco-hex-br" width="220" height="220" viewBox="0 0 90 90" fill="none">
+    <polygon points="45,4 81,24 81,66 45,86 9,66 9,24" fill="none" stroke="#c9a84c" stroke-width="2"/>
+  </svg>
+
+  <!-- Safe zone boundary lines -->
+  <div class="strip-top"></div>
+  <div class="strip-bottom"></div>
+
+  <!-- Corner brackets on safe zone -->
+  <div class="bracket b-tl"></div>
+  <div class="bracket b-tr"></div>
+  <div class="bracket b-bl"></div>
+  <div class="bracket b-br"></div>
+
+  <!-- Eyebrow -->
+  <div class="top-eyebrow">Decentralized Liquidity · Built on Uniswap V2</div>
+
+  <!-- ── SAFE ZONE ── -->
+  <div class="safe">
+
+    <!-- LEFT: mark + brand -->
+    <div class="left-block">
+      <div class="mark">
+        <svg viewBox="0 0 90 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="hg" x1="0" y1="0" x2="90" y2="90" gradientUnits="userSpaceOnUse">
+              <stop offset="0%"  stop-color="#f5d48a"/>
+              <stop offset="50%" stop-color="#c9a84c"/>
+              <stop offset="100%" stop-color="#f5d48a"/>
+            </linearGradient>
+            <linearGradient id="ig" x1="20" y1="20" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+              <stop offset="0%"  stop-color="#1a2535"/>
+              <stop offset="100%" stop-color="#0d1520"/>
+            </linearGradient>
+          </defs>
+          <polygon points="45,4 81,24 81,66 45,86 9,66 9,24" fill="none" stroke="url(#hg)" stroke-width="2"/>
+          <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="url(#ig)"/>
+          <polygon points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5" fill="none" stroke="#c9a84c" stroke-width="0.5" opacity="0.3"/>
+          <rect x="28" y="28" width="7" height="34" rx="1" fill="url(#hg)"/>
+          <rect x="55" y="28" width="7" height="34" rx="1" fill="url(#hg)"/>
+          <rect x="28" y="42" width="34" height="6" rx="1" fill="url(#hg)"/>
+          <circle cx="45" cy="5.5"  r="2" fill="#c9a84c" opacity="0.9"/>
+          <circle cx="45" cy="84.5" r="2" fill="#c9a84c" opacity="0.9"/>
+          <circle cx="80" cy="24.5" r="2" fill="#c9a84c" opacity="0.7"/>
+          <circle cx="10" cy="24.5" r="2" fill="#c9a84c" opacity="0.7"/>
+          <circle cx="80" cy="65.5" r="2" fill="#c9a84c" opacity="0.7"/>
+          <circle cx="10" cy="65.5" r="2" fill="#c9a84c" opacity="0.7"/>
+        </svg>
+      </div>
+
+      <div class="brand-text">
+        <div class="wordmark">HORDEX</div>
+        <div class="tagline">— Funding the Future —</div>
+      </div>
+    </div>
+
+    <!-- Centre divider -->
+    <div class="vdivider"></div>
+
+    <!-- RIGHT: features -->
+    <div class="right-block">
+      <div class="features">
+        <div class="feature-row">
+          <div class="feature-dot"></div>
+          <div class="feature-text">LP Staking &amp; <span>Referral Rewards</span></div>
+        </div>
+        <div class="feature-row">
+          <div class="feature-dot"></div>
+          <div class="feature-text">Up to <span>360-Day</span> Lock Durations</div>
+        </div>
+        <div class="feature-row">
+          <div class="feature-dot"></div>
+          <div class="feature-text"><span>10-Level</span> Commission System</div>
+        </div>
+        <div class="feature-row">
+          <div class="feature-dot"></div>
+          <div class="feature-text">100% <span>On-Chain</span> · Binance Smart Chain Network</div>
+        </div>
+      </div>
+      <div class="features-divider"></div>
+      <div class="social-row">
+        <div class="social-handle">hordex.club</div>
+        <div class="social-sep"></div>
+        <div class="social-handle">t.me/hordex_club</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom stats (TV + desktop tail) -->
+  <div class="bottom-strip">
+    <div class="stat">
+      <div class="stat-val">Uniswap V2</div>
+      <div class="stat-lbl">Protocol</div>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat">
+      <div class="stat-val">Binance Smart Chain</div>
+      <div class="stat-lbl">Network</div>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat">
+      <div class="stat-val">100%</div>
+      <div class="stat-lbl">Decentralized</div>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat">
+      <div class="stat-val">Non-Custodial</div>
+      <div class="stat-lbl">Your Keys · Your Funds</div>
+    </div>
+  </div>
+
+  <!-- ── Export UI (fixed overlay, not part of banner) ── -->
+  <div id="exportUI" style="
+    position: fixed;
+    top: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 12px; align-items: center;
+    background: rgba(4,8,15,0.92);
+    border: 1px solid rgba(201,168,76,0.35);
+    border-radius: 8px;
+    padding: 12px 20px;
+    z-index: 99999;
+    font-family: 'DM Mono', monospace;
+    backdrop-filter: blur(8px);
+  ">
+    <span style="font-size:11px;letter-spacing:2px;color:#5a6a7a;">EXPORT</span>
+    <div style="width:1px;height:20px;background:rgba(201,168,76,0.2);"></div>
+    <button onclick="exportSafeZone()" style="
+      background: rgba(201,168,76,0.1);
+      border: 1px solid rgba(201,168,76,0.4);
+      color: #c9a84c;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      padding: 8px 18px;
+      border-radius: 4px;
+      cursor: pointer;
+    ">SAFE ZONE (1546×423)</button>
+    <button onclick="exportFullBanner()" style="
+      background: #c9a84c;
+      border: none;
+      color: #04080f;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      padding: 8px 18px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 700;
+    ">FULL BANNER (2560×1440)</button>
+    <div id="exportStatus" style="font-size:10px;letter-spacing:1px;color:#5a6a7a;min-width:80px;"></div>
+  </div>
+
+  <script>
+    function setStatus(msg, color) {
+      const el = document.getElementById('exportStatus');
+      el.textContent = msg;
+      el.style.color = color || '#5a6a7a';
+    }
+
+    function download(canvas, filename) {
+      canvas.toBlob(blob => {
+        const url  = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href     = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setStatus('Saved!', '#4ade80');
+        setTimeout(() => setStatus(''), 2500);
+      }, 'image/png');
+    }
+
+    async function capture() {
+      return html2canvas(document.body, {
+        width:       2560,
+        height:      1440,
+        windowWidth: 2560,
+        windowHeight:1440,
+        scrollX:     0,
+        scrollY:     0,
+        x:           0,
+        y:           0,
+        scale:       1,
+        useCORS:     true,
+        allowTaint:  true,
+        backgroundColor: '#04080f',
+        logging:     false,
+        imageTimeout: 0,
+        removeContainer: true
+      });
+    }
+
+    async function exportFullBanner() {
+      try {
+        setStatus('Rendering…');
+        document.getElementById('exportUI').style.visibility = 'hidden';
+        const canvas = await capture();
+        document.getElementById('exportUI').style.visibility = 'visible';
+        download(canvas, 'hordex-banner-full.png');
+      } catch(e) {
+        document.getElementById('exportUI').style.visibility = 'visible';
+        setStatus('Error: ' + e.message, '#f87171');
+        console.error(e);
+      }
+    }
+
+    async function exportSafeZone() {
+      try {
+        setStatus('Rendering…');
+        document.getElementById('exportUI').style.visibility = 'hidden';
+        const full = await capture();
+        document.getElementById('exportUI').style.visibility = 'visible';
+
+        // Crop safe zone: x=507, y=508, w=1546, h=423
+        const crop = document.createElement('canvas');
+        crop.width  = 1546;
+        crop.height = 423;
+        crop.getContext('2d').drawImage(full, 507, 508, 1546, 423, 0, 0, 1546, 423);
+        download(crop, 'hordex-banner-safe.png');
+      } catch(e) {
+        document.getElementById('exportUI').style.visibility = 'visible';
+        setStatus('Error: ' + e.message, '#f87171');
+        console.error(e);
+      }
+    }
+  </script>
+
+</body>
+</html>

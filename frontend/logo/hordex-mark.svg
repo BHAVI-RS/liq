@@ -1,0 +1,66 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Platform gold grid pattern (60px spacing, 0.04 opacity) -->
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(201,168,76,0.07)" stroke-width="1"/>
+    </pattern>
+
+    <!-- Mark gradients -->
+    <linearGradient id="hexGrad" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#f5d48a"/>
+      <stop offset="50%"  stop-color="#c9a84c"/>
+      <stop offset="100%" stop-color="#f5d48a"/>
+    </linearGradient>
+    <linearGradient id="innerGrad" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#1a2535"/>
+      <stop offset="100%" stop-color="#0d1520"/>
+    </linearGradient>
+
+  </defs>
+
+  <!-- ── Background ── -->
+  <rect width="512" height="512" fill="#04080f"/>
+  <rect width="512" height="512" fill="url(#grid)"/>
+
+
+  <!-- ── Mark (scaled to centre of 512×512, original viewBox 0 0 90 90) ── -->
+  <!-- scale factor: 512/90 ≈ 5.69 — mark occupies ~70% of canvas = 358px, offset 77px each side -->
+  <g transform="translate(77, 77) scale(3.98)">
+
+    <!-- Outer hexagon -->
+    <polygon
+      points="45,4 81,24 81,66 45,86 9,66 9,24"
+      fill="none"
+      stroke="url(#hexGrad)"
+      stroke-width="2"
+    />
+
+    <!-- Inner hexagon fill -->
+    <polygon
+      points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5"
+      fill="url(#innerGrad)"
+    />
+
+    <!-- Inner hexagon subtle border -->
+    <polygon
+      points="45,10 76,27.5 76,62.5 45,80 14,62.5 14,27.5"
+      fill="none"
+      stroke="#c9a84c"
+      stroke-width="0.5"
+      opacity="0.3"
+    />
+
+    <!-- H letterform -->
+    <rect x="28" y="28" width="7" height="34" rx="1" fill="url(#hexGrad)"/>
+    <rect x="55" y="28" width="7" height="34" rx="1" fill="url(#hexGrad)"/>
+    <rect x="28" y="42" width="34" height="6" rx="1" fill="url(#hexGrad)"/>
+
+    <!-- Corner accent dots -->
+    <circle cx="45" cy="5.5"  r="2" fill="#c9a84c" opacity="0.9"/>
+    <circle cx="45" cy="84.5" r="2" fill="#c9a84c" opacity="0.9"/>
+    <circle cx="80" cy="24.5" r="2" fill="#c9a84c" opacity="0.7"/>
+    <circle cx="10" cy="24.5" r="2" fill="#c9a84c" opacity="0.7"/>
+    <circle cx="80" cy="65.5" r="2" fill="#c9a84c" opacity="0.7"/>
+    <circle cx="10" cy="65.5" r="2" fill="#c9a84c" opacity="0.7"/>
+  </g>
+</svg>

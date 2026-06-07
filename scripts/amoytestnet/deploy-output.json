@@ -1,14 +1,14 @@
 {
   "network": "polygonAmoy",
-  "deployedAt": "2026-06-06T17:10:11.960Z",
-  "deployBlock": 39689374,
+  "deployedAt": "2026-06-07T11:03:46.525Z",
+  "deployBlock": 39732348,
   "usdtAddress": "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c",
-  "tokenAddress": "0xD432001dF916AAD57B055d6371a06B253B022E19",
-  "liquidityAddress": "0x957C42eFbD1097C48F02310c8E75442592356Cbe",
-  "facetAddress": "0xFe138ec4f7601074c4c3BEcBB4Ae7FF1EfE77630",
-  "roiFacetAddress": "0x6eFF650035C1B80862D986a7ee0771fD063AFe12",
-  "libAddress": "0xFfC4cf7c0A3Bf32f033bE77406c4a3830cfc4811",
-  "libViewAddress": "0x46DfcA9E5ea29c89E01E7765e45aD4C70D411fB0",
+  "tokenAddress": "0x2820Ef6E15B1038A2e76a330E5eaC4ddAA8FeE57",
+  "liquidityAddress": "0x85fdC2c87279A26f0AB571cEE9183B0Cf0c48c05",
+  "facetAddress": "0xA8F3a7D2352DF91022B8b0a687f25B003F39a238",
+  "roiFacetAddress": "0x86b47573d902D6437a64bdf8A0b32021322e1084",
+  "libAddress": "0xcdae37022d644f6Ed0920D915F0e3cDBc8298b5c",
+  "libViewAddress": "0x365D7569aF377d0E21321647AF390d3261832579",
   "accounts": [
     {
       "index": 0,
