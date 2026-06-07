@@ -147,7 +147,61 @@
   flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center;
 }
 #landingConnectScreen { width: 100%; }
-.landing-hero-wrap { max-width: 720px; width: 100%; margin: 0 auto; padding: 88px 24px 0; text-align: center; }
+.landing-hero-wrap {
+  position: relative;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 88px 24px 0;
+  text-align: center;
+  overflow: hidden;
+}
+.landing-hero-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 420px;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.landing-hero-dot {
+  position: absolute;
+  bottom: 18px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(245,204,92,0.55);
+  box-shadow: 0 0 6px rgba(245,204,92,0.12);
+  opacity: 0;
+  animation: landingHeroDots 5s ease-in-out infinite;
+}
+.landing-hero-wrap > :not(.landing-hero-dots) {
+  position: relative;
+  z-index: 1;
+}
+@keyframes landingHeroDots {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.55;
+  }
+  35% {
+    transform: translate(calc(var(--dx, 0) * 0.4), -140px);
+    opacity: 0.45;
+  }
+  65% {
+    transform: translate(calc(var(--dx, 0) * -0.25), -260px);
+    opacity: 0.35;
+  }
+  100% {
+    transform: translate(calc(var(--dx, 0)), -360px);
+    opacity: 0;
+  }
+}
 #landingNewUserScreen { margin: auto; padding: 40px 20px 60px; }
 
 /* Hero stats */
