@@ -18,14 +18,9 @@
 
   </defs>
 
-  <!-- ── Background ── -->
-  <rect width="512" height="512" fill="#04080f"/>
-  <rect width="512" height="512" fill="url(#grid)"/>
-
-
-  <!-- ── Mark (scaled to centre of 512×512, original viewBox 0 0 90 90) ── -->
-  <!-- scale factor: 512/90 ≈ 5.69 — mark occupies ~70% of canvas = 358px, offset 77px each side -->
-  <g transform="translate(77, 77) scale(3.98)">
+  <!-- ── Mark (scaled to fill favicon, original viewBox 0 0 90 90) ── -->
+  <!-- scale factor: 5.7 — mark fills ~91% of canvas, centered at (256,256) ── -->
+  <g transform="translate(-0.5, -0.5) scale(5.7)">
 
     <!-- Outer hexagon -->
     <polygon
