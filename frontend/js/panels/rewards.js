@@ -35,7 +35,7 @@ function _rwROIStreamsHtml() {
              color:${dis ? 'rgba(255,255,255,0.18)' : 'var(--cream)'};
              border-radius:3px;cursor:${dis ? 'default' : 'pointer'};">${lbl}</button>`;
 
-  const ROI_LEVEL_RATES = [10, 5, 2, 1, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25];
+  const ROI_LEVEL_RATES = [50, 10, 5, 2, 0.6, 0.5, 0.45, 0.4, 0.4, 0.35];
 
   let rows = '';
   for (let j = 0; j < slice.length; j++) {
@@ -45,18 +45,41 @@ function _rwROIStreamsHtml() {
     // histPaid = ETH paid to A across all previous restake periods (from contract field).
     // Bar reference = current period max + historical paid, giving a continuous bar across restakes.
     const histPaid   = d.histPaidETH || 0;
-    const _curRef    = (d.periodMax > 0 ? d.periodMax : d.capETH);
+    const _curRef    = (d.periodMax > 0 ? d.periodMax : (d.ethInv || 0));
     const _barRef    = _curRef + histPaid;
-    const paidPct    = _barRef > 0 ? Math.min(100, (histPaid + d.roiPaidETH) / _barRef * 100) : 0;
-    const accruedPct = _barRef > 0 ? Math.min(100 - paidPct, d.accruedETH / _barRef * 100) : 0;
-    const totalPct   = paidPct + accruedPct;
-    const isAtCap    = d.capETH > 0 && (d.roiPaidETH + d.accruedETH) / d.capETH >= 0.9999;
+    const paidPct      = _barRef > 0 ? Math.min(100, (histPaid + d.roiPaidETH) / _barRef * 100) : 0;
+    // Gap-red: elapsed potential in current period minus what was actually paid/accruing.
+    // elapsedPotAtFetch is current-period-only (from lockedAt), so histPaid is NOT subtracted here —
+    // histPaid is already captured in the paidPct segment of the bar.
+    const _gapETH      = Math.max(0, (d.elapsedPotAtFetch || 0) - d.roiPaidETH - d.accruedETH);
+    const pausedPct    = _barRef > 0 ? Math.min(100 - paidPct, _gapETH / _barRef * 100) : 0;
+    // Yellow: claimable slice of live accrual (capped by remaining unified cap).
+    const claimableETH = Math.min(d.accruedETH, _rwROIAvailableCapETH);
+    const overCapETH   = Math.max(0, d.accruedETH - claimableETH);
+    const accruedPct   = _barRef > 0 ? Math.min(100 - paidPct - pausedPct, claimableETH / _barRef * 100) : 0;
+    // Over-cap red: live accrual beyond available cap — visible but uncollectable until cap refresh.
+    const overCapPct   = _barRef > 0 ? Math.min(100 - paidPct - pausedPct - accruedPct, overCapETH / _barRef * 100) : 0;
+    // When cap is exhausted (lock expired / ROI consumed cap), yellow earned BEFORE the gap,
+    // so draw yellow immediately after green and gap-red after yellow.
+    const _exhaustedSwap = _rwROICapExhausted && pausedPct > 0;
+    const _gapBarLeft    = _exhaustedSwap ? paidPct + accruedPct : paidPct;
+    const _yBarLeft      = _exhaustedSwap ? paidPct              : paidPct + pausedPct;
+    const totalPct     = paidPct + pausedPct + accruedPct + overCapPct;
+    const isAtCap    = false; // per-stream cap removed; overall cap handled via pause mechanism
     const levelRate  = ROI_LEVEL_RATES[d.level] !== undefined ? ROI_LEVEL_RATES[d.level] : '—';
-    const totalClaimed = histPaid + d.roiPaidETH;
-    const hasClaimed   = d.roiPaidNonZero || histPaid > 0;
-    const paidTokens   = _rwROITokenPrice > 0 && hasClaimed ? totalClaimed / _rwROITokenPrice : 0;
+    const totalClaimed   = histPaid + d.roiPaidETH;
+    const hasClaimed     = d.roiPaidNonZero || histPaid > 0;
+    const _streamKey     = `${d.investor.toLowerCase()}:${d.lockIndex}:${d.level}`;
+    const _sessionTokens = _rwROIStreamClaimedTokens.get(_streamKey) || 0;
+    const _totalClaimedTokens = _sessionTokens > 0
+      ? _sessionTokens
+      : (_rwROITokenPrice > 0 && totalClaimed > 0 ? totalClaimed / _rwROITokenPrice : 0);
     const claimedLine  = hasClaimed
-      ? `<div style="font-size:9px;color:#4ade80;margin-top:3px;">✓ ${paidTokens > 0 ? fmtNum(paidTokens) + ' ' + _rwROITokenSym : '$' + fmtNum(totalClaimed * USDT_PER_ETH) + ' USDT'} claimed</div>`
+      ? `<div style="font-size:9px;color:#4ade80;margin-top:3px;">✓ ${
+          _totalClaimedTokens > 0
+            ? fmtNum(_totalClaimedTokens) + ' ' + _rwROITokenSym + ' claimed'
+            : '$' + fmtNum(totalClaimed * USDT_PER_ETH) + ' USDT claimed'
+        }</div>`
       : `<div style="font-size:9px;color:var(--muted);margin-top:3px;">0 ${_rwROITokenSym} claimed</div>`;
 
     rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
@@ -69,19 +92,24 @@ function _rwROIStreamsHtml() {
       </td>
       <td style="padding:8px 8px;min-width:160px;">
         <div style="display:flex;align-items:baseline;gap:6px;">
-          <span id="rwROIStreamAccrued-${i}" style="color:var(--gold);">$${((histPaid + d.roiPaidETH + d.accruedETH) * USDT_PER_ETH).toFixed(5)}</span>
+          <span id="rwROIStreamAccrued-${i}" style="color:${_rwROICapPaused ? '#ef4444' : 'var(--gold)'};">$${((histPaid + d.roiPaidETH + d.accruedETH) * USDT_PER_ETH).toFixed(5)}</span>
           <span id="rwROIStreamPct-${i}" class="rw-roi-stream-pct" style="font-size:9px;color:var(--muted);">${totalPct >= 100 ? '100' : totalPct.toFixed(2)}%</span>${isAtCap ? '<span style="font-size:9px;color:var(--gold);"> cap reached</span>' : ''}
         </div>
         <div style="margin-top:5px;" class="dis-bar-track">
           <div class="dis-bar-claimed" style="width:${paidPct.toFixed(2)}%"></div>
-          <div id="rwROIStreamBar-${i}" class="dis-bar-active" style="left:${paidPct.toFixed(2)}%; width:${accruedPct.toFixed(2)}%"></div>
+          <div id="rwROIStreamPausedBar-${i}" class="dis-bar-paused" style="left:${_gapBarLeft.toFixed(2)}%; width:${pausedPct.toFixed(2)}%"></div>
+          <div id="rwROIStreamBar-${i}" class="dis-bar-active" style="left:${_yBarLeft.toFixed(2)}%; width:${accruedPct.toFixed(2)}%"></div>
+          <div id="rwROIStreamOverCapBar-${i}" class="dis-bar-overcap" style="left:${(paidPct + pausedPct + accruedPct).toFixed(2)}%; width:${overCapPct.toFixed(2)}%"></div>
         </div>
+        <div id="rwROIStreamOverCap-${i}" style="font-size:9px;color:#ef4444;margin-top:2px;${overCapETH > 0.0000001 ? '' : 'display:none;'}">↑ $${(overCapETH * USDT_PER_ETH).toFixed(5)} USDT over cap</div>
+        <div id="rwROIStreamMissed-${i}" style="font-size:9px;color:#ef4444;margin-top:2px;${_gapETH > 0.0000001 ? '' : 'display:none;'}">↑ $${(_gapETH * USDT_PER_ETH).toFixed(5)} USDT missing</div>
         ${claimedLine}
       </td>
       <td style="padding:8px 8px;text-align:right;">
         ${(() => {
-          const _t       = _rwROITokenPrice > 0 && d.accruedETH > 0 ? d.accruedETH / _rwROITokenPrice : 0;
-          const _canClaim = d.accruedETH > 0;
+          const _claimable = Math.min(d.accruedETH, _rwROIAvailableCapETH);
+          const _t       = _rwROITokenPrice > 0 && _claimable > 0 ? _claimable / _rwROITokenPrice : 0;
+          const _canClaim = _claimable > 0;
           const _label   = _t > 0 ? 'CLAIM · ' + _t.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM';
           return `<button onclick="claimROIFromStreamBtn('${d.investor}',${d.lockIndex},${d.level},this)"
             id="rwROIStreamClaimBtn-${i}"
@@ -134,9 +162,9 @@ function _rwROIStreamsHtml() {
 
 function _rwROIStreamsSnapBars(container) {
   if (!container) return;
-  container.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = 'none');
+  container.querySelectorAll('.dis-bar-active, .dis-bar-claimed, .dis-bar-paused').forEach(b => b.style.transition = 'none');
   requestAnimationFrame(() => requestAnimationFrame(() =>
-    container.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = '')
+    container.querySelectorAll('.dis-bar-active, .dis-bar-claimed, .dis-bar-paused').forEach(b => b.style.transition = '')
   ));
 }
 
@@ -163,7 +191,18 @@ let _rwROIFetchWall   = 0;      // wall-clock seconds at fetch
 let _rwROITokenSym    = 'HORDEX';
 let _rwROITokenPrice  = 0;      // ETH per token (spot)
 let _rwROIActiveCount = 0;      // number of active streams
-let _rwROIStreamDetails = [];   // [{investor,lockIndex,level,commRate,ethInv,capETH,accruedETH,streamRate}]
+let _rwROIStreamDetails = [];   // per-stream detail objects
+let _rwROICapPaused    = false;  // true when user's overall cap is currently exhausted
+let _rwROICapPausedAt  = 0;      // timestamp when cap was exhausted (0 = not paused)
+let _rwROICapExhausted = false;  // true when liveETH=0 from contract but _capPausedAt=0 (ROI consumed raw cap)
+let _rwROIAvailableCapETH = Infinity; // remaining unified cap for wallet (Infinity = uncapped / unknown)
+let _rwROIActiveCapETH    = Infinity; // commStats[3]: active-only raw cap — mirrors _getRawAvailableCap
+let _rwROIPendingETH       = 0; // pre-settled pending at last fetch (claimable even when rawCap = 0)
+let _rwROIMissedBaseETH    = 0; // total missed at fetch time (sum of per-stream gap when paused)
+let _rwROIMissedRatePerSec = 0; // rate at which missed amounts grow when paused (ETH/s)
+// Session-only cache: exact tokens received per stream from the ROIClaimed event.
+// Keyed "investor_lc:lockIndex:level". Cleared only on page reload.
+const _rwROIStreamClaimedTokens = new Map();
 let _rwROILoading = false;      // concurrency guard
 
 function _rwStopROITicker() {
@@ -175,21 +214,51 @@ function _rwStartROITicker() {
   _rwROIInterval = setInterval(() => {
     const liveEl   = document.getElementById('rwROILive');
     if (!liveEl) { _rwStopROITicker(); return; }
-    const elapsed   = Math.max(0, Math.floor(Date.now() / 1000) - _rwROIFetchWall);
-    const totalETH  = _rwROIBaseETH + elapsed * _rwROIRatePerSec;
-    const totalUSDT = totalETH * USDT_PER_ETH;
-    liveEl.textContent = '$' + totalUSDT.toFixed(5);
+    const elapsed    = Math.max(0, Math.floor(Date.now() / 1000) - _rwROIFetchWall);
+    const totalETH   = _rwROIBaseETH + elapsed * _rwROIRatePerSec;
+    const totalUSDT  = totalETH * USDT_PER_ETH;
 
+    // Real-time cap-exhaustion detection: contract gates _calcAccrued via _getRawAvailableCap
+    // (active locks only). When liveETH+pendingETH reaches that value, accrual stops on-chain.
+    // Mirror it here immediately — no 30-second poll wait.
+    // Guard: _rwROIActiveCapETH > 0 so natural lock expiry (activeCap = 0) doesn't falsely trigger.
+    const _midSessionExhausted = (
+      !_rwROICapPaused &&
+      (_rwROICapExhausted ||
+       (_rwROIActiveCapETH > 0 && _rwROIActiveCapETH < Infinity && totalETH >= _rwROIActiveCapETH))
+    );
+    const _effPaused = _rwROICapPaused || _midSessionExhausted;
+
+    // ACCRUED display:
+    //  - Paused from load: pendingETH (claimable) + growing missed commissions shown in red.
+    //  - Mid-session exhaustion: freeze at activeCapETH (stops ticking past on-chain cap).
+    //  - Normal: live total ticking in purple.
+    if (_rwROICapPaused) {
+      liveEl.style.color = '#ef4444';
+      liveEl.textContent = '$' + (_rwROIBaseETH * USDT_PER_ETH).toFixed(5);
+    } else if (_midSessionExhausted) {
+      liveEl.style.color = '#ef4444';
+      liveEl.textContent = '$' + (_rwROIActiveCapETH * USDT_PER_ETH).toFixed(5);
+    } else {
+      liveEl.style.color = '#a78bfa';
+      liveEl.textContent = '$' + (totalETH * USDT_PER_ETH).toFixed(5);
+    }
+
+    // Claimable = min(live+pending, rawCap) when rawCap > 0; or pre-settled pending when rawCap = 0.
+    const _tickEffETH = _rwROIAvailableCapETH > 0
+      ? Math.min(totalETH, _rwROIAvailableCapETH)
+      : _rwROIPendingETH;
     const tokEl = document.getElementById('rwROITokens');
     if (tokEl && _rwROITokenPrice > 0) {
-      const tokens = totalETH / _rwROITokenPrice;
-      tokEl.textContent = fmtNum(tokens) + ' ' + _rwROITokenSym;
+      tokEl.textContent = _tickEffETH > 0
+        ? fmtNum(_tickEffETH / _rwROITokenPrice) + ' ' + _rwROITokenSym
+        : '—';
     }
 
     const btn = document.getElementById('claimROIBtn');
     if (btn && btn.textContent !== 'CLAIMING…') {
-      const canClaim  = totalUSDT > 0.00001;
-      const tokens    = _rwROITokenPrice > 0 ? totalETH / _rwROITokenPrice : 0;
+      const canClaim = totalUSDT > 0.00001 && (_rwROIAvailableCapETH > 0 || _rwROIPendingETH > 0);
+      const tokens   = _rwROITokenPrice > 0 && _tickEffETH > 0 ? _tickEffETH / _rwROITokenPrice : 0;
       btn.textContent = canClaim ? 'CLAIM ALL · ' + fmtNum(tokens) + ' ' + _rwROITokenSym : 'NOTHING TO CLAIM';
       btn.disabled    = !canClaim;
       btn.style.background  = canClaim ? 'var(--gold)' : 'rgba(255,255,255,0.06)';
@@ -198,38 +267,109 @@ function _rwStartROITicker() {
       btn.style.cursor      = canClaim ? 'pointer'     : 'not-allowed';
     }
 
+
     for (let _si = 0; _si < _rwROIStreamDetails.length; _si++) {
       const _d    = _rwROIStreamDetails[_si];
-      const _capL = Math.max(0, _d.capETH - _d.roiPaidETH);
-      const _a    = Math.min(_capL, Math.max(0, _d.accruedETH + elapsed * _d.streamRate));
+      // Accrual is 0 while cap is paused or mid-session exhausted; streamRate is 0 when paused at load.
+      const _a    = _effPaused ? 0 : Math.max(0, _d.accruedETH + elapsed * _d.streamRate);
+      // When cap is exhausted (not explicitly paused), the live accrual is frozen at
+      // _d.accruedETH (set at load time). Use it for the gap formula and claim button so
+      // the bar shows the frozen claimable slice rather than collapsing it into the gap.
+      const _effectiveA = (_effPaused && !_rwROICapPaused) ? _d.accruedETH : _a;
 
-      const _histP   = _d.histPaidETH || 0;
+      const _histP = _d.histPaidETH || 0;
       const _accEl = document.getElementById('rwROIStreamAccrued-' + _si);
-      if (_accEl) _accEl.textContent = '$' + ((_histP + _d.roiPaidETH + _a) * USDT_PER_ETH).toFixed(5);
+      if (_accEl) {
+        // Compute gap here (before bar block) so it's available for the display.
+        const _fullRateEarly = _d.lockDur > 0 && _d.periodMax > 0 ? _d.periodMax / _d.lockDur : 0;
+        const _elPotEarly    = Math.min(_d.periodMax || 0, (_d.elapsedPotAtFetch || 0) + elapsed * _fullRateEarly);
+        const _gapEarly      = Math.max(0, _elPotEarly - _d.roiPaidETH - _effectiveA);
+        if (_effPaused) {
+          _accEl.style.color = '#ef4444';
+          const _frozenA = _rwROICapPaused ? 0 : _d.accruedETH;
+          _accEl.textContent = '$' + ((_histP + _d.roiPaidETH + _frozenA) * USDT_PER_ETH).toFixed(5);
+        } else {
+          _accEl.style.color = 'var(--gold)';
+          _accEl.textContent = '$' + ((_histP + _d.roiPaidETH + _a) * USDT_PER_ETH).toFixed(5);
+        }
+      }
 
       const _claimBtn = document.getElementById('rwROIStreamClaimBtn-' + _si);
       if (_claimBtn && _claimBtn.textContent !== 'CLAIMING…') {
-        const _canClaim = _a > 0;
-        const _bt       = _rwROITokenPrice > 0 && _canClaim ? _a / _rwROITokenPrice : 0;
+        const _claimableA = Math.min(_effectiveA, _rwROIAvailableCapETH);
+        const _canClaim = _claimableA > 0;
+        const _bt       = _rwROITokenPrice > 0 && _canClaim ? _claimableA / _rwROITokenPrice : 0;
         _claimBtn.textContent        = _bt > 0 ? 'CLAIM · ' + _bt.toFixed(5) + ' ' + _rwROITokenSym : 'CLAIM';
         _claimBtn.disabled           = !_canClaim;
-        _claimBtn.style.borderColor  = _canClaim ? 'var(--gold)'               : 'var(--border)';
-        _claimBtn.style.background   = _canClaim ? 'rgba(201,168,76,0.12)'     : 'rgba(255,255,255,0.04)';
-        _claimBtn.style.color        = _canClaim ? 'var(--gold)'               : 'var(--muted)';
-        _claimBtn.style.cursor       = _canClaim ? 'pointer'                   : 'not-allowed';
+        _claimBtn.style.borderColor  = _canClaim ? 'var(--gold)'           : 'var(--border)';
+        _claimBtn.style.background   = _canClaim ? 'rgba(201,168,76,0.12)' : 'rgba(255,255,255,0.04)';
+        _claimBtn.style.color        = _canClaim ? 'var(--gold)'           : 'var(--muted)';
+        _claimBtn.style.cursor       = _canClaim ? 'pointer'               : 'not-allowed';
       }
 
-      const _curRef2 = _d.periodMax > 0 ? _d.periodMax : _d.capETH;
+      const _curRef2 = _d.periodMax > 0 ? _d.periodMax : (_d.ethInv || 0);
       const _barRef2 = _curRef2 + _histP;
       if (_barRef2 > 0) {
         const _paidPct = Math.min(100, (_histP + _d.roiPaidETH) / _barRef2 * 100);
-        const _accPct  = Math.min(100 - _paidPct, _a / _barRef2 * 100);
-        const _barEl   = document.getElementById('rwROIStreamBar-' + _si);
-        if (_barEl) { _barEl.style.left = _paidPct.toFixed(3) + '%'; _barEl.style.width = _accPct.toFixed(3) + '%'; }
-        const _pctEl   = document.getElementById('rwROIStreamPct-' + _si);
+
+        // Gap-red: elapsed potential − (paid + effective accrual).
+        // _effectiveA uses the frozen accruedETH when exhausted/expired (not _a which is 0),
+        // so the claimable slice stays yellow and only the truly missed time shows red.
+        const _fullRate   = _d.lockDur > 0 && _d.periodMax > 0 ? _d.periodMax / _d.lockDur : 0;
+        const _elapsedPot = Math.min(_d.periodMax || 0, (_d.elapsedPotAtFetch || 0) + elapsed * _fullRate);
+        const _gapEth2    = Math.max(0, _elapsedPot - _d.roiPaidETH - _effectiveA);
+        const _pausedPct  = Math.min(100 - _paidPct, _gapEth2 / _barRef2 * 100);
+
+        // Yellow: claimable slice; over-cap red: beyond available cap.
+        const _claimableA2 = Math.min(_effectiveA, _rwROIAvailableCapETH);
+        const _overCapEth2 = Math.max(0, _effectiveA - _claimableA2);
+        const _accPct      = Math.min(100 - _paidPct - _pausedPct, _claimableA2 / _barRef2 * 100);
+        const _overCapPct  = Math.min(100 - _paidPct - _pausedPct - _accPct, _overCapEth2 / _barRef2 * 100);
+
+        // When cap is exhausted, yellow comes before gap (earned before the gap period).
+        const _tickExhSwap  = _effPaused && !_rwROICapPaused && _gapEth2 > 0;
+        const _gapBarLeft2  = _tickExhSwap ? (_paidPct + _accPct) : _paidPct;
+        const _yBarLeft2    = _tickExhSwap ? _paidPct             : (_paidPct + _pausedPct);
+
+        const _pausedBarEl = document.getElementById('rwROIStreamPausedBar-' + _si);
+        if (_pausedBarEl) {
+          _pausedBarEl.style.left  = _gapBarLeft2.toFixed(3) + '%';
+          _pausedBarEl.style.width = _pausedPct.toFixed(3) + '%';
+        }
+
+        const _barEl = document.getElementById('rwROIStreamBar-' + _si);
+        if (_barEl) { _barEl.style.left = _yBarLeft2.toFixed(3) + '%'; _barEl.style.width = _accPct.toFixed(3) + '%'; }
+
+        const _overCapBarEl = document.getElementById('rwROIStreamOverCapBar-' + _si);
+        if (_overCapBarEl) {
+          _overCapBarEl.style.left  = (_paidPct + _pausedPct + _accPct).toFixed(3) + '%';
+          _overCapBarEl.style.width = _overCapPct.toFixed(3) + '%';
+        }
+
+        const _pctEl = document.getElementById('rwROIStreamPct-' + _si);
         if (_pctEl) {
-          const _tot = _paidPct + _accPct;
+          const _tot = _paidPct + _pausedPct + _accPct + _overCapPct;
           _pctEl.textContent = (_tot >= 100 ? '100' : _tot.toFixed(2)) + '%';
+        }
+
+        const _overCapEl = document.getElementById('rwROIStreamOverCap-' + _si);
+        if (_overCapEl) {
+          if (_overCapEth2 > 0.0000001) {
+            _overCapEl.style.display = '';
+            _overCapEl.textContent = '↑ $' + (_overCapEth2 * USDT_PER_ETH).toFixed(5) + ' USDT over cap';
+          } else {
+            _overCapEl.style.display = 'none';
+          }
+        }
+
+        const _missedEl = document.getElementById('rwROIStreamMissed-' + _si);
+        if (_missedEl) {
+          if (_gapEth2 > 0.0000001) {
+            _missedEl.style.display = '';
+            _missedEl.textContent = '↑ $' + (_gapEth2 * USDT_PER_ETH).toFixed(5) + ' USDT missing';
+          } else {
+            _missedEl.style.display = 'none';
+          }
         }
       }
     }
@@ -238,6 +378,7 @@ function _rwStartROITicker() {
 
 // ─── Staking live ticker ──────────────────────────────────────────────────────
 let _rwPollInterval    = null;
+let _rwCapFastPollInterval = null;
 let _rwStakingInterval = null;
 let _rwStakingLocks    = [];
 let _rwStakingPrices   = [];   // parallel array: priceEth per lock
@@ -246,8 +387,42 @@ let _rwStakingFirstSym  = 'HORDEX';
 let _rwStakingBaseTime = 0;
 let _rwStakingWallBase = 0;
 
+function _rwStopCapFastPoll() {
+  if (_rwCapFastPollInterval) { clearInterval(_rwCapFastPollInterval); _rwCapFastPollInterval = null; }
+}
+
+function _rwStartCapFastPoll() {
+  _rwStopCapFastPoll();
+  _rwCapFastPollInterval = setInterval(async () => {
+    const panel = document.getElementById('panel-rewards');
+    if (!panel || !panel.classList.contains('active')) { _rwStopCapFastPoll(); return; }
+    if (!contract || !walletAddress) return;
+    try {
+      const capPausedAtRaw = await contract.getCapPausedAt(walletAddress);
+      const isPaused = Number(capPausedAtRaw) > 0;
+      if (isPaused && !_rwROICapPaused) {
+        // Cap just became paused between 30s polls — freeze yellow accrual immediately.
+        // Capture current accumulated total so display doesn't jump backward.
+        const _nowSec = Math.floor(Date.now() / 1000);
+        _rwROIBaseETH         = _rwROIBaseETH + Math.max(0, _nowSec - _rwROIFetchWall) * _rwROIRatePerSec;
+        _rwROIFetchWall       = _nowSec;
+        _rwROICapPaused       = true;
+        _rwROICapPausedAt     = Number(capPausedAtRaw);
+        _rwROIRatePerSec      = 0;
+        _rwROIAvailableCapETH = 0;
+        _rwROIActiveCapETH    = 0;
+        loadRwROI(true);
+      } else if (!isPaused && _rwROICapPaused) {
+        // Cap was restored (new invest / restake) — reload to resume yellow accrual.
+        loadRwROI(true);
+      }
+    } catch(_) {}
+  }, 5000);
+}
+
 function _rwStopPoll() {
   if (_rwPollInterval) { clearInterval(_rwPollInterval); _rwPollInterval = null; }
+  _rwStopCapFastPoll();
 }
 
 function _rwStartPoll() {
@@ -257,6 +432,7 @@ function _rwStartPoll() {
     if (!panel || !panel.classList.contains('active')) { _rwStopPoll(); return; }
     loadRwROI(true);
   }, 30000);
+  _rwStartCapFastPoll();
 }
 
 function _rwStopTicker() {
@@ -558,13 +734,29 @@ async function _rwAppendCommission(ev, from, amount, level) {
     const container = document.getElementById('rwRefHistContainer');
     if (container) container.innerHTML = _rwRefHistHtml();
 
-    // Update earned / cap stats from a single contract call (no event scan)
-    const stats = await contract.getUserCommissionStats(walletAddress).catch(() => null);
+    // Update earned / cap stats — fetch roi live data alongside to show referral-adjusted cap
+    const [stats, roiDataRefresh] = await Promise.all([
+      contract.getUserCommissionStats(walletAddress).catch(() => null),
+      contract.getROIData(walletAddress).catch(() => null),
+    ]);
     if (stats) {
+      const freshRaw      = parseFloat(ethers.utils.formatEther(stats.remainingCap));
+      const freshLive     = roiDataRefresh ? parseFloat(ethers.utils.formatEther(roiDataRefresh.liveETH))    : 0;
+      const freshPending  = roiDataRefresh ? parseFloat(ethers.utils.formatEther(roiDataRefresh.pendingETH)) : 0;
+      const freshEffective = Math.max(0, freshRaw - freshLive - freshPending);
       const earnedEl     = document.querySelector('#rwRefContent [data-field="earned"]');
       const remainingEl  = document.querySelector('#rwRefContent [data-field="remaining"]');
-      if (earnedEl)    earnedEl.textContent    = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.earned)), {decimals: 3});
-      if (remainingEl) remainingEl.textContent = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.remainingCap)));
+      const noteEl       = document.querySelector('#rwRefContent [data-field="remaining-note"]');
+      if (earnedEl)    earnedEl.textContent = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.earned)), {decimals: 3});
+      if (remainingEl) remainingEl.textContent = fmtUSDT(freshEffective);
+      if (noteEl) {
+        if (freshLive > 0.000001) {
+          noteEl.style.display = '';
+          noteEl.textContent   = `raw ${fmtUSDT(freshRaw)} · −${fmtUSDT(freshLive)} live ROI`;
+        } else {
+          noteEl.style.display = 'none';
+        }
+      }
     }
   } catch(_) {}
 }
@@ -599,11 +791,12 @@ async function loadRwReferral() {
   try {
     const _zeroStats = { earned: ethers.BigNumber.from(0), totalCap: ethers.BigNumber.from(0), remainingCap: ethers.BigNumber.from(0) };
     // Fast on-chain calls only — _computeMissedWei runs in the background after render
-    const [commStats, commRecords, activeCountRaw, minInvRaw] = await Promise.all([
+    const [commStats, commRecords, activeCountRaw, minInvRaw, roiDataRef] = await Promise.all([
       contract.getUserCommissionStats(walletAddress).catch(() => _zeroStats),
       contract.getCommissionRecords(walletAddress).catch(() => []),
       contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
+      contract.getROIData(walletAddress).catch(() => null),
     ]);
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
@@ -611,6 +804,12 @@ async function loadRwReferral() {
 
     const earned    = parseFloat(ethers.utils.formatEther(commStats.earned));
     const remaining = parseFloat(ethers.utils.formatEther(commStats.remainingCap));
+    // Effective cap for new referral commissions = raw remaining − live ROI already accruing.
+    // Mirrors _getAvailableCap in LiquidityStorage (raw − pending − live): ROI is counted as
+    // earned the moment it accrues, reducing the cap available to referrals immediately.
+    const liveROIRef      = roiDataRef ? parseFloat(ethers.utils.formatEther(roiDataRef.liveETH)) : 0;
+    const pendingROIRef   = roiDataRef ? parseFloat(ethers.utils.formatEther(roiDataRef.pendingETH)) : 0;
+    const effectiveCapRef = Math.max(0, remaining - liveROIRef - pendingROIRef);
 
     // Normalise on-chain CommissionRecord — no block fetches needed (ts is stored on-chain)
     const receivedEvs = commRecords.map(r => ({
@@ -635,8 +834,9 @@ async function loadRwReferral() {
           <div data-field="earned" style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned, {decimals: 3})}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CAP REMAINING</div>
-          <div data-field="remaining" style="font-size:18px;color:var(--gold);font-family:var(--font-display);">${fmtUSDT(remaining)}</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">CAP FOR REFERRALS</div>
+          <div data-field="remaining" style="font-size:18px;color:var(--gold);font-family:var(--font-display);">${fmtUSDT(effectiveCapRef)}</div>
+          ${liveROIRef > 0.000001 ? `<div data-field="remaining-note" style="font-size:9px;color:var(--muted);margin-top:3px;">raw ${fmtUSDT(remaining)} &nbsp;·&nbsp; −${fmtUSDT(liveROIRef)} live ROI</div>` : `<div data-field="remaining-note" style="display:none;font-size:9px;color:var(--muted);margin-top:3px;"></div>`}
         </div>
         <div id="rwRefMissedCard" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div id="rwRefMissedLabel" style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">MISSED</div>
@@ -954,15 +1154,35 @@ async function loadRwROI(silent = false) {
     el.innerHTML = '<div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div>';
   }
   try {
-    const COMM_RATES = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+    // ROI commission rates stored in the contract (roiCommissionRates[level]).
+    // These must match the on-chain values set in the constructor / setROICommissionRates().
+    const ROI_CONTRACT_RATES = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
 
-    const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords] = await Promise.all([
+    const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords, capPausedAtRaw, commStats, ownLocks] = await Promise.all([
       contract.getROIData(walletAddress).catch(() => null),
       contract.getActiveROIStreams(walletAddress).catch(() => null),
       contract.platformToken().catch(() => null),
       provider.getBlock('latest').catch(() => null),
       contract.getROIClaimRecords(walletAddress).catch(() => []),
+      Promise.resolve().then(() => contract.getCapPausedAt(walletAddress)).catch(() => 0),
+      Promise.resolve().then(() => contract.getUserCommissionStats(walletAddress)).catch(() => null),
+      contract.getUserLPLocks(walletAddress).catch(() => []),
     ]);
+
+    _rwROICapPausedAt  = capPausedAtRaw ? Number(capPausedAtRaw) : 0;
+    _rwROICapPaused    = _rwROICapPausedAt > 0;
+    _rwROICapExhausted = false;
+    // commStats[2] = totalCap (activeCap + pausedCap from expired locks).
+    // When cap is paused, use 0 so per-stream amounts don't show claimable from expired-lock cap
+    // (post-exhaustion accrual is blocked). When not paused, include expired-lock cap so ROI
+    // earned before a lock naturally expired stays claimable.
+    _rwROIAvailableCapETH = _rwROICapPaused
+      ? 0
+      : (commStats ? parseFloat(ethers.utils.formatEther(commStats[2])) : Infinity);
+    // commStats[3] = activeCap (non-expired locks only) — mirrors contract's _getRawAvailableCap.
+    // Used for real-time mid-session exhaustion detection in the ticker so yellow stops and red
+    // starts the moment liveETH+pendingETH reaches this value, without waiting for the 30s poll.
+    _rwROIActiveCapETH = commStats ? parseFloat(ethers.utils.formatEther(commStats[3])) : Infinity;
 
     // In silent (poll) mode: if core data failed, keep the existing ticker running
     if (silent && roiData === null) { _rwROILoading = false; return; }
@@ -975,7 +1195,9 @@ async function loadRwROI(silent = false) {
 
     const liveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
     const pendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
-    const baseETH    = liveETH + pendingETH;
+    // When cap is paused, the contract returns liveETH = 0 (post-exhaustion accrual is blocked).
+    // Guard here as a safety net against stale data: only include liveETH when NOT paused.
+    let baseETH      = _rwROICapPaused ? pendingETH : (liveETH + pendingETH);
     const lifetimeClaimedTokens = (roiClaimRecords || []).reduce(
       (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.tokensAmount)), 0
     );
@@ -994,9 +1216,25 @@ async function loadRwROI(silent = false) {
     // capETH = ethInv * commRate / 10_000  (mirrors contract's initROIStreamsExt formula)
     // accruedETH = same linear formula as _calcAccrued (recipientSince ≈ lockedAt for new streams)
     let ratePerSec = 0;
+    let missedBaseETH = 0;    // sum of per-stream gap at fetch time (when cap is paused)
+    let missedRatePerSec = 0; // rate at which missed amounts grow when cap is paused
     const wallNow  = Math.floor(Date.now() / 1000);
     const blockTs  = latestBlock ? latestBlock.timestamp : wallNow;
     const effNow   = Math.max(blockTs, wallNow);
+
+    // When A's lock has expired naturally (activeCap=0, totalCap>0, not explicitly paused),
+    // find the latest expiry timestamp so per-stream accruedETH can be bounded there.
+    // This ensures elapsedPotAtFetch > accruedETH on a fresh load, making the gap visible immediately.
+    let _naturalExpiryTs = 0;
+    if (!_rwROICapPaused && _rwROIActiveCapETH === 0 && _rwROIAvailableCapETH > 0 && _rwROIAvailableCapETH < Infinity) {
+      for (const _ol of (ownLocks || [])) {
+        if (!_ol.removed) {
+          const _ut = Number(_ol.unlockTime);
+          if (_ut <= blockTs && _ut > _naturalExpiryTs) _naturalExpiryTs = _ut;
+        }
+      }
+    }
+
     _rwROIStreamDetails = [];
 
     if (streams.length > 0) {
@@ -1029,10 +1267,9 @@ async function loadRwROI(silent = false) {
         if (lockDur <= 0) continue;
         const ethInv   = parseFloat(ethers.utils.formatEther(lock.ethInvested));
         const ratePPM  = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
-        const commRate = COMM_RATES[Number(ref.level)] || 0;
-        const capETH   = ethInv * commRate / 10_000;
-        const streamRate = (effNow < unlockTime && ratePPM > 0)
-          ? ethInv * ratePPM * commRate / (50_000_000_000 * lockDur)
+        const roiRate  = ROI_CONTRACT_RATES[Number(ref.level)] || 0;
+        const streamRate = (!_rwROICapPaused && effNow < unlockTime && ratePPM > 0 && roiRate > 0)
+          ? ethInv * ratePPM * roiRate / (50_000_000_000 * lockDur)
           : 0;
 
         const streamKey      = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
@@ -1049,30 +1286,40 @@ async function loadRwROI(silent = false) {
           ? streamInfo.historicalPaidETH : ethers.BigNumber.from(0);
         const histPaidETH = parseFloat(ethers.utils.formatEther(histPaidRaw));
 
-        // Incremental accrual since last settlement = total(from recipientSince) − already paid,
-        // capped by remaining cap. Using total − paid avoids the bar filling to 100% after a
-        // claim (where formula(elapsed) > roiPaidETH so min(capLeft, total) = capLeft).
-        const startTs         = Math.max(lockedAt, recSince);
-        const elapsed2        = Math.max(0, Math.min(unlockTime, effNow) - startTs);
-        const capLeft         = Math.max(0, capETH - roiPaidETH);
-        const totalSinceStart = lockDur > 0 && ratePPM > 0
-          ? ethInv * ratePPM * elapsed2 * commRate / (50_000_000_000 * lockDur)
+        // Accrual since last settlement (from recipientSince to now).
+        // When A's lock expired naturally, bound accrual at the expiry time so the gap period
+        // (expiry → now) is not counted as earned — elapsedPotAtFetch stays unbounded to effNow,
+        // giving a non-zero gap on fresh load without waiting for the ticker.
+        const recSinceTs   = Math.max(lockedAt, recSince);
+        const _effNowForAccrual = _naturalExpiryTs > 0 ? Math.min(effNow, _naturalExpiryTs) : effNow;
+        const elapsed2     = Math.max(0, Math.min(unlockTime, _effNowForAccrual) - recSinceTs);
+        const accrualFromRecSince = lockDur > 0 && ratePPM > 0 && roiRate > 0
+          ? ethInv * ratePPM * elapsed2 * roiRate / (50_000_000_000 * lockDur)
           : 0;
-        const accruedETH = Math.max(0, Math.min(capLeft, totalSinceStart - roiPaidETH));
+        const accruedETH = _rwROICapPaused ? 0 : Math.max(0, accrualFromRecSince);
 
-        // Max accrual this lock period — used as bar denominator so the bar fills
-        // proportionally to time elapsed (same behaviour as the staking bar).
-        // Computed from ratePPM directly so it stays correct even after lock expiry
-        // (when streamRate becomes 0 and streamRate * lockDur would give 0).
-        const periodMax = ratePPM > 0 && commRate > 0
-          ? ethInv * ratePPM * commRate / 50_000_000_000
-          : capETH;
+        // Max accrual for the full lock period — used as bar denominator.
+        const periodMax = ratePPM > 0 && roiRate > 0
+          ? ethInv * ratePPM * roiRate / 50_000_000_000
+          : 0;
+
+        // Potential accrual from lockedAt up to effNow (capped at one full period).
+        // Used to compute the red gap: elapsed potential − (paid + accrued).
+        const elapsedPotAtFetch = lockDur > 0 && periodMax > 0
+          ? periodMax * Math.min(Math.max(0, effNow - lockedAt), lockDur) / lockDur
+          : 0;
 
         ratePerSec += streamRate;
+        if (_rwROICapPaused && effNow < unlockTime && ratePPM > 0 && roiRate > 0) {
+          // Full stream rate (what would accrue if cap were available) — used for red ticker.
+          const fullRate = ethInv * ratePPM * roiRate / (50_000_000_000 * lockDur);
+          missedRatePerSec += fullRate;
+          missedBaseETH += Math.max(0, elapsedPotAtFetch - roiPaidETH);
+        }
         _rwROIStreamDetails.push({
           investor: ref.investor, lockIndex: Number(ref.lockIndex), level: Number(ref.level),
-          commRate, ethInv, capETH, periodMax, accruedETH, streamRate, roiPaidETH, roiPaidNonZero,
-          histPaidETH,
+          roiRate, ethInv, periodMax, accruedETH, streamRate, roiPaidETH, roiPaidNonZero,
+          histPaidETH, lockDur, elapsedPotAtFetch,
         });
       }
     }
@@ -1080,21 +1327,48 @@ async function loadRwROI(silent = false) {
     // Highest unclaimed rewards first
     _rwROIStreamDetails.sort((a, b) => b.accruedETH - a.accruedETH);
 
-    _rwROIBaseETH     = baseETH;
-    _rwROIRatePerSec  = ratePerSec;
-    _rwROIFetchWall   = wallNow;
-    _rwROITokenSym    = tokenSym;
-    _rwROITokenPrice  = tokenPrice;
-    _rwROIActiveCount = streams.length;
+    // getROIData returns liveETH = 0 when live cap is exhausted (pending + liveAccrued = rawCap)
+    // even without _capPausedAt being set (ROI-driven exhaustion). In that case baseETH = pendingETH
+    // and ratePerSec > 0, which would make the ticker keep growing past cap.
+    // Also fires when A's lock expired naturally (_naturalExpiryTs > 0) even if all investor locks
+    // have also expired (ratePerSec = 0) — needed so the exhausted swap puts yellow before red.
+    // Fix: cap baseETH at rawCap, zero all rates (global + per-stream), and set _rwROICapExhausted
+    // so _midSessionExhausted triggers immediately on the first ticker tick even in float edge cases.
+    if (!_rwROICapPaused && liveETH === 0 && (ratePerSec > 0 || _naturalExpiryTs > 0)) {
+      const _feLiveETH = _rwROIStreamDetails.reduce((s, d) => s + d.accruedETH, 0);
+      if (_feLiveETH > 0) {
+        const _capRem = (_rwROIAvailableCapETH > 0 && _rwROIAvailableCapETH < Infinity)
+          ? Math.max(0, _rwROIAvailableCapETH - pendingETH)
+          : _feLiveETH;
+        baseETH    = pendingETH + Math.min(_feLiveETH, _capRem);
+        ratePerSec = 0;
+        _rwROICapExhausted = true;
+        for (const _sd of _rwROIStreamDetails) _sd.streamRate = 0;
+      }
+    }
 
-    const claimTokens = tokenPrice > 0 && baseETH * USDT_PER_ETH > 0.00001 ? baseETH / tokenPrice : 0;
-    const canClaim    = baseETH * USDT_PER_ETH > 0.00001;
+    _rwROIBaseETH          = baseETH;
+    _rwROIRatePerSec       = ratePerSec;
+    _rwROIFetchWall        = wallNow;
+    _rwROITokenSym         = tokenSym;
+    _rwROITokenPrice       = tokenPrice;
+    _rwROIActiveCount      = streams.length;
+    _rwROIPendingETH       = pendingETH;
+    _rwROIMissedBaseETH    = missedBaseETH;
+    _rwROIMissedRatePerSec = missedRatePerSec;
+
+    // Claim is possible when there is raw cap available OR pre-settled pending (rawCap = 0 edge case).
+    const canClaim       = baseETH * USDT_PER_ETH > 0.00001 && (_rwROIAvailableCapETH > 0 || pendingETH > 0);
+    const _effectiveETH  = canClaim
+      ? (_rwROIAvailableCapETH > 0 ? Math.min(baseETH, _rwROIAvailableCapETH) : pendingETH)
+      : 0;
+    const claimTokens    = tokenPrice > 0 && _effectiveETH > 0 ? _effectiveETH / tokenPrice : 0;
 
     el.innerHTML = `
       <div class="rw-stat-grid-3 rw-roi-stat-grid">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">ACCRUED (USDT) <span style="color:#a78bfa;font-size:9px;">●</span></span><span class="rw-stat-label-mob">Accrued <span style="color:#a78bfa;font-size:9px;">●</span></span></div>
-          <div id="rwROILive" style="font-size:16px;color:#a78bfa;font-family:var(--font-display);">$${(baseETH * USDT_PER_ETH).toFixed(5)}</div>
+          <div id="rwROILive" style="font-size:16px;color:${_rwROICapPaused ? '#ef4444' : '#a78bfa'};font-family:var(--font-display);">$${(baseETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">CLAIMABLE (TOKENS)</span><span class="rw-stat-label-mob">Claimable</span></div>
@@ -1124,9 +1398,9 @@ async function loadRwROI(silent = false) {
       <div id="rwROIStreamsContainer">${_rwROIStreamsHtml()}</div>`;
 
     // Snap bars to rendered positions without CSS transition (same as staking)
-    el.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = 'none');
+    el.querySelectorAll('.dis-bar-active, .dis-bar-claimed, .dis-bar-paused').forEach(b => b.style.transition = 'none');
     requestAnimationFrame(() => requestAnimationFrame(() =>
-      el.querySelectorAll('.dis-bar-active, .dis-bar-claimed').forEach(b => b.style.transition = '')
+      el.querySelectorAll('.dis-bar-active, .dis-bar-claimed, .dis-bar-paused').forEach(b => b.style.transition = '')
     ));
 
     _rwStopROITicker();
@@ -1144,7 +1418,23 @@ async function claimROIFromStreamBtn(investor, lockIndex, level, btn) {
     toast('Confirm ROI claim in MetaMask…', 'info');
     const tx = await contract.connect(signer).claimROIFromStream(investor, lockIndex, level, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
-    await tx.wait();
+    const receipt = await tx.wait();
+
+    // Parse exact tokens from the ROIClaimed event in the receipt.
+    for (const log of receipt.logs) {
+      try {
+        const parsed = contract.interface.parseLog(log);
+        if (parsed.name === 'ROIClaimed') {
+          const tokens = parseFloat(ethers.utils.formatEther(parsed.args.tokensAmount));
+          if (tokens > 0) {
+            const key = `${investor.toLowerCase()}:${lockIndex}:${level}`;
+            _rwROIStreamClaimedTokens.set(key, (_rwROIStreamClaimedTokens.get(key) || 0) + tokens);
+          }
+          break;
+        }
+      } catch (_) {}
+    }
+
     toast('ROI commission claimed!', 'success');
     _rwROILoading = false;
     loadRwROI();

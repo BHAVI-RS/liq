@@ -159,41 +159,8 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── Commissions ───────────────────────────────────────────────────────────
 
-    function distributeCommissionsExt(address _from, uint256 _amount, address _token) external payable onlyDelegatecall {
-        _distributeReferralCommissions(_from, _amount, _token);
-    }
-
-    function _getAvailableCapForToken(address _user, address _token) internal view returns (uint256 available) {
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        for (uint256 j = 0; j < len; ) {
-            LPLock storage l = locks[j];
-            if (l.removed)                        { unchecked { j++; } continue; }
-            if (l.token != _token)                { unchecked { j++; } continue; }
-            if (block.timestamp >= l.unlockTime)  { unchecked { j++; } continue; }
-            uint256 cap = l.ethInvested * 5;
-            if (l.commissionsCapUsed < cap) available += cap - l.commissionsCapUsed;
-            unchecked { j++; }
-        }
-    }
-
-    function _chargeCapForToken(address _user, address _token, uint256 _amount) internal {
-        LPLock[] storage locks = userLPLocks[_user];
-        uint256 len = locks.length;
-        uint256 remaining = _amount;
-        for (uint256 j = 0; j < len && remaining > 0; ) {
-            LPLock storage l = locks[j];
-            if (l.removed)                        { unchecked { j++; } continue; }
-            if (l.token != _token)                { unchecked { j++; } continue; }
-            if (block.timestamp >= l.unlockTime)  { unchecked { j++; } continue; }
-            uint256 cap = l.ethInvested * 5;
-            if (l.commissionsCapUsed >= cap)      { unchecked { j++; } continue; }
-            uint256 space    = cap - l.commissionsCapUsed;
-            uint256 toCharge = remaining < space ? remaining : space;
-            l.commissionsCapUsed += toCharge;
-            remaining -= toCharge;
-            unchecked { j++; }
-        }
+    function distributeCommissionsExt(address _from, uint256 _amount) external payable onlyDelegatecall {
+        _distributeReferralCommissions(_from, _amount);
     }
 
     function _payCommission(address recipient, address from, uint256 amount, uint256 level) internal {
@@ -220,7 +187,7 @@ contract LiquidityFacet is LiquidityStorage {
         emit CommissionPaid(recipient, from, toRecipient, level);
     }
 
-    function _distributeReferralCommissions(address _from, uint256 _amount, address _token) internal {
+    function _distributeReferralCommissions(address _from, uint256 _amount) internal {
         // Pre-build the 10-hop ancestor chain so that level i always starts its
         // search at the fixed depth-(i+1) referrer, regardless of who received
         // commissions at lower levels.
@@ -252,7 +219,7 @@ contract LiquidityFacet is LiquidityStorage {
                     unchecked { hops++; }
                     if (activeReferralCount[search] <= i) { search = users[search].referrer; continue; }
                     if (search == owner) break;
-                    cachedCap = _getAvailableCapForToken(search, _token);
+                    cachedCap = _getAvailableCap(search);
                     if (cachedCap > 0) break;
                     search = users[search].referrer;
                 }
@@ -267,7 +234,7 @@ contract LiquidityFacet is LiquidityStorage {
                     toPay = toDistribute;
                 } else {
                     toPay = toDistribute < cachedCap ? toDistribute : cachedCap;
-                    _chargeCapForToken(search, _token, toPay);
+                    _chargeCap(search, toPay);
                 }
 
                 if (search == naturalRecipient) naturalReceivedHere += toPay;
@@ -652,7 +619,7 @@ contract LiquidityFacet is LiquidityStorage {
 
     // ── Helpers for Liquidity.sol ─────────────────────────────────────────────
 
-    function getAvailableCapExt(address _user, address _token) external view returns (uint256) {
-        return _getAvailableCapForToken(_user, _token);
+    function getAvailableCapExt(address _user) external view returns (uint256) {
+        return _getAvailableCap(_user);
     }
 }

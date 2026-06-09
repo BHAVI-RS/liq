@@ -51,7 +51,11 @@ const TX_OVERRIDES = {
   gasLimit: 5_000_000,   // invest() makes multiple DELEGATECALLs + ROI stream SSTOREs
 };
 
-const COMM_RATES_BPS = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+// Spot referral commission rates (BPS out of 10000, applied to 20% of T = A40eth).
+// Display formula: rate_bps / 500 = % of total investment T.
+const COMM_RATES_BPS    = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+// ROI commission rates (% of investor's staking reward) — for display only.
+const ROI_RATES_DISPLAY = [50, 10, 5, 2, 0.6, 0.5, 0.45, 0.4, 0.4, 0.35];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -575,6 +579,44 @@ const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
     const bal = await t.contract.balanceOf(liquidityAddress);
     console.log(`    ${t.symbol.padEnd(8)}: ${hre.ethers.formatEther(bal)}`);
   }
+
+  // ── ROI commission rates ────────────────────────────────────────
+  console.log(`\n  ROI commission rates (% of investor's staking reward):`);
+  ROI_RATES_DISPLAY.forEach((r, i) => console.log(`    L${i + 1}: ${r}%`));
+
+  // ── ROI pending for spine accounts (main recipients) ───────────
+  const spineAccounts = [1, 2, 12, 21, 29, 36, 42, 47, 51, 54];
+  const liqArtifact   = hre.artifacts.readArtifactSync("Liquidity");
+  const liq           = new hre.ethers.Contract(liquidityAddress, liqArtifact.abi, deployer);
+  console.log(`\n  ROI pending (live + settled) for spine accounts:`);
+  for (const idx of spineAccounts) {
+    if (idx >= TOTAL_ACCOUNTS) break;
+    try {
+      const pending = await liq.getROIPending(signers[idx].address);
+      const usdt    = parseFloat(hre.ethers.formatEther(pending)).toFixed(6);
+      console.log(`    account[${String(idx).padStart(2)}]  ${usdt} USDT`);
+    } catch (_) {}
+  }
+
+  // ── Unified cap for spine accounts ────────────────────────────
+  console.log(`\n  Unified cap (5× invested) for spine accounts:`);
+  console.log(`  ${"ACCOUNT".padEnd(14)} ${"TOTAL CAP".padEnd(14)} ${"REMAINING".padEnd(14)} STATUS`);
+  console.log(`  ${sep("·", 52)}`);
+  for (const idx of spineAccounts) {
+    if (idx >= TOTAL_ACCOUNTS) break;
+    try {
+      const [, , totalCapWei, remainingWei] = await liq.getUserCommissionStats(signers[idx].address);
+      const capPausedAt = await liq.getCapPausedAt(signers[idx].address);
+      const totalCap  = parseFloat(hre.ethers.formatEther(totalCapWei)).toFixed(2);
+      const remaining = parseFloat(hre.ethers.formatEther(remainingWei)).toFixed(2);
+      const status    = Number(capPausedAt) > 0 ? "⏸ paused" : "▶ active";
+      console.log(
+        `  account[${String(idx).padStart(2)}]     ` +
+        `$${totalCap}`.padEnd(14) + `$${remaining}`.padEnd(14) + status
+      );
+    } catch (_) {}
+  }
+
   console.log(sep("═") + "\n");
 }
 

@@ -146,6 +146,7 @@ contract Liquidity is LiquidityStorage {
         _facet          = facet_;
         _roiFacet       = roiFacet_;
         referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+        roiCommissionRates      = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
         _initStakingRates();
         _initPackages();
     }
@@ -308,15 +309,27 @@ contract Liquidity is LiquidityStorage {
         uint256 rewardPPM = _getRewardRatePPM(T, 90, 0);
         bool wasQualifying = _qualifies(msg.sender);
 
+        // Snapshot cap state BEFORE the new lock is added by investExt.
+        bool hadNoActiveCap = _getRawAvailableCap(msg.sender) == 0;
+        uint256 _lastExpiry = 0;
+        if (hadNoActiveCap) {
+            LPLock[] storage _lockArr = userLPLocks[msg.sender];
+            uint256 _ll = _lockArr.length;
+            for (uint256 _j = 0; _j < _ll; ) {
+                LPLock storage _lk = _lockArr[_j];
+                if (!_lk.removed && _lk.unlockTime <= block.timestamp && _lk.unlockTime > _lastExpiry)
+                    _lastExpiry = _lk.unlockTime;
+                unchecked { _j++; }
+            }
+        }
+
         _callFacet(abi.encodeCall(LiquidityFacet.investExt, (_token, rewardPPM, T)));
 
         userTotalInvested[msg.sender] += T;
         totalEthInvested              += T;
 
-        // Increment referrer's active count BEFORE distributing commissions and
-        // initialising ROI streams, so both see the correct eligibility immediately.
-        // onGainReferralExt is still called afterwards to redirect any streams that
-        // were skipped during *previous* investments (before ref had enough referrals).
+        // Increment referrer's active count before distributing commissions so
+        // the eligibility check in _distributeReferralCommissions sees the correct count.
         bool justQualified = !wasQualifying && _qualifies(msg.sender);
         address ref = users[msg.sender].referrer;
         if (justQualified && ref != address(0)) {
@@ -324,19 +337,51 @@ contract Liquidity is LiquidityStorage {
         }
 
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
-        _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, lockIndex)));
 
-        if (justQualified) {
-            _callROI(abi.encodeCall(LiquidityROIFacet.onFirstQualifyExt, (msg.sender)));
+        // Restore ROI stream start times now that a new lock restores available cap.
+        if (_capPausedAt[msg.sender] > 0) {
+            _capPausedAt[msg.sender] = 0;
+            if (hadNoActiveCap) {
+                // Lock had already expired when _chargeCap was triggered (e.g. by a commission).
+                // _chargeCap skipped pre-settlement (rawAvailable was 0) so recipientSince was
+                // never reset — treat identically to the natural-expiry path below.
+                _handleNaturalExpiryResume(msg.sender, _lastExpiry);
+            } else {
+                // Normal cap-pause: _chargeCap pre-settled streams and reset recipientSince to
+                // pause time. Record gap ROI (pause → reinvest) as missed, then reset to now.
+                StreamRef[] storage capRefs = _activeROIStreams[msg.sender];
+                uint256 capRefLen = capRefs.length;
+                for (uint256 k = 0; k < capRefLen; ) {
+                    ROIStream storage capStream =
+                        _roiStreams[capRefs[k].investor][capRefs[k].lockIndex][capRefs[k].level];
+                    if (!capStream.ended) {
+                        uint256 gapROI = _calcAccruedRaw(capStream, capRefs[k].investor, capRefs[k].lockIndex, capRefs[k].level);
+                        if (gapROI > 0) {
+                            totalMissedCommissions[msg.sender] += gapROI;
+                            _missedRecords[msg.sender].push(MissedRecord({
+                                from:   capRefs[k].investor,
+                                ts:     uint64(block.timestamp),
+                                level:  capRefs[k].level,
+                                reason: 1,
+                                amount: uint128(gapROI)
+                            }));
+                        }
+                        capStream.recipientSince = uint64(block.timestamp);
+                    }
+                    unchecked { k++; }
+                }
+            }
+        } else if (hadNoActiveCap) {
+            // Natural expiry: lock expired but no commission arrived after expiry to trigger
+            // _chargeCap. Settle pre-expiry ROI and record gap as missed.
+            _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
+
+        _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, lockIndex)));
 
         uint256 A   = T / 2;
         uint256 A40 = A - (A * 60 / 100);
-        _callFacet(abi.encodeCall(LiquidityFacet.distributeCommissionsExt, (msg.sender, A40, _token)));
-
-        if (justQualified && ref != address(0)) {
-            _callROI(abi.encodeCall(LiquidityROIFacet.onGainReferralExt, (ref)));
-        }
+        _callFacet(abi.encodeCall(LiquidityFacet.distributeCommissionsExt, (msg.sender, A40)));
     }
 
     // ── Claim LP ──────────────────────────────────────────────────────────────
@@ -362,18 +407,8 @@ contract Liquidity is LiquidityStorage {
 
     // ── Remove LP ─────────────────────────────────────────────────────────────
     function _removeLPCore(uint256 _lockIndex, bool direct) internal {
-        bool wasQualifying = _qualifies(msg.sender);
         _callFacet(abi.encodeCall(LiquidityFacet.removeLPCoreExt, (_lockIndex, direct)));
-        bool nowQualifying = _qualifies(msg.sender);
-
         _callROI(abi.encodeCall(LiquidityROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
-
-        if (wasQualifying && !nowQualifying) {
-            address ref = users[msg.sender].referrer;
-            if (ref != address(0)) {
-                _callROI(abi.encodeCall(LiquidityROIFacet.onLossReferralExt, (ref)));
-            }
-        }
     }
 
     function removeLP(uint256 _lockIndex) external nonReentrant {
@@ -390,10 +425,63 @@ contract Liquidity is LiquidityStorage {
             _durationDays != 90 && _durationDays != 180 && _durationDays != 360
         ) revert InvalidDuration();
 
+        // Snapshot cap state BEFORE restakeLPExt extends the lock's unlockTime in-place.
+        // (For invest() this snapshot happens before investExt; here we must do it first
+        //  because the restaked lock IS the one whose unlockTime changes.)
+        bool hadNoActiveCap = _getRawAvailableCap(msg.sender) == 0;
+        uint256 _lastExpiry = 0;
+        if (hadNoActiveCap) {
+            LPLock[] storage _lockArr = userLPLocks[msg.sender];
+            uint256 _ll = _lockArr.length;
+            for (uint256 _j = 0; _j < _ll; ) {
+                LPLock storage _lk = _lockArr[_j];
+                if (!_lk.removed && _lk.unlockTime <= block.timestamp && _lk.unlockTime > _lastExpiry)
+                    _lastExpiry = _lk.unlockTime;
+                unchecked { _j++; }
+            }
+        }
+
         // End old ROI streams before restakeLPExt updates the lock
         _callROI(abi.encodeCall(LiquidityROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
 
         _callFacet(abi.encodeCall(LiquidityFacet.restakeLPExt, (_lockIndex, _durationDays)));
+
+        // Restore ROI stream start times now that the restaked lock provides fresh cap.
+        if (_capPausedAt[msg.sender] > 0) {
+            userLPLocks[msg.sender][_lockIndex].commissionsCapUsed = 0;
+            _capPausedAt[msg.sender] = 0;
+            if (hadNoActiveCap) {
+                // Lock had expired before _chargeCap ran; recipientSince was not reset by it.
+                _handleNaturalExpiryResume(msg.sender, _lastExpiry);
+            } else {
+                // Normal cap-pause: record gap ROI (pause → restake) as missed, reset to now.
+                StreamRef[] storage capRefs = _activeROIStreams[msg.sender];
+                uint256 capRefLen = capRefs.length;
+                for (uint256 k = 0; k < capRefLen; ) {
+                    ROIStream storage capStream =
+                        _roiStreams[capRefs[k].investor][capRefs[k].lockIndex][capRefs[k].level];
+                    if (!capStream.ended) {
+                        uint256 gapROI = _calcAccruedRaw(capStream, capRefs[k].investor, capRefs[k].lockIndex, capRefs[k].level);
+                        if (gapROI > 0) {
+                            totalMissedCommissions[msg.sender] += gapROI;
+                            _missedRecords[msg.sender].push(MissedRecord({
+                                from:   capRefs[k].investor,
+                                ts:     uint64(block.timestamp),
+                                level:  capRefs[k].level,
+                                reason: 1,
+                                amount: uint128(gapROI)
+                            }));
+                        }
+                        capStream.recipientSince = uint64(block.timestamp);
+                    }
+                    unchecked { k++; }
+                }
+            }
+        } else if (hadNoActiveCap) {
+            // Natural expiry: no commission arrived after expiry to trigger _chargeCap.
+            userLPLocks[msg.sender][_lockIndex].commissionsCapUsed = 0;
+            _handleNaturalExpiryResume(msg.sender, _lastExpiry);
+        }
 
         // Init new ROI streams with updated lock (new rewardRatePPM written by restakeLPExt)
         _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, _lockIndex)));
@@ -412,41 +500,71 @@ contract Liquidity is LiquidityStorage {
         _callROI(abi.encodeCall(LiquidityROIFacet.settleAllStreamsExt, (msg.sender)));
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
+        uint256 rawCap = _getRawAvailableCap(msg.sender);
+        uint256 toClaim;
+        if (rawCap > 0) {
+            // Normal path: claim up to raw cap and charge commissionsCapUsed.
+            toClaim = ethAmount < rawCap ? ethAmount : rawCap;
+            _chargeCap(msg.sender, toClaim);
+        } else {
+            // rawCap = 0: either cap paused (_capPausedAt > 0) or active locks all expired.
+            // Paused: _chargeCap already pre-settled streams and charged active commissionsCapUsed;
+            //   post-exhaustion accrual is not settled (settleAllStreamsExt used active-only cap = 0).
+            //   Pay only what is in _roiPendingETH; no additional cap charge needed.
+            // Expired (not paused): expired locks still have remaining cap; settleAllStreamsExt
+            //   settled using that cap above, so commit the charge now to prevent re-claiming.
+            toClaim = ethAmount;
+            if (_capPausedAt[msg.sender] == 0) {
+                uint256 settleCap = _getRawAvailableCapInclExpired(msg.sender);
+                if (settleCap > 0 && toClaim > 0) {
+                    _chargeCapInclExpired(msg.sender, toClaim < settleCap ? toClaim : settleCap);
+                }
+            }
+        }
         _roiPendingETH[msg.sender] = 0;
         _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
-        uint256 roiTokens = (ethAmount * 1e18) / price;
+        uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
         if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
-            ethEquivalent: uint128(ethAmount),
+            ethEquivalent: uint128(toClaim),
             ts:            uint64(block.timestamp)
         }));
-        emit ROIClaimed(msg.sender, roiTokens, ethAmount);
+        emit ROIClaimed(msg.sender, roiTokens, toClaim);
     }
 
     function claimROIFromStream(address investor, uint256 lockIndex, uint8 level)
         external nonReentrant onlyRegistered
     {
-        // Snapshot pending before settling so we can isolate this stream's contribution.
         uint256 pendingBefore = _roiPendingETH[msg.sender];
         _callROI(abi.encodeCall(LiquidityROIFacet.settleStreamExt, (investor, lockIndex, level)));
-        // Only the delta belongs to this stream; leave any pre-existing pending untouched.
         uint256 streamEth = _roiPendingETH[msg.sender] - pendingBefore;
         if (streamEth == 0) revert NothingToClaim();
+        uint256 rawCap = _getRawAvailableCap(msg.sender);
+        uint256 toClaim = rawCap > 0 ? (streamEth < rawCap ? streamEth : rawCap) : streamEth;
+        if (rawCap > 0) _chargeCap(msg.sender, toClaim);
+        else if (_capPausedAt[msg.sender] == 0) {
+            // Expired (not paused): commit the charge on expired lock cap.
+            uint256 settleCap = _getRawAvailableCapInclExpired(msg.sender);
+            if (settleCap > 0 && toClaim > 0) {
+                _chargeCapInclExpired(msg.sender, toClaim < settleCap ? toClaim : settleCap);
+            }
+        }
+        // This stream's over-cap excess is discarded; other streams' settled pending is preserved.
         _roiPendingETH[msg.sender] = pendingBefore;
         _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
-        uint256 roiTokens = (streamEth * 1e18) / price;
+        uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
         if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
-            ethEquivalent: uint128(streamEth),
+            ethEquivalent: uint128(toClaim),
             ts:            uint64(block.timestamp)
         }));
-        emit ROIClaimed(msg.sender, roiTokens, streamEth);
+        emit ROIClaimed(msg.sender, roiTokens, toClaim);
     }
 
     // Settles a batch of ROI streams [fromIndex, fromIndex+count) into _roiPendingETH
@@ -462,18 +580,33 @@ contract Liquidity is LiquidityStorage {
     function claimPendingROI() external nonReentrant onlyRegistered {
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
+        uint256 rawCap = _getRawAvailableCap(msg.sender);
+        uint256 toClaim;
+        if (rawCap > 0) {
+            toClaim = ethAmount < rawCap ? ethAmount : rawCap;
+            _chargeCap(msg.sender, toClaim);
+        } else {
+            toClaim = ethAmount;
+            // Expired (not paused): commit the charge on expired lock cap.
+            if (_capPausedAt[msg.sender] == 0) {
+                uint256 settleCap = _getRawAvailableCapInclExpired(msg.sender);
+                if (settleCap > 0 && toClaim > 0) {
+                    _chargeCapInclExpired(msg.sender, toClaim < settleCap ? toClaim : settleCap);
+                }
+            }
+        }
         _roiPendingETH[msg.sender] = 0;
         _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
-        uint256 roiTokens = (ethAmount * 1e18) / price;
+        uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
         if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
-            ethEquivalent: uint128(ethAmount),
+            ethEquivalent: uint128(toClaim),
             ts:            uint64(block.timestamp)
         }));
-        emit ROIClaimed(msg.sender, roiTokens, ethAmount);
+        emit ROIClaimed(msg.sender, roiTokens, toClaim);
     }
 
     // ── TWAP ─────────────────────────────────────────────────────────────────
@@ -490,6 +623,9 @@ contract Liquidity is LiquidityStorage {
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────────
+    function setROICommissionRates(uint16[10] calldata rates) external onlyOwner {
+        roiCommissionRates = rates;
+    }
     function setValidPackage(uint256 ethWei, bool valid) external onlyOwner {
         validPackageAmounts[ethWei] = valid;
     }
@@ -631,6 +767,10 @@ contract Liquidity is LiquidityStorage {
         return _lpEventRecords[_user];
     }
 
+    function getCapPausedAt(address user) external view returns (uint64) {
+        return _capPausedAt[user];
+    }
+
     // ── ROI view functions (read directly from inherited storage) ────────────
     // These MUST NOT delegate to the ROI facet via a regular CALL — that would
     // read the facet's own empty storage instead of Liquidity.sol's storage.
@@ -648,11 +788,23 @@ contract Liquidity is LiquidityStorage {
     // dashboard and rewards tab to display and tick the ROI commission counters.
     function getROIData(address recipient) external view returns (uint256 liveETH, uint256 pendingETH) {
         pendingETH = _roiPendingETH[recipient];
+        // Cap is paused (exhausted by _chargeCap): streams were pre-settled into _roiPendingETH
+        // and recipientSince was reset.  Any _calcAccruedRaw from that point forward is
+        // post-exhaustion accrual which must NOT be shown or claimable.
+        if (_capPausedAt[recipient] > 0) return (0, pendingETH);
+        // Active locks fully used but expired locks still have remaining cap: allow showing
+        // the ROI that accrued during the lock period (capped at lock.unlockTime by _calcAccruedRaw).
+        if (_getRawAvailableCapInclExpired(recipient) == 0) return (0, pendingETH);
+        // Live cap exhausted (pending + live ROI consumed raw cap) even though _capPausedAt
+        // was not set — ROI has stopped accruing via _calcAccrued gate; show nothing live.
+        if (_getAvailableCap(recipient) == 0) return (0, pendingETH);
         StreamRef[] storage arr = _activeROIStreams[recipient];
         for (uint256 i = 0; i < arr.length; ) {
             StreamRef storage ref = arr[i];
             ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
-            if (!stream.ended) liveETH += _calcAccrued(stream, ref.investor, ref.lockIndex, ref.level);
+            // Raw accrual: endTs is capped at investor lock.unlockTime so value is fixed after
+            // expiry. Frontend caps the claimable zone at the settlement cap; over-cap shows red.
+            if (!stream.ended) liveETH += _calcAccruedRaw(stream, ref.investor, ref.lockIndex, ref.level);
             unchecked { i++; }
         }
     }

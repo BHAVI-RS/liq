@@ -36,6 +36,10 @@ var _dashROITickInterval = null;
 var _dashROIBaseETH      = 0;   // liveETH + pendingETH at last fetch
 var _dashROIRatePerSec   = 0;   // ETH per second accumulated across all active streams
 var _dashROIWall         = 0;   // wall-clock seconds at last fetch
+// ── Dashboard cap ticker ──
+var _dashEffCapRefBase = 0;   // effective referral cap (raw − pending − live) at last fetch
+var _dashCapRawAtLoad  = 0;   // raw cap at last fetch (for the sub-note)
+var _dashCapIsEligible = false;
 var _dashRefNow    = 0;
 var _dashWallRef   = 0;
 
@@ -319,6 +323,16 @@ function _dashStartROITicker() {
       el.innerHTML = `<span style="color:#a78bfa;">${fmt} USDT</span>`;
     } else {
       el.innerHTML = '0';
+    }
+    // Tick effective referral cap down as ROI accrues at the same rate.
+    if (_dashCapIsEligible) {
+      const capEl = document.getElementById('dashCapRem');
+      if (capEl) {
+        const capNow = Math.max(0, _dashEffCapRefBase - elapsed * _dashROIRatePerSec);
+        const hasDeduction = (_dashCapRawAtLoad - capNow) > 0.000001;
+        const note = hasDeduction ? ` (raw ${(_dashCapRawAtLoad * USDT_PER_ETH).toFixed(2)})` : '';
+        capEl.textContent = `Cap: ${(capNow * USDT_PER_ETH).toFixed(2)} USDT for referrals${note}`;
+      }
     }
   }, 1000);
 }
@@ -1161,17 +1175,15 @@ async function loadDashboard(silent = false) {
             }
           } catch(_) {}
         }));
+        // Don't show a growing rate when the contract already reports no live accrual
+        // (liveETH=0 means cap is exhausted or paused — matches getROIData's cap gates).
+        if (roiLiveETH === 0) ratePerSec = 0;
         _dashROIRatePerSec = ratePerSec;
         _dashStartROITicker();
       } catch(_) {}
     })();
     document.getElementById('dashRefEarnings').innerHTML       = fmtUSDT(refEarningsETH, {decimals: 3});
-    document.getElementById('dashRefEarningsUSD').innerHTML    =
-      isEligible
-        ? `<span style="color:var(--muted);">Cap: ${(capRemETH * USDT_PER_ETH).toFixed(2)} USDT remaining</span>`
-        : isPaused
-          ? `<span style="color:rgba(234,179,8,0.7);">Cap: ${(pausedCapETH * USDT_PER_ETH).toFixed(2)} USDT paused</span>`
-          : '';
+    document.getElementById('dashRefEarningsUSD').innerHTML    = '';
 
     const eligBadge = isEligible
       ? '<span style="cursor:pointer;font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:2px 6px;border-radius:3px;letter-spacing:1px;" onclick="event.stopPropagation();navToRewards(\'referral\')">ELIGIBLE</span>'
@@ -1201,6 +1213,20 @@ async function loadDashboard(silent = false) {
     pnlEl.innerHTML = myWealthETH > 0 ? fmtUSDT(myWealthETH, {decimals:2}) : '0';
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
+    {
+      // Effective cap for referral commissions = raw remaining minus live + pending ROI.
+      // ROI is counted as earned the moment it accrues — pending is also already earned.
+      const _effCapRef = Math.max(0, capRemETH - roiLiveETH - roiPendingETH);
+      const _liveNote  = roiLiveETH > 0.000001 ? ` (raw ${(capRemETH * USDT_PER_ETH).toFixed(2)})` : '';
+      _dashEffCapRefBase = _effCapRef;
+      _dashCapRawAtLoad  = capRemETH;
+      _dashCapIsEligible = isEligible;
+      pnlPctEl.innerHTML = isEligible
+        ? `<span id="dashCapRem" style="color:var(--muted);font-size:10px;">Cap: ${(_effCapRef * USDT_PER_ETH).toFixed(2)} USDT for referrals${_liveNote}</span>`
+        : isPaused
+          ? `<span style="color:rgba(234,179,8,0.7);font-size:10px;">Cap: ${(pausedCapETH * USDT_PER_ETH).toFixed(2)} USDT (paused)</span>`
+          : `<span style="color:#f87171;font-size:10px;">Cap: 0 USDT remaining</span>`;
+    }
 
 
     if (!silent || !_graphCache) {

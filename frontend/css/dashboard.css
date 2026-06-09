@@ -232,6 +232,19 @@
   background: var(--gold);
   transition: left 0.9s linear, width 0.9s linear;
 }
+.dis-bar-paused {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: #ef4444;
+  transition: left 0.9s linear, width 0.9s linear;
+}
+.dis-bar-overcap {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: #ef4444;
+  opacity: 0.55;
+  transition: left 0.9s linear, width 0.9s linear;
+}
 .dis-bar-row {
   display: flex;
   align-items: center;
