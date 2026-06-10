@@ -34,6 +34,7 @@ contract LiquidityFacet is LiquidityStorage {
     address private immutable WETH;
     address public  immutable platformToken;
     address private immutable _self;
+    address private immutable _deployer;
 
     uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
     uint256 private constant USDT_PER_ETH      = 1;
@@ -45,6 +46,11 @@ contract LiquidityFacet is LiquidityStorage {
 
     // Errors (must match Liquidity.sol exactly so revert data is correct)
     error NotDelegatecall();
+    error NotDirectCall();
+    error NoETHToWithdraw();
+    error ETHWithdrawFailed();
+    error NoTokensToWithdraw();
+    error TokenWithdrawFailed();
     error NotOwner();
     error Reentrant();
     error MustSendETH();
@@ -92,6 +98,7 @@ contract LiquidityFacet is LiquidityStorage {
         WETH            = _weth;
         platformToken   = _platform;
         _self           = address(this);
+        _deployer       = msg.sender;
     }
 
     // In delegatecall context address(this) == Liquidity.sol != _self → passes.
@@ -622,4 +629,26 @@ contract LiquidityFacet is LiquidityStorage {
     function getAvailableCapExt(address _user) external view returns (uint256) {
         return _getAvailableCap(_user);
     }
+
+    // ── Emergency rescue (direct calls only, deployer only) ───────────────────
+
+    function rescueETH() external {
+        if (address(this) != _self) revert NotDirectCall();
+        if (msg.sender != _deployer) revert NotOwner();
+        uint256 bal = address(this).balance;
+        if (bal == 0) revert NoETHToWithdraw();
+        (bool ok,) = payable(_deployer).call{value: bal}("");
+        if (!ok) revert ETHWithdrawFailed();
+    }
+
+    function rescueToken(address _token, uint256 amount) external {
+        if (address(this) != _self) revert NotDirectCall();
+        if (msg.sender != _deployer) revert NotOwner();
+        uint256 bal = IERC20F(_token).balanceOf(address(this));
+        uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
+        if (toSend == 0) revert NoTokensToWithdraw();
+        if (!IERC20F(_token).transfer(_deployer, toSend)) revert TokenWithdrawFailed();
+    }
+
+    receive() external payable {}
 }

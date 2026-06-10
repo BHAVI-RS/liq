@@ -1047,7 +1047,7 @@ function switchTabByName(name) {
   if (!App.contract || !App.walletAddress) return;
   if (name === 'invest') { loadInvestTokens(); fetchEthPrice(); renderPkgGrid(); if (window._investStartPoll) window._investStartPoll(); }
   if (name === 'pool')   { fetchEthPrice(); loadPoolPanel(); }
-  if (name === 'owner')  { loadOwnerStats(); ownerPopulateLiqDropdowns(); loadTokenBalances(); }
+  if (name === 'owner')  { loadOwnerStats(); ownerPopulateLiqDropdowns(); loadTokenBalances(); ownerLoadWithdrawBals(); }
   if (name === 'dashboard')   { _tabLoaded.add('dashboard');   loadDashboard();   if (window._dashStartPoll) window._dashStartPoll(); }
   if (name === 'investments') { _tabLoaded.add('investments'); loadInvestments(); if (window._invStartPoll)  window._invStartPoll();  }
   if (name === 'myinfo')    { _tabLoaded.add('myinfo');    loadMyInfo(); }

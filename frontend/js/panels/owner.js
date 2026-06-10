@@ -718,15 +718,12 @@ let _ownerWithdrawTokenSym = '';
 async function ownerLoadWithdrawBals() {
   const el = document.getElementById('ownerETHBal');
   try {
-    const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
-    const usdtAbi  = ['function balanceOf(address account) view returns (uint256)'];
-    const usdtCt   = new ethers.Contract(usdtAddr, usdtAbi, provider);
-    const usdtWei  = await usdtCt.balanceOf(contract.address);
-    const usdtBal  = parseFloat(ethers.utils.formatEther(usdtWei));
-    el.textContent = `Contract USDT balance: ${fmtNum(usdtBal)} USDT`;
-    el.style.color = usdtBal > 0 ? 'var(--gold)' : 'var(--muted)';
+    const rawBal = await provider.getBalance(contract.address);
+    const bal = parseFloat(ethers.utils.formatEther(rawBal));
+    el.innerHTML = `Contract native balance: <strong style="color:${bal > 0 ? 'var(--gold)' : 'var(--danger)'};">${bal.toLocaleString(undefined, { maximumFractionDigits: 6 })} ETH</strong> &nbsp;<span style="cursor:pointer;color:var(--muted);font-size:10px;" onclick="ownerLoadWithdrawBals()">↻ refresh</span>`;
   } catch(e) {
     el.textContent = 'Failed to load balance.';
+    el.style.color = 'var(--danger)';
   }
 }
 

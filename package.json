@@ -16,7 +16,8 @@
     "serve": "npx http-server . -p 3000 -c-1 --cors -o liquidity-platform.html",
     "amoy:hfsroi": "hardhat run scripts/amoytestnet/hfsroi.js --network polygonAmoy",
     "amoy:amoy": "hardhat run scripts/amoytestnet/deployamoy.js --network polygonAmoy",
-    "amoy:roitest": "hardhat run scripts/amoytestnet/roitest.js --network polygonAmoy"
+    "amoy:roitest": "hardhat run scripts/amoytestnet/roitest.js --network polygonAmoy",
+    "amoy:justdeploy": "hardhat run scripts/amoytestnet/justdeploy.js --network polygonAmoy"
   },
   "keywords": [],
   "author": "",

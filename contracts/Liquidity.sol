@@ -647,9 +647,7 @@ contract Liquidity is LiquidityStorage {
     }
     function withdrawToken(address _token, uint256 amount) external onlyOwner nonReentrant {
         uint256 bal    = IERC20(_token).balanceOf(address(this));
-        uint256 locked = _totalLockedLP[_token];
-        uint256 free   = bal > locked ? bal - locked : 0;
-        uint256 toSend = amount == 0 ? free : (amount > free ? free : amount);
+        uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
         if (toSend == 0) revert NoTokensToWithdraw();
         if (!IERC20(_token).transfer(owner, toSend)) revert TokenWithdrawFailed();
     }

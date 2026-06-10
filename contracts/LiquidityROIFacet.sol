@@ -3,6 +3,11 @@ pragma solidity ^0.8.0;
 
 import "./LiquidityStorage.sol";
 
+interface IERC20ROI {
+    function balanceOf(address) external view returns (uint256);
+    function transfer(address, uint256) external returns (bool);
+}
+
 // DELEGATECALL facet — executes in Liquidity.sol's storage context.
 // _calcAccrued is inherited from LiquidityStorage.
 //
@@ -13,11 +18,19 @@ import "./LiquidityStorage.sol";
 contract LiquidityROIFacet is LiquidityStorage {
 
     address private immutable _self;
+    address private immutable _deployer;
 
     error NotDelegatecall();
+    error NotDirectCall();
+    error NotOwner();
+    error NoETHToWithdraw();
+    error ETHWithdrawFailed();
+    error NoTokensToWithdraw();
+    error TokenWithdrawFailed();
 
     constructor() {
-        _self = address(this);
+        _self     = address(this);
+        _deployer = msg.sender;
     }
 
     modifier onlyDelegatecall() {
@@ -265,4 +278,26 @@ contract LiquidityROIFacet is LiquidityStorage {
     {
         return _calcAccruedRaw(_roiStreams[investor][lockIndex][level], investor, lockIndex, level);
     }
+
+    // ── Emergency rescue (direct calls only, deployer only) ───────────────────
+
+    function rescueETH() external {
+        if (address(this) != _self) revert NotDirectCall();
+        if (msg.sender != _deployer) revert NotOwner();
+        uint256 bal = address(this).balance;
+        if (bal == 0) revert NoETHToWithdraw();
+        (bool ok,) = payable(_deployer).call{value: bal}("");
+        if (!ok) revert ETHWithdrawFailed();
+    }
+
+    function rescueToken(address _token, uint256 amount) external {
+        if (address(this) != _self) revert NotDirectCall();
+        if (msg.sender != _deployer) revert NotOwner();
+        uint256 bal = IERC20ROI(_token).balanceOf(address(this));
+        uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
+        if (toSend == 0) revert NoTokensToWithdraw();
+        if (!IERC20ROI(_token).transfer(_deployer, toSend)) revert TokenWithdrawFailed();
+    }
+
+    receive() external payable {}
 }

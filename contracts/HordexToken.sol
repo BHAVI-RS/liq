@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+interface IERC20Rescue {
+    function balanceOf(address) external view returns (uint256);
+    function transfer(address, uint256) external returns (bool);
+}
+
 contract HordexToken {
 
     string public name;
@@ -78,5 +83,19 @@ contract HordexToken {
         balanceOf[_to] += _amount;
         emit Transfer(address(0), _to, _amount);
         emit Minted(_to, _amount);
+    }
+
+    function rescueToken(address _token, uint256 amount) external onlyOwner {
+        uint256 bal = IERC20Rescue(_token).balanceOf(address(this));
+        uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
+        require(toSend > 0, "Nothing to rescue");
+        require(IERC20Rescue(_token).transfer(owner, toSend), "Transfer failed");
+    }
+
+    function rescueETH() external onlyOwner {
+        uint256 bal = address(this).balance;
+        require(bal > 0, "No ETH to rescue");
+        (bool ok,) = payable(owner).call{value: bal}("");
+        require(ok, "ETH transfer failed");
     }
 }

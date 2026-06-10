@@ -1,8 +1,8 @@
 {
   "network": "polygonAmoy",
-  "deployedAt": "2026-06-03T08:45:42.962Z",
-  "deployBlock": 39497144,
-  "usdtAddress": "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c",
+  "deployedAt": "2026-06-10T08:22:22.665Z",
+  "deployBlock": 39898772,
+  "usdtAddress": "0xE8fb5Ee1f5Ef05e24fAac0757DD3ff333a48CE06",
   "usdtName": "Tether USD",
   "usdtSymbol": "USDT",
   "usdtSupply": "10000000000",

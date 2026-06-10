@@ -14,7 +14,7 @@ const FUND_TARGET    = hre.ethers.parseEther("5");   // top-up target per sub-wa
 const FUND_THRESHOLD = hre.ethers.parseEther("0.5"); // skip if already has this much
 
 // ── USDT ──────────────────────────────────────────────────────────────────────
-const USDT_ADDRESS       = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const USDT_ADDRESS       = "0xE8fb5Ee1f5Ef05e24fAac0757DD3ff333a48CE06";
 const USDT_PER_ACCOUNT   = hre.ethers.parseEther("2000000"); // exact target per sub-wallet (18 decimals)
 const USDT_ABI = [
   "function balanceOf(address) view returns (uint256)",
