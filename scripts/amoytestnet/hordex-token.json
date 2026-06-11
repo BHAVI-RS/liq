@@ -1,0 +1,9 @@
+{
+  "network": "polygonAmoy",
+  "tokenAddress": "0xC05362EF8396C1761A9591bbf0Bd0f5bfFB163A7",
+  "name": "Hordex Token",
+  "symbol": "HORDEX",
+  "totalSupply": "10000000000",
+  "deployedAt": "2026-06-11T09:26:29.551Z",
+  "deployer": "0xF8Fd742887Af3Bd4829c24fF250662D19dEdDb4C"
+}
