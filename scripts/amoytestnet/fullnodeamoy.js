@@ -18,7 +18,7 @@ const TOTAL          = 20_000;
 const POL_TARGET     = hre.ethers.parseEther("0.05");
 const POL_THRESHOLD  = hre.ethers.parseEther("0.02");
 
-const USDT_ADDRESS   = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const USDT_ADDRESS   = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
 const USDT_TARGET    = hre.ethers.parseEther("5000");
 const USDT_ABI = [
   "function balanceOf(address) view returns (uint256)",

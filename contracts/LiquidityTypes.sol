@@ -21,7 +21,8 @@ struct Token {
 struct LPLock {
     address token;              // slot 0: 20 bytes
     bool claimed;               //         +1 byte
-    bool removed;               //         +1 byte  (22 bytes total, slot 0)
+    bool removed;               //         +1 byte
+    bool capPaused;             //         +1 byte  (23 bytes total, slot 0)
     uint256 lpAmount;           // slot 1
     uint256 unlockTime;         // slot 2
     uint256 ethInvested;        // slot 3
@@ -126,6 +127,7 @@ struct ROIStream {
     uint128 roiPaidETH;          // ETH-equiv settled in the CURRENT lock period
     uint128 capETH;              // cap for the CURRENT period = ethInvested * commissionRate / 10_000
     uint128 historicalPaidETH;   // cumulative ETH-equiv paid across ALL previous periods (restakes)
+    uint128 historicalMissedETH; // cumulative ROI missed (cap-blocked) across ALL previous periods
 }
 
 // Pointer stored in _activeROIStreams / _skippedROIStreams per address.

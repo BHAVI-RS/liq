@@ -90,9 +90,10 @@ async function loadInvestments() {
   }
 
   try {
-    const [lpLocks, latestBlock] = await Promise.all([
+    const [lpLocks, latestBlock, roiData] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
       provider.getBlock('latest').catch(() => null),
+      contract.getROIData(walletAddress).catch(() => null),
     ]);
     // Use blockchain timestamp as the reference "now".  On a Hardhat mainnet fork
     // block.timestamp can be far behind the wall clock, which makes every fresh lock
@@ -171,6 +172,30 @@ async function loadInvestments() {
         expandedIndices.add(Number(card.dataset.lockIndex));
     });
 
+    // Distribute outstanding ROI (live + pending) across active locks in FIFO order.
+    // commissionsCapUsed already includes paid commissions and previously-claimed ROI.
+    // pendingETH (_roiPendingETH) is pre-settled but NOT yet charged to commissionsCapUsed
+    // — it gets charged only when the user calls claimAllROI. Include it here so each
+    // lock's cap consumed bar accurately reflects all outstanding debt against the cap.
+    const _roiLive    = roiData ? parseFloat(ethers.utils.formatEther(roiData[0])) : 0;
+    const _roiPending = roiData ? parseFloat(ethers.utils.formatEther(roiData[1])) : 0;
+    const _totalROI   = _roiLive + _roiPending;
+    const _roiPerLock = new Array(lpLocks.length).fill(0);
+    let _roiLeft = _totalROI;
+    for (let _fi = 0; _fi < lpLocks.length && _roiLeft > 0; _fi++) {
+      const _fl = lpLocks[_fi];
+      if (_fl.removed) continue;
+      if (_fl.capPaused) continue;
+      if (Number(_fl.unlockTime) <= effectiveNow) continue;
+      const _fEth     = parseFloat(ethers.utils.formatEther(_fl.ethInvested));
+      const _fCap     = _fEth * 5;
+      const _fCommUsed = parseFloat(ethers.utils.formatEther(_fl.commissionsCapUsed || ethers.BigNumber.from(0)));
+      const _fSlot    = Math.max(0, _fCap - _fCommUsed);
+      const _fRoi     = Math.min(_roiLeft, _fSlot);
+      _roiPerLock[_fi] = _fRoi;
+      _roiLeft -= _fRoi;
+    }
+
     const activeCards = [];
     const removedCards = [];
 
@@ -247,19 +272,37 @@ async function loadInvestments() {
       const isInActiveLock  = !isUnlocked && !isClaimed && !isRemoved;
       const showStakingRow  = rewardTotalETH > 0 && (isInActiveLock || canClaimStaking);
 
-      // ── Per-lock referral cap ──
+      // ── Per-lock cap (referral commissions + live/pending ROI attributed by FIFO) ──
       const commissionsCapUsed = parseFloat(ethers.utils.formatEther(lock.commissionsCapUsed || ethers.BigNumber.from(0)));
       const lockCap            = ethInvested * 5;
-      const lockCapRemaining   = Math.max(0, lockCap - commissionsCapUsed);
-      const capPct             = lockCap > 0 ? Math.min(100, commissionsCapUsed / lockCap * 100) : 0;
+      const roiAttrib          = _roiPerLock[i] || 0;
+      const totalCapUsed       = Math.min(lockCap, commissionsCapUsed + roiAttrib);
+      const lockCapRemaining   = Math.max(0, lockCap - totalCapUsed);
+      const capPct             = lockCap > 0 ? Math.min(100, totalCapUsed / lockCap * 100) : 0;
+      const isCapPaused        = !!lock.capPaused;
       const capIsActive        = !isRemoved && !isClaimed && secsLeft > 0;
-      const capIsFull          = lockCap > 0 && commissionsCapUsed >= lockCap;
-      // Don't show PAUSED tag if cap is fully used and lock is expired
-      const capTagHtml = isRemoved ? '' : capIsFull
-        ? `<span style="font-size:9px;background:rgba(201,168,76,0.15);color:var(--gold);border:1px solid rgba(201,168,76,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">CAP FULL</span>`
-        : capIsActive
-          ? `<span style="font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">ACTIVE</span>`
-          : `<span style="font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">PAUSED</span>`;
+      const capIsFull          = lockCap > 0 && totalCapUsed >= lockCap - 0.000001;
+      // Cap status: PAUSED (admin-paused, bypassed in FIFO) > EXHAUSTED (cap full) > ELIGIBLE (active, has cap) > inactive
+      const capTagHtml = isRemoved ? '' : isCapPaused
+        ? `<span style="font-size:9px;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">PAUSED</span>`
+        : capIsFull
+          ? `<span style="font-size:9px;background:rgba(248,113,113,0.15);color:#f87171;border:1px solid rgba(248,113,113,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">EXHAUSTED</span>`
+          : capIsActive
+            ? `<span style="font-size:9px;background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">ELIGIBLE</span>`
+            : `<span style="font-size:9px;background:rgba(255,255,255,0.06);color:var(--muted);border:1px solid rgba(255,255,255,0.1);padding:1px 5px;border-radius:3px;letter-spacing:1px;margin-left:6px;">INACTIVE</span>`;
+      const capColor    = capIsFull ? '#f87171' : isCapPaused ? '#eab308' : capIsActive ? '#4ade80' : 'rgba(255,255,255,0.2)';
+      const capRemPct   = Math.max(0, 100 - capPct);
+      const capBarHtml  = !isRemoved ? `
+        <div style="padding:5px 14px 6px;border-top:1px solid rgba(255,255,255,0.04);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <span style="font-family:var(--font-mono);font-size:9px;letter-spacing:1.5px;color:var(--muted);">LIVE CAP AVAILABLE${capTagHtml}</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:${capIsFull ? '#f87171' : isCapPaused ? '#eab308' : capIsActive ? '#4ade80' : 'var(--muted)'};">${fmtUSDT(lockCapRemaining)}<span style="color:var(--muted);font-size:9px;"> / ${fmtUSDT(lockCap)}</span></span>
+          </div>
+          <div style="height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;">
+            <div style="height:100%;width:${capRemPct.toFixed(2)}%;background:${capColor};border-radius:2px;transition:width 0.3s;"></div>
+          </div>
+        </div>` : '';
+
       const tokensDeposited = priceEth > 0 ? (ethInvested / 2) / priceEth : myTokensInPool;
       const usdtDeposited   = ethInvested * USDT_PER_ETH / 2;
 
@@ -377,23 +420,24 @@ async function loadInvestments() {
             </div>
             ${actionColHtml}
           </div>
+          ${capBarHtml}
           ${showStakingRow ? stakingRowHtml : ''}
           <button class="dash-inv-toggle" onclick="toggleInvDetails(this)">
             SHOW MORE <span class="dit-arrow">▾</span>
           </button>
           <div class="dash-inv-details">
             ${!isRemoved ? `<div class="did-row">
-              <span class="did-label">REF CAP${capTagHtml}</span>
+              <span class="did-label">CAP CONSUMED${capTagHtml}</span>
               <span class="did-val">
-                <span class="refcap-detail">${fmtUSDT(commissionsCapUsed)} / ${fmtUSDT(lockCap)}<span style="color:var(--muted);font-size:10px;margin-left:4px;">(${fmtNum(capPct, 1)}%)</span></span>
-                <span style="color:${capIsFull ? '#f87171' : capIsActive ? '#4ade80' : '#eab308'};font-size:10px;margin-left:6px;">${fmtUSDT(lockCapRemaining)} remaining</span>
+                <span class="refcap-detail">${fmtUSDT(totalCapUsed)} / ${fmtUSDT(lockCap)}<span style="color:var(--muted);font-size:10px;margin-left:4px;">(${fmtNum(capPct, 1)}%)</span></span>
+                <span style="color:${capIsFull ? '#f87171' : isCapPaused ? '#eab308' : capIsActive ? '#4ade80' : 'var(--muted)'};font-size:10px;margin-left:6px;">${fmtUSDT(lockCapRemaining)} remaining</span>
               </span>
             </div>
             <div class="did-row" style="padding-top:2px;padding-bottom:6px;">
               <span class="did-label"></span>
               <span class="did-val" style="width:100%;max-width:260px;">
                 <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;">
-                  <div style="height:100%;width:${capPct.toFixed(2)}%;background:${capIsFull ? '#f87171' : capIsActive ? '#4ade80' : '#eab308'};border-radius:2px;transition:width 0.3s;"></div>
+                  <div style="height:100%;width:${capPct.toFixed(2)}%;background:${capIsFull ? '#f87171' : isCapPaused ? '#eab308' : capIsActive ? '#4ade80' : 'rgba(255,255,255,0.2)'};border-radius:2px;transition:width 0.3s;"></div>
                 </div>
               </span>
             </div>` : ''}

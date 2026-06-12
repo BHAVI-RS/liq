@@ -14,12 +14,15 @@ const FUND_TARGET    = hre.ethers.parseEther("5");   // top-up target per sub-wa
 const FUND_THRESHOLD = hre.ethers.parseEther("0.5"); // skip if already has this much
 
 // ── USDT ──────────────────────────────────────────────────────────────────────
-const USDT_ADDRESS       = "0xE8fb5Ee1f5Ef05e24fAac0757DD3ff333a48CE06";
+const USDT_ADDRESS       = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
 const USDT_PER_ACCOUNT   = hre.ethers.parseEther("2000000"); // exact target per sub-wallet (18 decimals)
 const USDT_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function transfer(address to, uint256 amount) returns (bool)",
 ];
+
+// ── Platform token (Hordex) — collect all back to deployer ────────────────────
+const PLATFORM_TOKEN_ADDRESS = "0x39544CBb2aB89E64aD74c731Ee690D2923bB209f";
 
 function sep(c = "─", n = 60) { return c.repeat(n); }
 
@@ -53,16 +56,20 @@ async function main() {
   console.log("  AMOY NODE — 60 Derived Accounts");
   console.log(sep("═"));
 
+  const platformContract = new hre.ethers.Contract(PLATFORM_TOKEN_ADDRESS, USDT_ABI, deployer);
+
   let maticFunded = 0, maticSkipped = 0;
   let usdtFunded  = 0, usdtSkipped  = 0;
+  let hdxRecovered = 0;
 
   for (let i = 0; i < TOTAL; i++) {
     const wallet = wallets[i];
     const tag    = i === 0 ? " (funder)" : "";
 
-    const [maticBal, usdtBal] = await Promise.all([
+    const [maticBal, usdtBal, hdxBal] = await Promise.all([
       provider.getBalance(wallet.address),
       usdtContract.balanceOf(wallet.address),
+      platformContract.balanceOf(wallet.address),
     ]);
 
     console.log(`\n  Account [${String(i).padStart(2, "0")}]${tag}`);
@@ -70,6 +77,7 @@ async function main() {
     console.log(`  Address     : ${wallet.address}`);
     console.log(`  Private Key : ${wallet.privateKey}`);
     console.log(`  USDT Balance: ${hre.ethers.formatEther(usdtBal)} USDT`);
+    console.log(`  HDX Balance : ${hre.ethers.formatEther(hdxBal)} HDX`);
     console.log(`  ETH Balance : ${hre.ethers.formatEther(maticBal)} POL`);
 
     if (i === 0) continue; // deployer is the funder — never refill
@@ -104,11 +112,23 @@ async function main() {
       console.log(`  USDT        : sent ${hre.ethers.formatEther(deficit)} USDT ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
       usdtFunded++;
     }
+
+    // ── HDX — collect all back to deployer ───────────────────────────────
+    if (hdxBal > 0n) {
+      const subPlatform = new hre.ethers.Contract(PLATFORM_TOKEN_ADDRESS, USDT_ABI, wallet);
+      const tx = await subPlatform.transfer(deployer.address, hdxBal);
+      await tx.wait();
+      console.log(`  HDX         : recovered ${hre.ethers.formatEther(hdxBal)} HDX to account[0] ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      hdxRecovered++;
+    } else {
+      console.log(`  HDX         : zero — skipped`);
+    }
   }
 
-  const [finalMatic, finalUSDT] = await Promise.all([
+  const [finalMatic, finalUSDT, finalHDX] = await Promise.all([
     provider.getBalance(deployer.address),
     usdtContract.balanceOf(deployer.address),
+    platformContract.balanceOf(deployer.address),
   ]);
 
   console.log("\n" + sep("═"));
@@ -116,8 +136,10 @@ async function main() {
   console.log(sep("═"));
   console.log(`  POL  funded : ${maticFunded}  skipped: ${maticSkipped}`);
   console.log(`  USDT funded : ${usdtFunded}  skipped: ${usdtSkipped}`);
+  console.log(`  HDX recovered: ${hdxRecovered} wallets`);
   console.log(`  account[00] POL  remaining: ${hre.ethers.formatEther(finalMatic)} POL`);
   console.log(`  account[00] USDT remaining: ${hre.ethers.formatEther(finalUSDT)} USDT`);
+  console.log(`  account[00] HDX  balance  : ${hre.ethers.formatEther(finalHDX)} HDX`);
   console.log(sep("═"));
   console.log("  Done. Run simulateamoy.js next:");
   console.log("  npx hardhat run scripts/amoytestnet/simulateamoy.js --network polygonAmoy");

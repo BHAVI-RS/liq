@@ -42,20 +42,26 @@ contract LiquidityROIFacet is LiquidityStorage {
 
     // Settles a single stream using raw accrual (no cap gate).
     // The caller is responsible for enforcing the raw cap ceiling across the batch.
-    // toSettle = 0 is valid: recipientSince is always reset so future accrual starts fresh.
+    // Any accrual that cannot be settled (capRemaining = 0 or cap too small) is recorded
+    // directly into stream.historicalMissedETH so the value is never silently discarded.
     function _settleStream(
         ROIStream storage stream,
         address investor,
         uint256 lockIndex,
         uint8   level,
-        uint256 capRemaining    // max ETH this settlement may add to pending (0 = skip payment)
+        uint256 capRemaining    // max ETH this settlement may add to pending (0 = record all as missed)
     ) internal returns (uint256 settled) {
-        if (stream.recipient != address(0) && capRemaining > 0) {
+        if (stream.recipient != address(0)) {
             uint256 accrued = _calcAccruedRaw(stream, investor, lockIndex, level);
-            settled = accrued < capRemaining ? accrued : capRemaining;
-            if (settled > 0) {
-                stream.roiPaidETH += uint128(settled);
-                _roiPendingETH[stream.recipient] += settled;
+            if (capRemaining > 0) {
+                settled = accrued < capRemaining ? accrued : capRemaining;
+                if (settled > 0) {
+                    stream.roiPaidETH += uint128(settled);
+                    _roiPendingETH[stream.recipient] += settled;
+                }
+            }
+            if (accrued > settled) {
+                stream.historicalMissedETH += uint128(accrued - settled);
             }
         }
         stream.recipientSince = uint64(block.timestamp);
@@ -94,6 +100,7 @@ contract LiquidityROIFacet is LiquidityStorage {
     // Like _settleStream but bounded to endBound — used when A's own lock has expired naturally.
     // Sets recipientSince = endBound (not block.timestamp) so _handleNaturalExpiryResume can
     // later detect the gap period (endBound → reinvestment time) and record it as missed.
+    // Any accrual that cannot be settled (cap insufficient) is written to historicalMissedETH.
     function _settleStreamAt(
         ROIStream storage stream,
         address investor,
@@ -102,12 +109,17 @@ contract LiquidityROIFacet is LiquidityStorage {
         uint256 capRemaining,
         uint256 endBound
     ) internal returns (uint256 settled) {
-        if (stream.recipient != address(0) && capRemaining > 0) {
+        if (stream.recipient != address(0)) {
             uint256 accrued = _calcAccruedRawAt(stream, investor, lockIndex, level, endBound);
-            settled = accrued < capRemaining ? accrued : capRemaining;
-            if (settled > 0) {
-                stream.roiPaidETH += uint128(settled);
-                _roiPendingETH[stream.recipient] += settled;
+            if (capRemaining > 0) {
+                settled = accrued < capRemaining ? accrued : capRemaining;
+                if (settled > 0) {
+                    stream.roiPaidETH += uint128(settled);
+                    _roiPendingETH[stream.recipient] += settled;
+                }
+            }
+            if (accrued > settled) {
+                stream.historicalMissedETH += uint128(accrued - settled);
             }
         }
         stream.recipientSince = uint64(endBound);
@@ -150,6 +162,7 @@ contract LiquidityROIFacet is LiquidityStorage {
 
     // Called by _removeLPCore() and restakeLP() before initROIStreamsExt.
     // Settles each stream's pending accrual (capped at recipient's live available cap) and marks it ended.
+    // Any unsettled accrual is recorded as missed inside _settleStream.
     function endROIStreamsExt(address investor, uint256 lockIndex) external payable onlyDelegatecall {
         for (uint8 i = 0; i < 10; ) {
             ROIStream storage stream = _roiStreams[investor][lockIndex][i];

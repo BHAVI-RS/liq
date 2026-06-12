@@ -60,7 +60,7 @@ library LiquidityViewLib {
         uint256 len = locks.length;
         for (uint256 i = 0; i < len; ) {
             LPLock memory l = locks[i];
-            if (!l.removed) {
+            if (!l.removed && !l.capPaused) {
                 uint256 cap     = l.ethInvested * 5;
                 uint256 capLeft = l.commissionsCapUsed < cap ? cap - l.commissionsCapUsed : 0;
                 if (capLeft > 0) {

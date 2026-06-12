@@ -46,7 +46,7 @@ const UNI_FACTORY = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
 // UNI_WETH is no longer used — USDT is the pool base token instead.
 
 // ── USDT — already deployed; used as the pool base token (replaces WETH) ─────
-const DEPLOYED_USDT = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const DEPLOYED_USDT = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
 
 // ── Platform token config ─────────────────────────────────────────────────────
 const TOKEN_NAME   = "Hordex Token";

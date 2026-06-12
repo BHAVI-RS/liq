@@ -1,6 +1,13 @@
 // ── CONFIG ──
 const contractAddress = CONTRACT_ADDRESS;
 
+// Capture ?ref= immediately at script load — history.replaceState later strips the URL
+// so reading window.location.search inside checkRegistration always returns empty.
+const _capturedRefParam = (function() {
+  try { return new URLSearchParams(window.location.search).get('ref'); }
+  catch(_) { return null; }
+})();
+
 // Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
 // Transactions still go through the wallet signer; only eth_call goes here.
 const ALCHEMY_AMOY_URL = 'https://polygon-amoy.g.alchemy.com/v2/_0p-lkCP0DWUV-Z-BQYCL';
@@ -821,8 +828,9 @@ async function checkRegistration() {
         setTimeout(_onLoginCheckInvestments, 4000);
       }, 600);
     } else {
-      const params = new URLSearchParams(window.location.search);
-      const refParam = params.get('ref');
+      // Use the ref param captured at page load — window.location.search is
+      // already empty by this point because history.replaceState stripped it.
+      const refParam = _capturedRefParam;
       let referrerAddr = null;
       let referrerLabel = '';
 
@@ -839,14 +847,18 @@ async function checkRegistration() {
       if (!referrerAddr) {
         referrerAddr = await App.contract.owner();
         referrerLabel = referrerAddr + '  (Platform Admin)';
-        document.getElementById('newUserPromptText').textContent = 'Register under the platform admin, or enter a referrer below.';
+        document.getElementById('newUserReferrerLabel').textContent = 'REGISTERED UNDER';
+        document.getElementById('newUserPromptText').textContent = 'No referral link detected. You will be registered under the platform admin.';
         // No referral link — show the manual address entry section
         document.getElementById('customReferrerSection').style.display = 'block';
         document.getElementById('customReferrerInput').value = '';
         document.getElementById('customReferrerStatus').textContent = '';
+        document.getElementById('newUserBtnLabel').textContent = 'JOIN UNDER ADMIN';
       } else {
-        document.getElementById('newUserPromptText').textContent = 'Register under this referrer?';
+        document.getElementById('newUserReferrerLabel').textContent = 'REFERRED BY';
+        document.getElementById('newUserPromptText').textContent = 'You were referred by this user. Click below to complete your registration.';
         document.getElementById('customReferrerSection').style.display = 'none';
+        document.getElementById('newUserBtnLabel').textContent = 'YES, REGISTER ME';
       }
 
       _pendingReferrer = referrerAddr;
@@ -866,10 +878,21 @@ async function checkRegistration() {
 async function registerNewUser() {
   if (!App.contract || !_pendingReferrer) return;
   const btn = document.getElementById('newUserBtnLabel');
-  btn.textContent = 'Registering...';
   document.getElementById('newUserRegisterBtn').disabled = true;
   _txBegin();
   try {
+    // Step 1: Approve the 1 USDT registration fee
+    const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+    const usdtAbi  = ['function approve(address spender, uint256 amount) external returns (bool)'];
+    const usdtToken = new ethers.Contract(usdtAddr, usdtAbi, App.signer);
+    const regFee    = ethers.utils.parseEther('1'); // 1 USDT legitimacy check fee
+    btn.textContent = 'Approving 1 USDT...';
+    const approveTx = await usdtToken.approve(CONTRACT_ADDRESS, regFee, _GAS);
+    btn.textContent = 'Waiting for approval...';
+    await approveTx.wait();
+
+    // Step 2: Register
+    btn.textContent = 'Registering...';
     const tx = await App.contract.connect(App.signer).register(_pendingReferrer, _GAS);
     btn.textContent = 'Waiting for confirmation...';
     await tx.wait();
@@ -937,6 +960,7 @@ async function applyCustomReferrer() {
     _pendingReferrer = val;
     document.getElementById('newUserReferrerAddr').textContent = val;
     document.getElementById('newUserPromptText').textContent = 'Register under this referrer?';
+    document.getElementById('newUserBtnLabel').textContent = 'YES, REGISTER ME';
     statusEl.textContent = 'Referrer set. Click YES, REGISTER ME to continue.';
     statusEl.style.color = '#4ade80';
   } catch(e) {
@@ -1118,6 +1142,8 @@ function _doRefresh(panel) {
     case 'rewards-staking':
       if (window.loadRwStaking)   window.loadRwStaking(true);
       if (window.loadRwLPFees)    window.loadRwLPFees(true);     break;
+    case 'rewards-roi':
+      if (_tabLoaded.has('rewards') && window.loadRwROI) window.loadRwROI(true); break;
     case 'history-rewards':
       if (_activeHistTab === 'rewards' && window.loadRewardHistory) window.loadRewardHistory(); break;
   }
@@ -1137,7 +1163,7 @@ function _startChainListeners() {
   try {
     // ── User's own on-chain actions ──────────────────────────────────────
     contract.on(contract.filters.Invested(addr), () =>
-      _triggerRefresh(['dashboard', 'investments']));
+      _triggerRefresh(['dashboard', 'investments', 'rewards-roi']));
 
     contract.on(contract.filters.LPClaimed(addr), () =>
       _triggerRefresh(['dashboard', 'investments', 'rewards-staking']));

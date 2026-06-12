@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1781115228720"></script>
+  <script src="contract-config.js?v=1781286824350"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -129,7 +129,7 @@
         <div class="landing-section-label">How Does It Work</div>
         <div class="ls-step">
           <div class="ls-step-num">1</div>
-          <div class="ls-step-body"><strong>REGISTRATION</strong> <p>Connect your wallet and sign up using a referral link to join the HORDEX network. No referral? Join directly on the platform and receive early invites to meetings.</p></div>
+          <div class="ls-step-body"><strong>REGISTRATION</strong> <p>Connect your wallet and sign up using a referral link to join the HORDEX network. No referral? Join directly on the platform and receive early invites to meetings. A one-time <strong>1 USDT legitimacy check</strong> is required on registration to keep the platform free of spam accounts.</p></div>
         </div>
         <div class="ls-step">
           <div class="ls-step-num">2</div>
@@ -234,12 +234,21 @@
         <div id="newUserReferrerRow" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);">
           <div style="flex-shrink:0;width:32px;height:32px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:14px;">👤</div>
           <div>
-            <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">REFERRED BY</div>
+            <div id="newUserReferrerLabel" style="font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">REFERRED BY</div>
             <div id="newUserReferrerAddr" style="font-family:var(--font-mono);font-size:12px;color:var(--cream);">—</div>
           </div>
         </div>
         <div style="font-size:13px;color:var(--cream);margin-bottom:6px;" id="newUserPromptText">Register under this referrer?</div>
         <div style="font-size:11px;color:var(--muted);line-height:1.7;">You will earn commission for your referrer on your investments.<br>You can also earn commissions by sharing your own link after registration.</div>
+
+        <!-- Registration fee notice -->
+        <div style="margin-top:14px;padding:10px 14px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.3);border-radius:6px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:15px;flex-shrink:0;">🔒</span>
+          <div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--gold);letter-spacing:.08em;margin-bottom:2px;">LEGITIMACY CHECK — 1 USDT</div>
+            <div style="font-size:10px;color:var(--muted);line-height:1.6;">A one-time fee of <strong style="color:var(--cream);">1 USDT</strong> is collected on registration to prevent spam accounts. This is sent directly to the platform.</div>
+          </div>
+        </div>
 
         <!-- shown only when no ?ref= link is present -->
         <div id="customReferrerSection" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">

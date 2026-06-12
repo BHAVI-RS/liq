@@ -1002,9 +1002,9 @@ input[type="email"]::placeholder { color: var(--muted); }
 
 /* ── ROI COMMISSIONS MOBILE ── */
 @media (max-width: 640px) {
-  /* Stat cards — force single row */
+  /* Stat cards — 2×2 grid for the 4 tabs */
   .rw-roi-stat-grid {
-    grid-template-columns: repeat(3, 1fr) !important;
+    grid-template-columns: repeat(2, 1fr) !important;
     gap: 6px !important;
   }
   .rw-roi-stat-grid > div { padding: 8px 6px !important; }

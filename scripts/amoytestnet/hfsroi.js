@@ -33,7 +33,7 @@ const path = require("path");
 // ── Uniswap V2 on Polygon Amoy ────────────────────────────────────────────────
 const UNI_ROUTER    = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
 const UNI_FACTORY   = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
-const DEPLOYED_USDT = "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c";
+const DEPLOYED_USDT = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
 const USDT_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function transfer(address,uint256) returns (bool)",

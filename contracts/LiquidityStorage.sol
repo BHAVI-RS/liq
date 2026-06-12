@@ -135,7 +135,7 @@ abstract contract LiquidityStorage {
         uint256 len = locks.length;
         for (uint256 j = 0; j < len; ) {
             LPLock storage l = locks[j];
-            if (!l.removed && block.timestamp < l.unlockTime) {
+            if (!l.removed && !l.capPaused && block.timestamp < l.unlockTime) {
                 uint256 cap = l.ethInvested * 5;
                 if (l.commissionsCapUsed < cap) available += cap - l.commissionsCapUsed;
             }
@@ -152,7 +152,7 @@ abstract contract LiquidityStorage {
         uint256 len = locks.length;
         for (uint256 j = 0; j < len; ) {
             LPLock storage l = locks[j];
-            if (!l.removed) {
+            if (!l.removed && !l.capPaused) {
                 uint256 cap = l.ethInvested * 5;
                 if (l.commissionsCapUsed < cap) available += cap - l.commissionsCapUsed;
             }
@@ -169,7 +169,7 @@ abstract contract LiquidityStorage {
         uint256 remaining = _amount;
         for (uint256 j = 0; j < len && remaining > 0; ) {
             LPLock storage l = locks[j];
-            if (!l.removed) {
+            if (!l.removed && !l.capPaused) {
                 uint256 cap = l.ethInvested * 5;
                 if (l.commissionsCapUsed < cap) {
                     uint256 space    = cap - l.commissionsCapUsed;
@@ -259,12 +259,13 @@ abstract contract LiquidityStorage {
     }
 
     function _chargeCap(address _user, uint256 _amount) internal {
-        // Exhaust check uses live cap (raw − pending − live ROI) so that ROI already consuming
-        // the cap is accounted for. A commission that pushes the live cap to zero triggers
-        // stream pre-settlement and cap pause even if it does not alone exhaust the raw cap.
+        // Pre-settlement guard: when this commission would push live cap (raw − pending − ROI)
+        // to zero, pre-settle ROI streams NOW so they are frozen at the cap boundary.
+        // _capPausedAt is set separately only when the raw commission cap across ALL active
+        // locks is genuinely exhausted (remaining > 0 after the FIFO loop below).
         uint256 rawAvailable = _getRawAvailableCap(_user);
-        bool willExhaust = rawAvailable == 0 || _getAvailableCap(_user) <= _amount;
-        if (willExhaust && rawAvailable > 0) {
+        bool needsPreSettle = rawAvailable == 0 || _getAvailableCap(_user) <= _amount;
+        if (needsPreSettle && rawAvailable > 0) {
             StreamRef[] storage sRefs = _activeROIStreams[_user];
             uint256 sLen = sRefs.length;
             for (uint256 k = 0; k < sLen; ) {
@@ -284,7 +285,7 @@ abstract contract LiquidityStorage {
         uint256 remaining = _amount;
         for (uint256 j = 0; j < len && remaining > 0; ) {
             LPLock storage l = locks[j];
-            if (!l.removed && block.timestamp < l.unlockTime) {
+            if (!l.removed && !l.capPaused && block.timestamp < l.unlockTime) {
                 uint256 cap = l.ethInvested * 5;
                 if (l.commissionsCapUsed < cap) {
                     uint256 space    = cap - l.commissionsCapUsed;
@@ -296,21 +297,26 @@ abstract contract LiquidityStorage {
             unchecked { j++; }
         }
 
-        if (willExhaust) {
+        if (remaining > 0) {
             _capPausedAt[_user] = uint64(block.timestamp);
         }
     }
 
-    // Called when an investor re-enters (invest/restake) after all their active LP locks expired
-    // naturally — i.e. _getRawAvailableCap was 0 without _capPausedAt being explicitly set.
-    // Settles the ROI earned before the lock expired against the settlement cap (expired locks),
-    // records the gap-period ROI (lastExpiry → now) as missed commissions, and resets
-    // recipientSince so future accrual starts clean from the reinvestment moment.
+    // Called when an investor re-enters (invest/restake) after _getRawAvailableCap was 0
+    // without _capPausedAt being explicitly set.  Two sub-cases:
+    //   lastExpiry > 0 — locks existed and expired naturally.  Settle pre-expiry ROI, then
+    //                    record gap (lastExpiry → now) as missed.
+    //   lastExpiry = 0 — user had no locks at all (first investment as referrer, etc.).
+    //                    No pre-expiry settlement; the entire accrual window is the gap.
+    // In both cases recipientSince is reset so future accrual starts clean from now.
     function _handleNaturalExpiryResume(address _user, uint256 lastExpiry) internal {
-        if (lastExpiry == 0) return;
-        uint256 rawCap       = _getRawAvailableCapInclExpired(_user);
-        uint256 alreadyPend  = _roiPendingETH[_user];
-        uint256 capRem       = rawCap > alreadyPend ? rawCap - alreadyPend : 0;
+        // Only pre-expiry settlement needs a cap; gap recording never does.
+        uint256 capRem = 0;
+        if (lastExpiry > 0) {
+            uint256 rawCap      = _getRawAvailableCapInclExpired(_user);
+            uint256 alreadyPend = _roiPendingETH[_user];
+            capRem = rawCap > alreadyPend ? rawCap - alreadyPend : 0;
+        }
 
         StreamRef[] storage sRefs = _activeROIStreams[_user];
         uint256 sLen = sRefs.length;
@@ -318,26 +324,24 @@ abstract contract LiquidityStorage {
             StreamRef storage sRef = sRefs[k];
             ROIStream storage s = _roiStreams[sRef.investor][sRef.lockIndex][sRef.level];
             if (!s.ended) {
-                // Pre-expiry: settle ROI accrued from recipientSince up to lastExpiry.
-                uint256 preExpiry = _calcAccruedRawAt(s, sRef.investor, sRef.lockIndex, sRef.level, lastExpiry);
-                if (preExpiry > 0 && capRem > 0) {
-                    uint256 toSettle = preExpiry < capRem ? preExpiry : capRem;
-                    s.roiPaidETH        += uint128(toSettle);
-                    _roiPendingETH[_user] += toSettle;
-                    if (toSettle < capRem) capRem -= toSettle; else capRem = 0;
+                uint256 preExpiry = 0;
+                if (lastExpiry > 0) {
+                    // Pre-expiry: settle ROI accrued from recipientSince up to lastExpiry.
+                    preExpiry = _calcAccruedRawAt(s, sRef.investor, sRef.lockIndex, sRef.level, lastExpiry);
+                    if (preExpiry > 0 && capRem > 0) {
+                        uint256 toSettle = preExpiry < capRem ? preExpiry : capRem;
+                        s.roiPaidETH          += uint128(toSettle);
+                        _roiPendingETH[_user] += toSettle;
+                        if (toSettle < capRem) capRem -= toSettle; else capRem = 0;
+                    }
                 }
-                // Gap: ROI from lastExpiry to now — count as missed (active cap was zero).
+                // Gap: ROI from lastExpiry (or stream start when lastExpiry=0) to now.
                 uint256 fullRaw = _calcAccruedRaw(s, sRef.investor, sRef.lockIndex, sRef.level);
                 uint256 gapROI  = fullRaw > preExpiry ? fullRaw - preExpiry : 0;
                 if (gapROI > 0) {
-                    totalMissedCommissions[_user] += gapROI;
-                    _missedRecords[_user].push(MissedRecord({
-                        from:   sRef.investor,
-                        ts:     uint64(block.timestamp),
-                        level:  sRef.level,
-                        reason: 1,
-                        amount: uint128(gapROI)
-                    }));
+                    // ROI gap is tracked per-stream in historicalMissedETH only.
+                    // totalMissedCommissions / _missedRecords track referral commission misses only.
+                    s.historicalMissedETH += uint128(gapROI);
                 }
                 s.recipientSince = uint64(block.timestamp);
             }

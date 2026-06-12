@@ -36,9 +36,10 @@ contract Liquidity is LiquidityStorage {
     address private immutable _facet;
     address private immutable _roiFacet;
 
-    uint256 private constant LP_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
-    uint256 private constant USDT_PER_ETH     = 1;
-    uint256 private constant TWAP_MAX_STALE   = 2 hours;
+    uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
+    uint256 private constant USDT_PER_ETH      = 1;
+    uint256 private constant TWAP_MAX_STALE    = 2 hours;
+    uint256 private constant REGISTRATION_FEE  = 1e18 / USDT_PER_ETH; // 1 USDT legitimacy check
 
     // ── Errors ────────────────────────────────────────────────────────────────
     error NotOwner();
@@ -87,6 +88,7 @@ contract Liquidity is LiquidityStorage {
     error TokenWithdrawFailed();
     error TWAPStale();
     error TokenTWAPStale();
+    error RegistrationFeeFailed();
 
     // ── Events ────────────────────────────────────────────────────────────────
     event UserRegistered(address indexed user, address indexed referrer);
@@ -207,6 +209,8 @@ contract Liquidity is LiquidityStorage {
     function register(address _referrer) external notRegistered {
         if (_referrer == msg.sender) revert CannotReferSelf();
         if (!users[_referrer].isRegistered) revert ReferrerNotRegistered();
+        // 1 USDT legitimacy check — sent directly to the deployer wallet
+        if (!IERC20(WETH).transferFrom(msg.sender, owner, REGISTRATION_FEE)) revert RegistrationFeeFailed();
         User storage user = users[msg.sender];
         user.userAddress  = msg.sender;
         user.referrer     = _referrer;
@@ -341,14 +345,15 @@ contract Liquidity is LiquidityStorage {
         // Restore ROI stream start times now that a new lock restores available cap.
         if (_capPausedAt[msg.sender] > 0) {
             _capPausedAt[msg.sender] = 0;
-            if (hadNoActiveCap) {
-                // Lock had already expired when _chargeCap was triggered (e.g. by a commission).
+            if (hadNoActiveCap && _lastExpiry > 0) {
+                // All active locks had expired when _chargeCap was triggered by a commission.
                 // _chargeCap skipped pre-settlement (rawAvailable was 0) so recipientSince was
                 // never reset — treat identically to the natural-expiry path below.
                 _handleNaturalExpiryResume(msg.sender, _lastExpiry);
             } else {
-                // Normal cap-pause: _chargeCap pre-settled streams and reset recipientSince to
-                // pause time. Record gap ROI (pause → reinvest) as missed, then reset to now.
+                // Commission-exhausted active locks (_lastExpiry = 0): _chargeCap pre-settled
+                // streams and reset recipientSince to pause time. Record gap ROI as missed so
+                // the gap period (pause → reinvest) does not retroactively accrue on new cap.
                 StreamRef[] storage capRefs = _activeROIStreams[msg.sender];
                 uint256 capRefLen = capRefs.length;
                 for (uint256 k = 0; k < capRefLen; ) {
@@ -357,14 +362,7 @@ contract Liquidity is LiquidityStorage {
                     if (!capStream.ended) {
                         uint256 gapROI = _calcAccruedRaw(capStream, capRefs[k].investor, capRefs[k].lockIndex, capRefs[k].level);
                         if (gapROI > 0) {
-                            totalMissedCommissions[msg.sender] += gapROI;
-                            _missedRecords[msg.sender].push(MissedRecord({
-                                from:   capRefs[k].investor,
-                                ts:     uint64(block.timestamp),
-                                level:  capRefs[k].level,
-                                reason: 1,
-                                amount: uint128(gapROI)
-                            }));
+                            capStream.historicalMissedETH += uint128(gapROI);
                         }
                         capStream.recipientSince = uint64(block.timestamp);
                     }
@@ -372,8 +370,8 @@ contract Liquidity is LiquidityStorage {
                 }
             }
         } else if (hadNoActiveCap) {
-            // Natural expiry: lock expired but no commission arrived after expiry to trigger
-            // _chargeCap. Settle pre-expiry ROI and record gap as missed.
+            // Natural expiry (or no prior investment): lock expired or user never had a lock.
+            // Settle pre-expiry ROI and record gap as missed.
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 
@@ -450,11 +448,11 @@ contract Liquidity is LiquidityStorage {
         if (_capPausedAt[msg.sender] > 0) {
             userLPLocks[msg.sender][_lockIndex].commissionsCapUsed = 0;
             _capPausedAt[msg.sender] = 0;
-            if (hadNoActiveCap) {
-                // Lock had expired before _chargeCap ran; recipientSince was not reset by it.
+            if (hadNoActiveCap && _lastExpiry > 0) {
+                // All locks had expired before _chargeCap ran; recipientSince was not reset.
                 _handleNaturalExpiryResume(msg.sender, _lastExpiry);
             } else {
-                // Normal cap-pause: record gap ROI (pause → restake) as missed, reset to now.
+                // Commission-exhausted active locks or normal cap-pause: record gap as missed.
                 StreamRef[] storage capRefs = _activeROIStreams[msg.sender];
                 uint256 capRefLen = capRefs.length;
                 for (uint256 k = 0; k < capRefLen; ) {
@@ -463,14 +461,7 @@ contract Liquidity is LiquidityStorage {
                     if (!capStream.ended) {
                         uint256 gapROI = _calcAccruedRaw(capStream, capRefs[k].investor, capRefs[k].lockIndex, capRefs[k].level);
                         if (gapROI > 0) {
-                            totalMissedCommissions[msg.sender] += gapROI;
-                            _missedRecords[msg.sender].push(MissedRecord({
-                                from:   capRefs[k].investor,
-                                ts:     uint64(block.timestamp),
-                                level:  capRefs[k].level,
-                                reason: 1,
-                                amount: uint128(gapROI)
-                            }));
+                            capStream.historicalMissedETH += uint128(gapROI);
                         }
                         capStream.recipientSince = uint64(block.timestamp);
                     }
@@ -631,6 +622,9 @@ contract Liquidity is LiquidityStorage {
     }
     function setMinDirectReferralInvestment(uint256 _amount) external onlyOwner {
         minDirectReferralInvestment = _amount;
+    }
+    function setLockCapPaused(address _user, uint256 _lockIndex, bool _paused) external onlyOwner {
+        userLPLocks[_user][_lockIndex].capPaused = _paused;
     }
     function setStakingRates(uint256 durationIdx, uint256 tierIdx, uint256 streakLevel, uint256 rate) external onlyOwner {
         if (durationIdx >= 6) revert InvalidDurationIndex();

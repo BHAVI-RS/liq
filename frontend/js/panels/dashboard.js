@@ -37,9 +37,11 @@ var _dashROIBaseETH      = 0;   // liveETH + pendingETH at last fetch
 var _dashROIRatePerSec   = 0;   // ETH per second accumulated across all active streams
 var _dashROIWall         = 0;   // wall-clock seconds at last fetch
 // ── Dashboard cap ticker ──
-var _dashEffCapRefBase = 0;   // effective referral cap (raw − pending − live) at last fetch
-var _dashCapRawAtLoad  = 0;   // raw cap at last fetch (for the sub-note)
-var _dashCapIsEligible = false;
+var _dashEffCapRefBase  = 0;     // effective referral cap (raw − pending − live) at last fetch
+var _dashCapRawAtLoad   = 0;     // raw cap at last fetch (for the sub-note)
+var _dashCapIsEligible  = false;
+var _dashCapPaused      = false; // true when _capPausedAt > 0 (commission-triggered exhaustion)
+var _dashCapLockExpired = false; // true when all active locks expired naturally (no _capPausedAt)
 var _dashRefNow    = 0;
 var _dashWallRef   = 0;
 
@@ -326,12 +328,17 @@ function _dashStartROITicker() {
     }
     // Tick effective referral cap down as ROI accrues at the same rate.
     if (_dashCapIsEligible) {
-      const capEl = document.getElementById('dashCapRem');
+      const capEl   = document.getElementById('dashCapRem');
+      const badgeEl = document.getElementById('dashCapBadge');
       if (capEl) {
         const capNow = Math.max(0, _dashEffCapRefBase - elapsed * _dashROIRatePerSec);
-        const hasDeduction = (_dashCapRawAtLoad - capNow) > 0.000001;
-        const note = hasDeduction ? ` (raw ${(_dashCapRawAtLoad * USDT_PER_ETH).toFixed(2)})` : '';
-        capEl.textContent = `Cap: ${(capNow * USDT_PER_ETH).toFixed(2)} USDT for referrals${note}`;
+        capEl.textContent = '$' + (capNow * USDT_PER_ETH).toFixed(2) + ' cap remaining';
+        if (badgeEl && capNow <= 0) {
+          badgeEl.textContent = 'EXHAUSTED';
+          badgeEl.style.color = '#ef4444';
+          badgeEl.style.background = 'rgba(239,68,68,0.12)';
+          badgeEl.style.borderColor = 'rgba(239,68,68,0.3)';
+        }
       }
     }
   }, 1000);
@@ -979,13 +986,15 @@ async function loadDashboard(silent = false) {
   try {
     const _latestBlockNum = await provider.getBlockNumber();
     const _fromBlock      = getFromBlock(_latestBlockNum);
-    const [lpLocks, commStats, stakingReward, platformToken, latestBlock, roiData] = await Promise.all([
+    const [lpLocks, commStats, stakingReward, platformToken, latestBlock, roiData, capPausedAtRaw, roiClaimRecords] = await Promise.all([
       contract.getUserLPLocks(walletAddress).catch(() => []),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
       contract.platformToken().catch(() => null),
       provider.getBlock('latest').catch(() => null),
       contract.getROIData(walletAddress).catch(() => null),
+      contract.getCapPausedAt(walletAddress).catch(() => 0),
+      contract.getROIClaimRecords(walletAddress).catch(() => []),
     ]);
     // Silent poll: if every critical call failed the RPC is down — keep existing display
     if (silent && lpLocks.length === 0 && platformToken === null) return;
@@ -1003,7 +1012,7 @@ async function loadDashboard(silent = false) {
 
     const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned)) : 0;
     // Cap state assigned after _effNow is established below.
-    let capETH = 0, capRemETH = 0, pausedCapETH = 0, isEligible = false, isPaused = false;
+    let capETH = 0, capRemETH = 0, pausedCapETH = 0, adminPausedCapETH = 0, isEligible = false, isPaused = false, hasAdminPausedCap = false;
 
     let totalInvestedETH = 0;
     let totalCurrentETH  = 0;
@@ -1032,25 +1041,33 @@ async function loadDashboard(silent = false) {
     // Compute referral cap state using _effNow (same clock as investments tab)
     // so PAUSED/ELIGIBLE badges stay in sync regardless of Hardhat block.timestamp lag.
     {
-      let _lActiveCap = ethers.BigNumber.from(0);
-      let _lPausedCap = ethers.BigNumber.from(0);
+      let _lActiveCap      = ethers.BigNumber.from(0);
+      let _lPausedCap      = ethers.BigNumber.from(0);
+      let _lAdminPausedCap = ethers.BigNumber.from(0);
       for (const _lk of lpLocks) {
         if (_lk.removed) continue;
         const _capMax  = _lk.ethInvested.mul(5);
         const _capUsed = _lk.commissionsCapUsed || ethers.BigNumber.from(0);
         const _capLeft = _capMax.gt(_capUsed) ? _capMax.sub(_capUsed) : ethers.BigNumber.from(0);
         if (_capLeft.isZero()) continue;
+        if (_lk.capPaused) {
+          // Admin-paused: track separately so we can show PAUSED badge when active cap is gone
+          if (_effNow < Number(_lk.unlockTime)) _lAdminPausedCap = _lAdminPausedCap.add(_capLeft);
+          continue;
+        }
         if (_effNow < Number(_lk.unlockTime)) {
           _lActiveCap = _lActiveCap.add(_capLeft);
         } else {
           _lPausedCap = _lPausedCap.add(_capLeft);
         }
       }
-      capETH      = parseFloat(ethers.utils.formatEther(_lActiveCap.add(_lPausedCap)));
-      capRemETH   = parseFloat(ethers.utils.formatEther(_lActiveCap));
-      pausedCapETH = parseFloat(ethers.utils.formatEther(_lPausedCap));
-      isEligible  = _lActiveCap.gt(0);
-      isPaused    = !isEligible && _lPausedCap.gt(0);
+      capETH           = parseFloat(ethers.utils.formatEther(_lActiveCap.add(_lPausedCap)));
+      capRemETH        = parseFloat(ethers.utils.formatEther(_lActiveCap));
+      pausedCapETH     = parseFloat(ethers.utils.formatEther(_lPausedCap));
+      adminPausedCapETH = parseFloat(ethers.utils.formatEther(_lAdminPausedCap));
+      isEligible       = _lActiveCap.gt(0);
+      isPaused         = !isEligible && _lPausedCap.gt(0);
+      hasAdminPausedCap = _lAdminPausedCap.gt(0);
     }
 
     if (lpLocks.length) {
@@ -1123,18 +1140,22 @@ async function loadDashboard(silent = false) {
     const myWealthETH = refEarningsETH + _initDisplayETH + lpFeesETH + totalInvestedETH;
     _dashWealthBase   = myWealthETH - _initDisplayETH;
 
-    // ── ROI commissions display ──
+    // ── ROI commissions display ── mirrors ROI tab ACCRUED: lifetime claimed + pending + live
     const roiLiveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
     const roiPendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
     const roiBaseETH    = roiLiveETH + roiPendingETH;
-    _dashROIBaseETH  = roiBaseETH;
+    const roiLifetimeClaimedETH = (roiClaimRecords || []).reduce(
+      (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.ethEquivalent)), 0
+    );
+    const totalROIAccruedETH = roiLifetimeClaimedETH + roiBaseETH;
+    _dashROIBaseETH  = totalROIAccruedETH;
     _dashROIWall     = _wallNow;
     _dashROIRatePerSec = 0;
     {
       const roiEl = document.getElementById('dashROICommissions');
       if (roiEl) {
-        if (roiBaseETH > 0) {
-          const roiUSDT = roiBaseETH * USDT_PER_ETH;
+        if (totalROIAccruedETH > 0) {
+          const roiUSDT = totalROIAccruedETH * USDT_PER_ETH;
           const roiFmt  = roiUSDT >= 0.00001 ? roiUSDT.toFixed(5) : roiUSDT.toExponential(3);
           roiEl.innerHTML = `<span style="color:#a78bfa;">${roiFmt} USDT</span>`;
         } else {
@@ -1146,7 +1167,7 @@ async function loadDashboard(silent = false) {
     const _effNowCapture = _effNow;
     (async () => {
       try {
-        const COMM_RATES = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
+        const ROI_RATES = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
         const activeStreams = await contract.getActiveROIStreams(walletAddress).catch(() => []);
         if (!activeStreams.length) { _dashStartROITicker(); return; }
         const investorMap = new Map();
@@ -1170,14 +1191,17 @@ async function loadDashboard(silent = false) {
               const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
               const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
               if (ratePPM === 0) continue;
-              const commRate = COMM_RATES[Number(ref.level)] || 0;
+              const commRate = ROI_RATES[Number(ref.level)] || 0;
               ratePerSec += ethInv * ratePPM * commRate / (50_000_000_000 * lockDur);
             }
           } catch(_) {}
         }));
         // Don't show a growing rate when the contract already reports no live accrual
         // (liveETH=0 means cap is exhausted or paused — matches getROIData's cap gates).
-        if (roiLiveETH === 0) ratePerSec = 0;
+        // Also zero rate when the effective cap reference is 0: the new investment's cap
+        // is already fully consumed by outstanding ROI from an earlier package, so the
+        // ticker should not grow the display past actual accrual.
+        if (roiLiveETH === 0 || _dashEffCapRefBase <= 0) ratePerSec = 0;
         _dashROIRatePerSec = ratePerSec;
         _dashStartROITicker();
       } catch(_) {}
@@ -1214,18 +1238,65 @@ async function loadDashboard(silent = false) {
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
     {
-      // Effective cap for referral commissions = raw remaining minus live + pending ROI.
-      // ROI is counted as earned the moment it accrues — pending is also already earned.
       const _effCapRef = Math.max(0, capRemETH - roiLiveETH - roiPendingETH);
-      const _liveNote  = roiLiveETH > 0.000001 ? ` (raw ${(capRemETH * USDT_PER_ETH).toFixed(2)})` : '';
-      _dashEffCapRefBase = _effCapRef;
-      _dashCapRawAtLoad  = capRemETH;
-      _dashCapIsEligible = isEligible;
-      pnlPctEl.innerHTML = isEligible
-        ? `<span id="dashCapRem" style="color:var(--muted);font-size:10px;">Cap: ${(_effCapRef * USDT_PER_ETH).toFixed(2)} USDT for referrals${_liveNote}</span>`
-        : isPaused
-          ? `<span style="color:rgba(234,179,8,0.7);font-size:10px;">Cap: ${(pausedCapETH * USDT_PER_ETH).toFixed(2)} USDT (paused)</span>`
-          : `<span style="color:#f87171;font-size:10px;">Cap: 0 USDT remaining</span>`;
+      _dashEffCapRefBase  = _effCapRef;
+      _dashCapRawAtLoad   = capRemETH;
+      _dashCapIsEligible  = isEligible;
+      _dashCapPaused      = Number(capPausedAtRaw) > 0;
+      _dashCapLockExpired = !isEligible && isPaused && !_dashCapPaused;
+
+      let _badgeTxt, _badgeColor, _badgeBg, _badgeBorder, _capLine;
+      if (isEligible && _effCapRef > 0.0001) {
+        // Active lock with cap headroom available.
+        _badgeTxt    = 'ACTIVE';
+        _badgeColor  = '#4ade80';
+        _badgeBg     = 'rgba(74,222,128,0.12)';
+        _badgeBorder = 'rgba(74,222,128,0.3)';
+        _capLine     = `<span id="dashCapRem" style="font-size:10px;color:var(--muted);">$${(_effCapRef * USDT_PER_ETH).toFixed(2)} cap remaining</span>`;
+      } else if (isEligible) {
+        // Active lock exists but outstanding ROI has already consumed the available cap
+        // (e.g. previous package exhausted its portion — new investment doesn't restore
+        // headroom until pending ROI is claimed). Show EXHAUSTED immediately so the
+        // badge never flashes ACTIVE→EXHAUSTED via the ticker.
+        _badgeTxt    = 'EXHAUSTED';
+        _badgeColor  = '#ef4444';
+        _badgeBg     = 'rgba(239,68,68,0.12)';
+        _badgeBorder = 'rgba(239,68,68,0.3)';
+        _capLine     = `<span style="font-size:10px;color:var(--muted);">claim ROI to restore accrual</span>`;
+      } else if (hasAdminPausedCap) {
+        // No active cap left, but at least one investment has its cap admin-paused with remaining headroom.
+        _badgeTxt    = 'PAUSED';
+        _badgeColor  = '#eab308';
+        _badgeBg     = 'rgba(234,179,8,0.12)';
+        _badgeBorder = 'rgba(234,179,8,0.3)';
+        _capLine     = `<span style="font-size:10px;color:var(--muted);">$${(adminPausedCapETH * USDT_PER_ETH).toFixed(2)} paused · resumable by admin</span>`;
+      } else if (_dashCapPaused) {
+        _badgeTxt    = 'CAP PAUSED';
+        _badgeColor  = '#ef4444';
+        _badgeBg     = 'rgba(239,68,68,0.12)';
+        _badgeBorder = 'rgba(239,68,68,0.3)';
+        _capLine     = `<span style="font-size:10px;color:var(--muted);">invest again to restore cap</span>`;
+      } else if (_dashCapLockExpired) {
+        _badgeTxt    = 'LOCK EXPIRED';
+        _badgeColor  = '#f97316';
+        _badgeBg     = 'rgba(249,115,22,0.12)';
+        _badgeBorder = 'rgba(249,115,22,0.3)';
+        _capLine     = `<span style="font-size:10px;color:var(--muted);">$${(pausedCapETH * USDT_PER_ETH).toFixed(2)} settable from expired lock</span>`;
+      } else {
+        _badgeTxt    = 'NO CAP';
+        _badgeColor  = '#ef4444';
+        _badgeBg     = 'rgba(239,68,68,0.12)';
+        _badgeBorder = 'rgba(239,68,68,0.3)';
+        _capLine     = `<span style="font-size:10px;color:var(--muted);">invest to earn a cap</span>`;
+      }
+      pnlPctEl.innerHTML =
+        `<div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
+           <span id="dashCapBadge" style="font-size:9px;font-family:var(--font-mono);letter-spacing:1px;
+                 padding:2px 6px;border-radius:3px;
+                 background:${_badgeBg};color:${_badgeColor};border:1px solid ${_badgeBorder};"
+           >${_badgeTxt}</span>
+           ${_capLine}
+         </div>`;
     }
 
 

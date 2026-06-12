@@ -459,6 +459,7 @@ contract LiquidityFacet is LiquidityStorage {
             token:              _token,
             claimed:            false,
             removed:            false,
+            capPaused:          false,
             lpAmount:           lpReceived,
             unlockTime:         block.timestamp + LP_LOCK_DURATION,
             ethInvested:        T,
@@ -614,6 +615,14 @@ contract LiquidityFacet is LiquidityStorage {
         } else {
             lock.restakeCounts[dIdx] = 0;
             sIdx = 0;
+        }
+
+        // Exhaust any remaining cap — restaking does not grant a new cap period.
+        // commissionsCapUsed already tracks consumed cap; we mark the rest as used
+        // so the re-locked window cannot receive new referral/ROI commissions.
+        {
+            uint256 fullCap = lock.ethInvested * 5;
+            if (lock.commissionsCapUsed < fullCap) lock.commissionsCapUsed = fullCap;
         }
 
         lock.lockedAt         = block.timestamp;

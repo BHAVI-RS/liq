@@ -1,49 +1,12 @@
 {
   "network": "polygonAmoy",
-  "deployedAt": "2026-06-10T18:16:11.922Z",
-  "deployBlock": 39922429,
-  "usdtAddress": "0x5b0Eaea74F03ED873B03d6C6ce54f6d5eDE75F9c",
-  "tokenAddress": "0x6189C78fc085a2cdb77ae6409F02C723918054d1",
-  "liquidityAddress": "0x3099d457c96f9525950Cf0431E614B684A0AF562",
-  "facetAddress": "0x2D3441C9b91Fc115E33E36692c286149E6Fb7E08",
-  "roiFacetAddress": "0x1469746701a461D6d31919c84b9E5d8889C4C30D",
-  "libAddress": "0xA509398746C2A2E5978d1f5d47F7972D176283BE",
-  "libViewAddress": "0x73d36f7F2Bdb249a61e3c6A6081592a02e6d7EaE",
-  "accounts": [
-    {
-      "index": 0,
-      "address": "0xF8Fd742887Af3Bd4829c24fF250662D19dEdDb4C",
-      "referrer": null
-    },
-    {
-      "index": 1,
-      "address": "0x60A55d315698C33a5bE8AaFE29A375579aE056A9",
-      "referrer": 0
-    },
-    {
-      "index": 2,
-      "address": "0x225080BC51268Fe5a988940D894a971577726a40",
-      "referrer": 1
-    },
-    {
-      "index": 3,
-      "address": "0xCA038B09923D5668C38c0f07DeE6671F9bE39d50",
-      "referrer": 1
-    },
-    {
-      "index": 4,
-      "address": "0xAeC4746DD72Bbc906081dcC670398a1285494F06",
-      "referrer": 1
-    },
-    {
-      "index": 5,
-      "address": "0x07879E6AfFDa133857692962641B58Fb508beEa0",
-      "referrer": 2
-    },
-    {
-      "index": 6,
-      "address": "0x2EDeddd9D9272E707D6c16c592b4e5EbBd498880",
-      "referrer": 2
-    }
-  ]
+  "deployedAt": "2026-06-12T17:53:44.354Z",
+  "deployBlock": 40036824,
+  "usdtAddress": "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9",
+  "tokenAddress": "0x39544CBb2aB89E64aD74c731Ee690D2923bB209f",
+  "liquidityAddress": "0x0f866b977d88522e0F795f52d9B03c14d8a2Cc9F",
+  "facetAddress": "0xAa21E68a3e32DA06Fa6bd40530b0Af4901AAa19e",
+  "roiFacetAddress": "0xb7e93035ec2deb7eD1ca6e3E30Fc87D86099B9e4",
+  "libAddress": "0x03a40b565cB5482E9CbFAC268312eece89a9aC0c",
+  "libViewAddress": "0x4bB4EdF247132b81fb47844A2e7F9b7FB41444c4"
 }
