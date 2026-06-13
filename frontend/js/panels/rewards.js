@@ -268,6 +268,7 @@ let _rwROIMissedBaseETH    = 0; // total missed at fetch time (sum of per-stream
 let _rwROIMissedRatePerSec = 0; // rate at which missed amounts grow when paused (ETH/s)
 let _rwROILockExpired           = false; // true when active locks all expired naturally (no _capPausedAt)
 let _rwROIMidExhaustedDetected = false; // set by ticker on first mid-session exhaustion tick; reset by loadRwROI
+let _rwROIRetained             = false; // true when all LP removed but earned ROI is retained on-chain (claimable)
 // Session-only cache: exact tokens received per stream from the ROIClaimed event.
 // Keyed "investor_lc:lockIndex:level". Cleared only on page reload.
 const _rwROIStreamClaimedTokens = new Map();
@@ -292,7 +293,7 @@ function _rwStartROITicker() {
     // Exhaustion fires when totalETH (= pendingETH + liveETH + elapsed accrual) >= activeCap.
     // Guard: _rwROIActiveCapETH > 0 so natural lock expiry (activeCap = 0) doesn't falsely trigger.
     const _midSessionExhausted = (
-      !_rwROICapPaused &&
+      !_rwROICapPaused && !_rwROIRetained &&
       (_rwROICapExhausted ||
        (_rwROIActiveCapETH > 0 && _rwROIActiveCapETH < Infinity && totalETH >= _rwROIActiveCapETH))
     );
@@ -510,7 +511,7 @@ function _rwStartCapFastPoll() {
       // For states where getCapPausedAt alone can't detect recovery, also fetch commStats:
       //   • LOCK EXPIRED  : restake restores activeCapETH from 0 → >0
       //   • EXHAUSTED     : new invest raises activeCapETH above the value we last loaded
-      const _needsCapCheck = _rwROILockExpired || _rwROICapExhausted || _rwROIMidExhaustedDetected;
+      const _needsCapCheck = _rwROILockExpired || _rwROICapExhausted || _rwROIMidExhaustedDetected || _rwROIRetained;
       const [capPausedAtRaw, freshCommStats] = await Promise.all([
         contract.getCapPausedAt(walletAddress),
         _needsCapCheck
@@ -535,7 +536,10 @@ function _rwStartCapFastPoll() {
       } else if (freshCommStats && !isPaused) {
         // Cap not paused on-chain. Check if a previously exhausted or lock-expired state resolved.
         const freshActiveCap = parseFloat(ethers.utils.formatEther(freshCommStats[3]));
-        if (_rwROILockExpired && freshActiveCap > 0) {
+        if (_rwROIRetained && freshActiveCap > 0) {
+          // Re-invested while retained: a new active lock created cap → retention cleared on-chain.
+          loadRwROI(true);
+        } else if (_rwROILockExpired && freshActiveCap > 0) {
           // Lock-expired → restaked: activeCapETH went from 0 to positive.
           loadRwROI(true);
         } else if ((_rwROICapExhausted || _rwROIMidExhaustedDetected) && !_rwROILockExpired) {
@@ -1305,6 +1309,7 @@ async function loadRwROI(silent = false) {
     _rwROICapPaused            = _rwROICapPausedAt > 0;
     _rwROICapExhausted         = false;
     _rwROIMidExhaustedDetected = false;
+    _rwROIRetained             = false;
     // commStats[2] = totalCap (activeCap + pausedCap from expired locks).
     // When cap is paused, use 0 so per-stream amounts don't show claimable from expired-lock cap
     // (post-exhaustion accrual is blocked). When not paused, include expired-lock cap so ROI
@@ -1546,6 +1551,34 @@ async function loadRwROI(silent = false) {
       }
     }
 
+    // ── Retained-after-exit: all LP removed but earned ROI is preserved on-chain. ───────
+    // computeCommissionStats skips removed locks, so commStats cap comes back 0 and the
+    // cap-reconstruction path would (wrongly) disable claiming. getROIData/getROIPending DO
+    // account for _roiRetainedCap, so the retained liveETH is the authoritative claimable
+    // budget — trust it. Surface a positive available cap (gates canClaim + clears _rawCapZero),
+    // freeze accrual (the budget is fixed at exit), and split it across streams so both the
+    // per-stream CLAIM and the global CLAIM ALL buttons enable. On-chain payout stays exact;
+    // this split only drives the per-stream display.
+    const _isRetainedExit = !_rwROICapPaused && _rwROIAvailableCapETH === 0 && liveETH > 0;
+    if (_isRetainedExit) {
+      _rwROIRetained        = true;
+      _rwROIAvailableCapETH = liveETH + pendingETH;
+      baseETH               = liveETH + pendingETH;
+      ratePerSec            = 0;
+      const _wSum = _rwROIStreamDetails.reduce((s, d) => s + (d.streamRate || 0), 0);
+      const _nStr = _rwROIStreamDetails.length || 1;
+      for (const _sd of _rwROIStreamDetails) {
+        const _w = _wSum > 0 ? (_sd.streamRate || 0) / _wSum : 1 / _nStr;
+        _sd.accruedETH        = liveETH * _w;
+        _sd.streamRate        = 0;
+        _sd.perStreamMissRate = 0;
+        _sd.liveWindowGapETH  = 0;
+      }
+      _rwROIStreamDetails.sort((a, b) => b.accruedETH - a.accruedETH);
+      missedBaseETH    = 0;
+      missedRatePerSec = 0;
+    }
+
     _rwROIBaseETH          = baseETH;
     _rwROIRatePerSec       = ratePerSec;
     _rwROIFetchWall        = wallNow;
@@ -1572,7 +1605,12 @@ async function loadRwROI(silent = false) {
         // baseETH = liveETH + pendingETH; both reduce available cap since neither has been
         // charged to commissionsCapUsed yet (pending is pre-settled but unclaimed).
         const _initLiveCap = Math.max(0, _rwROIActiveCapETH - baseETH);
-        if (_rwROICapPaused) {
+        if (_rwROIRetained) {
+          _cbTxt = 'RETAINED'; _cbColor = '#a78bfa';
+          _cbBg = 'rgba(167,139,250,0.10)'; _cbBorder = 'rgba(167,139,250,0.3)';
+          _caAmt = `<div id="rwROICapAmt" style="font-size:16px;font-family:var(--font-display);color:#a78bfa;margin:6px 0 2px;">$${(baseETH * USDT_PER_ETH).toFixed(2)}</div>`;
+          _caSub = `<div style="font-size:10px;color:var(--muted);">earned ROI preserved · claim anytime</div>`;
+        } else if (_rwROICapPaused) {
           _cbTxt = 'CAP PAUSED'; _cbColor = '#ef4444';
           _cbBg = 'rgba(239,68,68,0.10)'; _cbBorder = 'rgba(239,68,68,0.3)';
           _caAmt = `<div style="font-size:16px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">—</div>`;

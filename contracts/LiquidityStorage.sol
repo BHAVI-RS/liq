@@ -149,6 +149,18 @@ abstract contract LiquidityStorage {
     // are unchanged. (New value defaults to false for every address, matching a fresh count.)
     mapping(address => bool) internal _countsForReferrer;
 
+    // ── ROI retention after full LP exit ───────────────────────────────────────
+    // When a user removes their LAST cap-bearing lock, the LP is withdrawn but the lock's
+    // leftover 5× cap is RETAINED here as a frozen budget so ROI already earned (bounded at
+    // the lock's expiry) stays claimable instead of being lost. Set by removeLPCoreExt on full
+    // exit; the inclExpired cap helper adds this budget, _chargeCapInclExpired draws it down
+    // (preventing re-claim), _naturalExpiryOf bounds settlement at _roiRetainedAt, and the
+    // accrual helpers bypass the _qualifies gate while _roiRetainedAt != 0. Cleared by invest()
+    // on re-entry (after _handleNaturalExpiryResume preserves the earned ROI into pending).
+    // Appended at the end of storage so existing slots are unchanged (both default to 0).
+    mapping(address => uint256) internal _roiRetainedCap;
+    mapping(address => uint64)  internal _roiRetainedAt;
+
     // ── Unified cap helpers (shared by LiquidityFacet and Liquidity.sol) ────────
     // Single overall cap per LP lock = ethInvested × 5.
     // commissionsCapUsed is consumed by BOTH regular referral commissions and ROI claims.
@@ -185,6 +197,8 @@ abstract contract LiquidityStorage {
             }
             unchecked { j++; }
         }
+        // Frozen budget retained after a full LP exit so earned ROI is still settlement-claimable.
+        available += _roiRetainedCap[_user];
     }
 
     // Like _chargeCap but charges both active and expired (non-removed) locks.
@@ -207,6 +221,11 @@ abstract contract LiquidityStorage {
             }
             unchecked { j++; }
         }
+        // Commit against the retained budget last, so the same earned ROI can't be claimed twice.
+        if (remaining > 0 && _roiRetainedCap[_user] > 0) {
+            uint256 r = remaining < _roiRetainedCap[_user] ? remaining : _roiRetainedCap[_user];
+            _roiRetainedCap[_user] -= r;
+        }
     }
 
     // Computes ROI accrual without the cap-exhaustion guard.
@@ -219,7 +238,9 @@ abstract contract LiquidityStorage {
         uint8   level
     ) internal view returns (uint256 accrued) {
         if (stream.ended || stream.recipient == address(0)) return 0;
-        if (stream.recipient != owner && !_qualifies(stream.recipient)) return 0;
+        // Retained recipients (withdrawn but cap preserved) keep accruing the earned-but-unclaimed
+        // ROI; the _roiRetainedCap budget and _naturalExpiryOf bound cap this, so skip the gate.
+        if (stream.recipient != owner && _roiRetainedAt[stream.recipient] == 0 && !_qualifies(stream.recipient)) return 0;
         LPLock storage lock = userLPLocks[investor][lockIndex];
         uint256 lockDur = lock.unlockTime > lock.lockedAt
             ? lock.unlockTime - lock.lockedAt
@@ -244,7 +265,7 @@ abstract contract LiquidityStorage {
         uint256 endBound
     ) internal view returns (uint256 accrued) {
         if (stream.ended || stream.recipient == address(0)) return 0;
-        if (stream.recipient != owner && !_qualifies(stream.recipient)) return 0;
+        if (stream.recipient != owner && _roiRetainedAt[stream.recipient] == 0 && !_qualifies(stream.recipient)) return 0;
         LPLock storage lock = userLPLocks[investor][lockIndex];
         uint256 lockDur = lock.unlockTime > lock.lockedAt
             ? lock.unlockTime - lock.lockedAt

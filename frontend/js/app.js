@@ -16,7 +16,7 @@ const _capturedRefParam = (function() {
 // down by the provider's allowed-domains/rate-limit settings.
 const ALCHEMY_AMOY_URL = (typeof READ_RPC_URL !== 'undefined' && READ_RPC_URL)
   ? READ_RPC_URL
-  : 'https://rpc-amoy.polygon.technology';
+  : 'https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk';
 
 // Returns { total: BigNumber, entries: [] } for the connected wallet.
 // Reads totalMissedCommissions and getMissedRecords from on-chain storage — view calls,

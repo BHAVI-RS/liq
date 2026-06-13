@@ -35,10 +35,12 @@ module.exports = {
       chainId: 31337,
       initialBaseFeePerGas: 0,
       allowUnlimitedContractSize: true,
-      forking: {
-        url: MAINNET_RPC,
-        blockNumber: 21000000,
-      },
+      // Mainnet forking is opt-in (set FORK_MAINNET=1 with an archive RPC in MAINNET_RPC_URL).
+      // Off by default so `hardhat test` runs on a clean local chain — the contract test suite
+      // deploys its own local Uniswap V2 stack and doesn't need a fork.
+      ...(process.env.FORK_MAINNET ? {
+        forking: { url: MAINNET_RPC, blockNumber: 21000000 },
+      } : {}),
       accounts: {
         mnemonic: "test test test test test test test test test test test junk",
         count: 60

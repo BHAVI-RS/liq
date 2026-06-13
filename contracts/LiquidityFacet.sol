@@ -536,6 +536,20 @@ contract LiquidityFacet is LiquidityStorage {
         // underflow — so removeLP can never revert on a desynced count.
         _syncReferralCount(msg.sender);
 
+        // Preserve already-earned ROI on a full exit: if removing this lock leaves the user with
+        // NO remaining cap-bearing lock, retain its leftover 5x cap as a frozen budget (bounded at
+        // the lock's expiry via _roiRetainedAt). Earned ROI then stays claimable (claimAll /
+        // per-stream) and resumes cleanly on re-invest. No loop here — settlement stays lazy.
+        if (_roiRetainedAt[msg.sender] == 0 && _getRawAvailableCapInclExpired(msg.sender) == 0) {
+            uint256 cap5     = ethInvested * 5;
+            uint256 retained = cap5 > lock.commissionsCapUsed ? cap5 - lock.commissionsCapUsed : 0;
+            if (retained > 0) {
+                _roiRetainedCap[msg.sender] = retained;
+                _roiRetainedAt[msg.sender]  = uint64(lock.unlockTime);
+                _capPausedAt[msg.sender]    = 0; // ensure the inclExpired settlement path is used
+            }
+        }
+
         address pair = IFactoryF(UNISWAP_FACTORY).getPair(lock.token, WETH);
         if (pair == address(0)) revert PoolNotFound();
 

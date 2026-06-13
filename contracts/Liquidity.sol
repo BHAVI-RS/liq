@@ -329,6 +329,10 @@ contract Liquidity is LiquidityStorage {
                     _lastExpiry = _lk.unlockTime;
                 unchecked { _j++; }
             }
+            // Retained-after-exit users have no non-removed lock; resume from the retention time
+            // so _handleNaturalExpiryResume preserves the earned ROI and excludes the no-stake gap.
+            if (_roiRetainedAt[msg.sender] != 0 && _roiRetainedAt[msg.sender] > _lastExpiry)
+                _lastExpiry = _roiRetainedAt[msg.sender];
         }
 
         _callFacet(abi.encodeCall(LiquidityFacet.investExt, (_token, rewardPPM, T)));
@@ -374,6 +378,13 @@ contract Liquidity is LiquidityStorage {
             // Natural expiry (or no prior investment): lock expired or user never had a lock.
             // Settle pre-expiry ROI and record gap as missed.
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
+        }
+
+        // The earned ROI has now been preserved into pending by the resume above (if any); clear
+        // any retention so the new lock's fresh cap governs future accrual from here on.
+        if (_roiRetainedAt[msg.sender] != 0) {
+            _roiRetainedCap[msg.sender] = 0;
+            _roiRetainedAt[msg.sender]  = 0;
         }
 
         _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, lockIndex)));

@@ -166,16 +166,39 @@ contract LiquidityViewFacet is LiquidityStorage {
     // ── ROI view functions (read directly from inherited storage) ─────────────
     function getROIPending(address recipient) external view returns (uint256 total) {
         total = _roiPendingETH[recipient];
+        uint64 retAt = _roiRetainedAt[recipient];
         StreamRef[] storage arr = _activeROIStreams[recipient];
+        uint256 acc = 0;
         for (uint256 i = 0; i < arr.length; ) {
             StreamRef storage ref = arr[i];
             ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
-            if (!stream.ended) total += _calcAccrued(stream, ref.investor, ref.lockIndex, ref.level);
+            if (!stream.ended) {
+                // Retained-after-exit: earned ROI is bounded at the retention time and capped by
+                // the retained budget, matching what claimAllROI / claimROIFromStream will pay.
+                acc += retAt != 0
+                    ? _calcAccruedRawAt(stream, ref.investor, ref.lockIndex, ref.level, retAt)
+                    : _calcAccrued(stream, ref.investor, ref.lockIndex, ref.level);
+            }
             unchecked { i++; }
         }
+        if (retAt != 0 && acc > _roiRetainedCap[recipient]) acc = _roiRetainedCap[recipient];
+        total += acc;
     }
     function getROIData(address recipient) public view returns (uint256 liveETH, uint256 pendingETH) {
         pendingETH = _roiPendingETH[recipient];
+        uint64 retAt = _roiRetainedAt[recipient];
+        if (retAt != 0) {
+            // Withdrawn but ROI retained: report the still-claimable earned ROI (bounded + capped).
+            StreamRef[] storage rArr = _activeROIStreams[recipient];
+            for (uint256 i = 0; i < rArr.length; ) {
+                StreamRef storage ref = rArr[i];
+                ROIStream storage s = _roiStreams[ref.investor][ref.lockIndex][ref.level];
+                if (!s.ended) liveETH += _calcAccruedRawAt(s, ref.investor, ref.lockIndex, ref.level, retAt);
+                unchecked { i++; }
+            }
+            if (liveETH > _roiRetainedCap[recipient]) liveETH = _roiRetainedCap[recipient];
+            return (liveETH, pendingETH);
+        }
         if (_capPausedAt[recipient] > 0) return (0, pendingETH);
         if (_getRawAvailableCapInclExpired(recipient) == 0) return (0, pendingETH);
         if (_getAvailableCap(recipient) == 0) return (0, pendingETH);

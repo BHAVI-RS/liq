@@ -84,6 +84,9 @@ contract LiquidityROIFacet is LiquidityStorage {
     // (all locks past unlockTime, _capPausedAt not set). Returns 0 if cap is paused or still active.
     // Used to bound claim settlements so gap-period ROI is not paid out.
     function _naturalExpiryOf(address _user) internal view returns (uint256 lastExpiry) {
+        // Retained (withdrawn-but-cap-preserved) users: bound earned ROI at the retention time
+        // (the removed lock's expiry) so post-exit / gap ROI is never settled.
+        if (_roiRetainedAt[_user] != 0) return _roiRetainedAt[_user];
         if (_capPausedAt[_user] != 0) return 0;
         if (_getRawAvailableCap(_user) != 0) return 0;
         LPLock[] storage locks = userLPLocks[_user];
