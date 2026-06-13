@@ -59,6 +59,28 @@ abstract contract LiquidityStorage {
         return total > 0 && (minDirectReferralInvestment == 0 || total >= minDirectReferralInvestment);
     }
 
+    // Idempotently reconciles `user`'s contribution to their referrer's activeReferralCount.
+    // Call after ANY change to userTotalInvested[user] (invest / removeLP). The +1 a user
+    // contributes is tracked per-user via _countsForReferrer, so the count always equals the
+    // number of currently-qualifying direct referrals and self-corrects on the user's next
+    // action. This makes the count immune to drift/underflow when the owner changes
+    // minDirectReferralInvestment out-of-band (the old wasQualifying/justQualified transition
+    // logic assumed the qualification threshold never moved between a user's invest and exit).
+    function _syncReferralCount(address user) internal {
+        address ref = users[user].referrer;
+        if (ref == address(0)) return;
+        bool nowQ    = _qualifies(user);
+        bool counted = _countsForReferrer[user];
+        if (nowQ == counted) return;                 // already in sync — nothing to do
+        if (nowQ) {
+            _countsForReferrer[user] = true;
+            activeReferralCount[ref]++;
+        } else {
+            _countsForReferrer[user] = false;
+            if (activeReferralCount[ref] > 0) activeReferralCount[ref]--;   // clamp: never underflow
+        }
+    }
+
     // ROI accrual constants and helper — shared with Liquidity.sol view functions so that
     // getROIAccrued/getROIPending can read directly from inherited storage instead of calling
     // the ROI facet as a regular CALL (which would read the facet's own empty storage).
@@ -121,6 +143,11 @@ abstract contract LiquidityStorage {
     // Timestamp when a user's overall cap was last exhausted (0 = not paused).
     // Set by _chargeCap when cap hits 0; cleared by invest() when a new lock restores cap.
     mapping(address => uint64) internal _capPausedAt;
+
+    // Whether `user` currently contributes +1 to their referrer's activeReferralCount.
+    // Maintained by _syncReferralCount(). Appended at the end of storage so existing slots
+    // are unchanged. (New value defaults to false for every address, matching a fresh count.)
+    mapping(address => bool) internal _countsForReferrer;
 
     // ── Unified cap helpers (shared by LiquidityFacet and Liquidity.sol) ────────
     // Single overall cap per LP lock = ethInvested × 5.

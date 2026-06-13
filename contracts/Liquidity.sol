@@ -316,7 +316,6 @@ contract Liquidity is LiquidityStorage {
 
         uint256 T         = _usdtAmount;
         uint256 rewardPPM = _getRewardRatePPM(T, 90, 0);
-        bool wasQualifying = _qualifies(msg.sender);
 
         // Snapshot cap state BEFORE the new lock is added by investExt.
         bool hadNoActiveCap = _getRawAvailableCap(msg.sender) == 0;
@@ -337,13 +336,10 @@ contract Liquidity is LiquidityStorage {
         userTotalInvested[msg.sender] += T;
         totalEthInvested              += T;
 
-        // Increment referrer's active count before distributing commissions so
-        // the eligibility check in _distributeReferralCommissions sees the correct count.
-        bool justQualified = !wasQualifying && _qualifies(msg.sender);
-        address ref = users[msg.sender].referrer;
-        if (justQualified && ref != address(0)) {
-            activeReferralCount[ref]++;
-        }
+        // Reconcile the referrer's active count BEFORE distributing commissions so the
+        // eligibility check in _distributeReferralCommissions sees the correct count.
+        // Idempotent + clamped, so a changed minDirectReferralInvestment can't make it drift.
+        _syncReferralCount(msg.sender);
 
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
 
@@ -660,6 +656,10 @@ contract Liquidity is LiquidityStorage {
     // ── Direct swap functions (records every trade in _tradeHistory) ─────────
     function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant {
         if (_usdtIn == 0) revert MustSendUSDT();
+        // Only platform-registered, live tokens may be traded through the contract — prevents
+        // arbitrary tokens from polluting _tradeHistory and keeps recorded trades meaningful.
+        if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
+        if (tokens[_token].removed) revert TokenDelisted();
         if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtIn)) revert USDTTransferFailed();
         IERC20(WETH).approve(UNISWAP_ROUTER, _usdtIn);
         address[] memory path = new address[](2);
@@ -680,6 +680,9 @@ contract Liquidity is LiquidityStorage {
 
     function swapSell(address _token, uint256 _tokensIn, uint256 _minUsdtOut) external nonReentrant {
         if (_tokensIn == 0) revert MustSpecifyTokenAmount();
+        // Must be a platform-registered token (delisted tokens are still allowed here so holders
+        // can always exit a position that was later removed).
+        if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
         if (!IERC20(_token).transferFrom(msg.sender, address(this), _tokensIn)) revert TokenTransferFailed();
         IERC20(_token).approve(UNISWAP_ROUTER, _tokensIn);
         address[] memory path = new address[](2);

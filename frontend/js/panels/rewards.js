@@ -1703,19 +1703,51 @@ async function claimROIFromStreamBtn(investor, lockIndex, level, btn) {
   }
 }
 
+// Number of ROI streams settled per settleROIStreams() tx in the batched path.
+// claimAllROI() settles ALL active streams in a single tx; once a recipient has many
+// streams that can exceed the block gas limit, so we fall back to the contract's
+// incremental escape hatch: settleROIStreams(from, count) in chunks, then claimPendingROI().
+const _ROI_CLAIM_CHUNK = 25;
+
 async function claimAllROI() {
   const btn = document.getElementById('claimROIBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
+  _txBegin();
   try {
-    toast('Confirm ROI commission claim in MetaMask…', 'info');
-    const tx = await contract.connect(signer).claimAllROI(_GAS);
-    toast('Transaction sent — waiting for confirmation…', 'info');
-    await tx.wait();
+    // Decide single-tx vs batched based on the authoritative active-stream count.
+    let streamCount = 0;
+    try {
+      const streams = await contract.getActiveROIStreams(walletAddress);
+      streamCount = streams ? streams.length : 0;
+    } catch(_) {}
+
+    if (streamCount > _ROI_CLAIM_CHUNK) {
+      // Batched path — settle in chunks, then a single payout. Each step is its own tx.
+      const chunks = Math.ceil(streamCount / _ROI_CLAIM_CHUNK);
+      for (let i = 0; i < chunks; i++) {
+        const from = i * _ROI_CLAIM_CHUNK;
+        toast(`Settling ROI streams ${from + 1}–${Math.min(from + _ROI_CLAIM_CHUNK, streamCount)} of ${streamCount} (${i + 1}/${chunks})…`, 'info');
+        const stx = await contract.connect(signer).settleROIStreams(from, _ROI_CLAIM_CHUNK, _GAS);
+        await stx.wait();
+      }
+      toast('Confirm final ROI payout in MetaMask…', 'info');
+      const ctx = await contract.connect(signer).claimPendingROI(_GAS);
+      await ctx.wait();
+    } else {
+      // Single-tx path (small stream count) — original behaviour.
+      toast('Confirm ROI commission claim in MetaMask…', 'info');
+      const tx = await contract.connect(signer).claimAllROI(_GAS);
+      toast('Transaction sent — waiting for confirmation…', 'info');
+      await tx.wait();
+    }
+
+    _txDone();
     toast('ROI commissions claimed!', 'success');
     _rwROILoading = false;
     loadRwROI();
   } catch(e) {
-    if (btn) { btn.disabled = false; }
+    _txDone();
+    if (btn) { btn.disabled = false; btn.textContent = 'CLAIM ALL ROI'; }
     toast('Claim failed: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
   }
 }

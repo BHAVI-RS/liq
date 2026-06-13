@@ -10,7 +10,13 @@ const _capturedRefParam = (function() {
 
 // Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
 // Transactions still go through the wallet signer; only eth_call goes here.
-const ALCHEMY_AMOY_URL = 'https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk';
+// No API key is hardcoded here. Set READ_RPC_URL in contract-config.js (e.g. a
+// domain-restricted Alchemy/Infura endpoint) to use a private provider; otherwise
+// fall back to the public Polygon Amoy RPC. Any browser-exposed key MUST be locked
+// down by the provider's allowed-domains/rate-limit settings.
+const ALCHEMY_AMOY_URL = (typeof READ_RPC_URL !== 'undefined' && READ_RPC_URL)
+  ? READ_RPC_URL
+  : 'https://rpc-amoy.polygon.technology';
 
 // Returns { total: BigNumber, entries: [] } for the connected wallet.
 // Reads totalMissedCommissions and getMissedRecords from on-chain storage — view calls,

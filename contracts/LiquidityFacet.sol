@@ -282,13 +282,16 @@ contract LiquidityFacet is LiquidityStorage {
         LPLock storage lock = userLPLocks[_user][_lockIndex];
         if (lock.removed) return;
 
+        // Refresh the platform-token TWAP first. A stale price would value the reward at zero,
+        // and the old code advanced rewardClaimedETH BEFORE checking price/balance — so a stale
+        // TWAP (or an underfunded contract) silently marked the reward claimed while paying 0
+        // tokens. Updating here removes the common (stale-price) cause of that forfeiture.
+        _updateTokenTWAP(platformToken);
+
         uint256 pendingETH = LiquidityMath.calcPendingRewardETH(
             lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
         );
         uint256 carry = lock.tokensAccumulated;
-
-        lock.rewardClaimedETH += pendingETH;
-        lock.tokensAccumulated = 0;
 
         uint256 price     = _twapPrice();
         uint256 newTokens = price > 0 ? (pendingETH * 1e18) / price : 0;
@@ -296,8 +299,15 @@ contract LiquidityFacet is LiquidityStorage {
 
         if (total == 0) return;
         uint256 available = IERC20F(platformToken).balanceOf(address(this));
+        // Cannot cover the reward right now: skip WITHOUT advancing the claimed accounting, so the
+        // reward is never marked claimed-but-unpaid. (Removal still proceeds; no funds are lost to
+        // a false "claimed" state.)
         if (available < total) return;
 
+        // Advance accounting only once payment is guaranteed. Mark the ETH portion claimed only
+        // when it was actually converted to tokens (price > 0).
+        if (newTokens > 0) lock.rewardClaimedETH += pendingETH;
+        lock.tokensAccumulated = 0;
         lock.totalTokensClaimed += total;
         if (!IERC20F(platformToken).transfer(_user, total)) revert StakingRewardTransferFailed();
         emit StakingRewardClaimed(_user, total, pendingETH);
@@ -517,14 +527,14 @@ contract LiquidityFacet is LiquidityStorage {
         if (direct) lock.claimed = true;
         lock.removed = true;
 
-        bool wasQualifying = _qualifies(msg.sender);
         if (userTotalInvested[msg.sender] >= ethInvested) {
             userTotalInvested[msg.sender] -= ethInvested;
-            if (wasQualifying && !_qualifies(msg.sender)) {
-                address ref = users[msg.sender].referrer;
-                if (ref != address(0)) activeReferralCount[ref]--;
-            }
         }
+        // Reconcile the referrer's active count against the user's new qualification state.
+        // Idempotent + clamped: if the user was never counted (e.g. minDirectReferralInvestment
+        // was lowered after they invested below the bar), this is a safe no-op instead of an
+        // underflow — so removeLP can never revert on a desynced count.
+        _syncReferralCount(msg.sender);
 
         address pair = IFactoryF(UNISWAP_FACTORY).getPair(lock.token, WETH);
         if (pair == address(0)) revert PoolNotFound();
