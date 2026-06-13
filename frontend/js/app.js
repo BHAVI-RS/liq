@@ -10,7 +10,7 @@ const _capturedRefParam = (function() {
 
 // Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
 // Transactions still go through the wallet signer; only eth_call goes here.
-const ALCHEMY_AMOY_URL = 'https://polygon-amoy.g.alchemy.com/v2/_0p-lkCP0DWUV-Z-BQYCL';
+const ALCHEMY_AMOY_URL = 'https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk';
 
 // Returns { total: BigNumber, entries: [] } for the connected wallet.
 // Reads totalMissedCommissions and getMissedRecords from on-chain storage — view calls,
