@@ -277,10 +277,14 @@ async function loadInvestments() {
       const lockCap            = ethInvested * 5;
       const roiAttrib          = _roiPerLock[i] || 0;
       const totalCapUsed       = Math.min(lockCap, commissionsCapUsed + roiAttrib);
-      const lockCapRemaining   = Math.max(0, lockCap - totalCapUsed);
-      const capPct             = lockCap > 0 ? Math.min(100, totalCapUsed / lockCap * 100) : 0;
       const isCapPaused        = !!lock.capPaused;
-      const capIsActive        = !isRemoved && !isClaimed && secsLeft > 0;
+      // Paused locks are excluded from _chargeCap FIFO — they contribute 0 available cap,
+      // so remaining is effectively 0 regardless of how much commissionsCapUsed shows.
+      const lockCapRemaining   = isCapPaused ? 0 : Math.max(0, lockCap - totalCapUsed);
+      const capPct             = isCapPaused
+        ? (lockCap > 0 ? Math.min(100, commissionsCapUsed / lockCap * 100) : 0)
+        : (lockCap > 0 ? Math.min(100, totalCapUsed / lockCap * 100) : 0);
+      const capIsActive        = !isRemoved && !isCapPaused && secsLeft > 0;
       const capIsFull          = lockCap > 0 && totalCapUsed >= lockCap - 0.000001;
       // Cap status: PAUSED (admin-paused, bypassed in FIFO) > EXHAUSTED (cap full) > ELIGIBLE (active, has cap) > inactive
       const capTagHtml = isRemoved ? '' : isCapPaused
@@ -420,7 +424,6 @@ async function loadInvestments() {
             </div>
             ${actionColHtml}
           </div>
-          ${capBarHtml}
           ${showStakingRow ? stakingRowHtml : ''}
           <button class="dash-inv-toggle" onclick="toggleInvDetails(this)">
             SHOW MORE <span class="dit-arrow">▾</span>

@@ -32,10 +32,12 @@ var _dashStakingEventsBase   = 0;
 var _dashStakingHWM          = 0;
 
 // ── Dashboard ROI commission live ticker ──
-var _dashROITickInterval = null;
-var _dashROIBaseETH      = 0;   // liveETH + pendingETH at last fetch
-var _dashROIRatePerSec   = 0;   // ETH per second accumulated across all active streams
-var _dashROIWall         = 0;   // wall-clock seconds at last fetch
+var _dashROITickInterval  = null;
+var _dashROIBaseETH       = 0;   // lifetimeClaimed + liveETH + pendingETH at last fetch
+var _dashROIRatePerSec    = 0;   // ETH per second accumulated across all active streams
+var _dashROIWall          = 0;   // wall-clock seconds at last fetch
+var _dashCurrentROIETH    = 0;   // live ROI total for wealth display (updated by ROI ticker)
+var _dashCurrentStakingETH = 0;  // live staking total for wealth display (updated by staking ticker)
 // ── Dashboard cap ticker ──
 var _dashEffCapRefBase  = 0;     // effective referral cap (raw − pending − live) at last fetch
 var _dashCapRawAtLoad   = 0;     // raw cap at last fetch (for the sub-note)
@@ -76,6 +78,7 @@ async function _fetchDashTeamTree() {
 // The 1s ticker recomputes staking accumulation from wall clock — no periodic chain polling.
 var _dashTeamWealthTicker    = null;
 var _dashTeamWealthParams    = [];  // wealthParams for each downline member (cached until next load)
+var _dashTeamROIAmounts      = [];  // parallel: liveETH+pendingETH snapshot per member
 var _dashTeamWealthLastFetch = 0;
 
 function _dashStopTeamWealth() {
@@ -86,7 +89,10 @@ function _dashUpdateTeamWealthDisplay() {
   const el = document.getElementById('dashTeamWealth');
   if (!el) { _dashStopTeamWealth(); return; }
   let total = 0;
-  for (const p of _dashTeamWealthParams) total += _computeWealthFromParams(p);
+  for (let _i = 0; _i < _dashTeamWealthParams.length; _i++) {
+    total += _computeWealthFromParams(_dashTeamWealthParams[_i]);
+    total += (_dashTeamROIAmounts[_i] || 0);
+  }
   el.innerHTML = total > 0.000001
     ? `<span style="color:#a855f7;">${fmtUSDT(total, {decimals:2})}</span>`
     : '0';
@@ -108,12 +114,23 @@ async function _loadDashTeamWealth() {
     // Batch to 5 concurrent calls — firing all 50+ at once floods Amoy testnet RPC
     const batchSize = 5;
     const paramsList = [];
+    const roiList    = [];
     for (let _bi = 0; _bi < allAddrs.length; _bi += batchSize) {
       const _chunk = allAddrs.slice(_bi, _bi + batchSize);
-      const _res   = await Promise.all(_chunk.map(a => contract.getWealthParams(a).catch(() => null)));
-      paramsList.push(..._res);
+      const _res   = await Promise.all(_chunk.map(a => Promise.all([
+        contract.getWealthParams(a).catch(() => null),
+        contract.getROIData(a).catch(() => null),
+      ])));
+      for (const [_wp, _rd] of _res) {
+        paramsList.push(_wp);
+        roiList.push(_rd
+          ? parseFloat(ethers.utils.formatEther(_rd.liveETH || 0)) + parseFloat(ethers.utils.formatEther(_rd.pendingETH || 0))
+          : 0);
+      }
     }
-    _dashTeamWealthParams = paramsList.filter(p => p !== null);
+    const _combined = paramsList.map((_wp, _i) => ({ _wp, _roi: roiList[_i] || 0 })).filter(x => x._wp !== null);
+    _dashTeamWealthParams = _combined.map(x => x._wp);
+    _dashTeamROIAmounts   = _combined.map(x => x._roi);
     _dashUpdateTeamWealthDisplay();
     // Tick every 1s: recomputes staking accumulation from wall clock (no chain calls).
     // Params stay cached until the next loadDashboard() call (e.g. after a transaction).
@@ -297,11 +314,8 @@ function _dashStartStakingTicker() {
       el.innerHTML = '0';
     }
 
-    const wealthEl = document.getElementById('dashPnL');
-    if (wealthEl) {
-      const liveWealthETH = _dashWealthBase + displayETH;
-      wealthEl.innerHTML = fmtUSDT(liveWealthETH, {decimals:2});
-    }
+    _dashCurrentStakingETH = displayETH;
+    _dashUpdateWealthDisplay();
 
     // All locks have now expired — stop ticking, the value is final.
     if (!anyStillActive) _dashStopStakingTicker();
@@ -312,14 +326,25 @@ function _dashStopROITicker() {
   if (_dashROITickInterval) { clearInterval(_dashROITickInterval); _dashROITickInterval = null; }
 }
 
+// Wealth = ref earnings + ROI commissions + staking rewards + LP fee earnings + invested.
+// Called by both the staking and ROI tickers so the display stays in sync regardless of which fires.
+function _dashUpdateWealthDisplay() {
+  const el = document.getElementById('dashPnL');
+  if (el) el.innerHTML = fmtUSDT(_dashWealthBase + _dashCurrentStakingETH + _dashCurrentROIETH, {decimals:2});
+}
+
 function _dashStartROITicker() {
   _dashStopROITicker();
   _dashROITickInterval = setInterval(() => {
     const el = document.getElementById('dashROICommissions');
     if (!el) { _dashStopROITicker(); return; }
     const elapsed  = Math.max(0, Math.floor(Date.now() / 1000) - _dashROIWall);
-    const totalETH = _dashROIBaseETH + elapsed * _dashROIRatePerSec;
-    if (_dashROIRatePerSec > 0 || totalETH > 0) {
+    // Prefer the rewards tab's live value (includes mid-session exhaustion capping) when available.
+    const _rwAccrued = typeof window._rwROIGetAccrued === 'function' ? window._rwROIGetAccrued() : null;
+    const totalETH = _rwAccrued !== null ? _rwAccrued : (_dashROIBaseETH + elapsed * _dashROIRatePerSec);
+    _dashCurrentROIETH = totalETH;
+    _dashUpdateWealthDisplay();
+    if (totalETH > 0) {
       const totalUSDT = totalETH * USDT_PER_ETH;
       const fmt = totalUSDT >= 0.00001 ? totalUSDT.toFixed(5) : totalUSDT.toExponential(3);
       el.innerHTML = `<span style="color:#a78bfa;">${fmt} USDT</span>`;
@@ -1136,11 +1161,7 @@ async function loadDashboard(silent = false) {
 
     document.getElementById('dashTotalInvested').innerHTML     = fmtUSDT(totalInvestedETH, {decimals:2});
     document.getElementById('dashTotalInvestedUSD').innerHTML  = '';
-    const lpFeesETH   = Math.max(0, totalCurrentETH - totalInvestedETH);
-    const myWealthETH = refEarningsETH + _initDisplayETH + lpFeesETH + totalInvestedETH;
-    _dashWealthBase   = myWealthETH - _initDisplayETH;
-
-    // ── ROI commissions display ── mirrors ROI tab ACCRUED: lifetime claimed + pending + live
+    // ── ROI commissions ── compute first so totalROIAccruedETH is available for wealth calc
     const roiLiveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
     const roiPendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
     const roiBaseETH    = roiLiveETH + roiPendingETH;
@@ -1148,9 +1169,18 @@ async function loadDashboard(silent = false) {
       (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.ethEquivalent)), 0
     );
     const totalROIAccruedETH = roiLifetimeClaimedETH + roiBaseETH;
-    _dashROIBaseETH  = totalROIAccruedETH;
-    _dashROIWall     = _wallNow;
+    _dashROIBaseETH    = totalROIAccruedETH;
+    _dashROIWall       = _wallNow;
     _dashROIRatePerSec = 0;
+
+    // ── My Wealth = ref + ROI + staking + LP fees + invested ──
+    const lpFeesETH        = Math.max(0, totalCurrentETH - totalInvestedETH);
+    _dashWealthBase        = refEarningsETH + lpFeesETH + totalInvestedETH;
+    _dashCurrentStakingETH = _initDisplayETH;
+    _dashCurrentROIETH     = totalROIAccruedETH;
+    const myWealthETH      = _dashWealthBase + _dashCurrentStakingETH + _dashCurrentROIETH;
+
+    // ── ROI commissions element display (ticker takes over after async rate is computed) ──
     {
       const roiEl = document.getElementById('dashROICommissions');
       if (roiEl) {
@@ -1235,6 +1265,7 @@ async function loadDashboard(silent = false) {
     const pnlEl = document.getElementById('dashPnL');
     pnlEl.style.color = '#4ade80'; // Always green for My Wealth
     pnlEl.innerHTML = myWealthETH > 0 ? fmtUSDT(myWealthETH, {decimals:2}) : '0';
+    _dashStartROITicker(); // start ROI ticker immediately so wealth updates as ROI ticks
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
     {

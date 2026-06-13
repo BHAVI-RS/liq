@@ -1836,3 +1836,20 @@ window.sortRwRef             = sortRwRef;
 window.setRwROIStreamPage    = setRwROIStreamPage;
 window.setRwROIStreamPerPage = setRwROIStreamPerPage;
 window.showROIStreamPopup    = showROIStreamPopup;
+
+// Exposed so the dashboard's ROI element and wealth display can mirror the exact value
+// shown in the rewards tab ACCRUED (including mid-session exhaustion capping).
+// Returns null when the rewards tab hasn't loaded ROI data yet.
+window._rwROIGetAccrued = function() {
+  if (!_rwROIFetchWall) return null;
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - _rwROIFetchWall);
+  const totalETH = _rwROIBaseETH + elapsed * _rwROIRatePerSec;
+  const _midSessExh = !_rwROICapPaused && (_rwROICapExhausted ||
+      (_rwROIActiveCapETH > 0 && _rwROIActiveCapETH < Infinity && totalETH >= _rwROIActiveCapETH));
+  const _outstandingETH = _rwROICapPaused
+    ? _rwROIBaseETH
+    : (_midSessExh && _rwROIAvailableCapETH > 0 && _rwROIAvailableCapETH < Infinity)
+      ? Math.min(totalETH, _rwROIAvailableCapETH)
+      : totalETH;
+  return _rwROILifetimeClaimedETH + _outstandingETH;
+};
