@@ -149,6 +149,20 @@ contract LiquidityViewFacet is LiquidityStorage {
         return _capPausedAt[user];
     }
 
+    // Authoritative live available cap (active locks only) = raw active cap − pending ROI − live
+    // ROI accrual.  Mirrors the exact value the contract gates accrual against (_getAvailableCap).
+    // The UI should use THIS instead of reconstructing cap from getROIData, whose liveETH collapses
+    // to 0 at exhaustion and makes reconstructed cap over-report remaining headroom.
+    function getAvailableCap(address user) external view returns (uint256) {
+        return _getAvailableCap(user);
+    }
+
+    // Same, but the raw base also counts expired (non-removed) locks — the settlement-inclusive
+    // available cap used by the Investments tab (which shows cap on expired/not-staked locks too).
+    function getAvailableCapInclExpired(address user) external view returns (uint256) {
+        return _getAvailableCapInclExpired(user);
+    }
+
     // ── ROI view functions (read directly from inherited storage) ─────────────
     function getROIPending(address recipient) external view returns (uint256 total) {
         total = _roiPendingETH[recipient];

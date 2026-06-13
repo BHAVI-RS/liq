@@ -90,10 +90,13 @@ async function loadInvestments() {
   }
 
   try {
-    const [lpLocks, latestBlock, roiData] = await Promise.all([
+    const [lpLocks, latestBlock, roiData, availCapInclExpiredRaw] = await Promise.all([
       contract.getUserLPLocks(walletAddress),
       provider.getBlock('latest').catch(() => null),
       contract.getROIData(walletAddress).catch(() => null),
+      // Authoritative live available cap (incl. expired/settlement locks). Used to derive the
+      // true outstanding ROI debt below, because getROIData.liveETH collapses to 0 at exhaustion.
+      contract.getAvailableCapInclExpired(walletAddress).catch(() => null),
     ]);
     // Use blockchain timestamp as the reference "now".  On a Hardhat mainnet fork
     // block.timestamp can be far behind the wall clock, which makes every fresh lock
@@ -179,7 +182,22 @@ async function loadInvestments() {
     // lock's cap consumed bar accurately reflects all outstanding debt against the cap.
     const _roiLive    = roiData ? parseFloat(ethers.utils.formatEther(roiData[0])) : 0;
     const _roiPending = roiData ? parseFloat(ethers.utils.formatEther(roiData[1])) : 0;
-    const _totalROI   = _roiLive + _roiPending;
+    // True outstanding ROI debt against cap = rawCap(incl. expired) − availableCap(incl. expired).
+    // getAvailableCapInclExpired already subtracts pending + the REAL live accrual, so this stays
+    // correct even at ROI-driven exhaustion — where getROIData.liveETH collapses to 0 and the old
+    // `_roiLive + _roiPending` under-counted the debt, making locks show phantom remaining cap.
+    let _totalROI = _roiLive + _roiPending; // fallback when the cap getter is unavailable
+    if (availCapInclExpiredRaw != null) {
+      let _rawInclExpired = 0;
+      for (const _l of lpLocks) {
+        if (_l.removed || _l.capPaused) continue;
+        const _e = parseFloat(ethers.utils.formatEther(_l.ethInvested));
+        const _u = parseFloat(ethers.utils.formatEther(_l.commissionsCapUsed || ethers.BigNumber.from(0)));
+        _rawInclExpired += Math.max(0, _e * 5 - _u);
+      }
+      const _availInclExpired = parseFloat(ethers.utils.formatEther(availCapInclExpiredRaw));
+      _totalROI = Math.max(0, _rawInclExpired - _availInclExpired);
+    }
     const _roiPerLock = new Array(lpLocks.length).fill(0);
     let _roiLeft = _totalROI;
     // Attribute a lock's free cap slot to outstanding ROI (helper for the two passes below).

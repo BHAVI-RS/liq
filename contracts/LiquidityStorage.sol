@@ -236,8 +236,21 @@ abstract contract LiquidityStorage {
     // ROI is counted as earned the moment it accrues, so it reduces available cap immediately
     // whether or not the user has claimed it.  _calcAccrued uses this as its gate so that
     // accumulation stops as soon as the combined total (referral + pending + live) reaches cap.
-    function _getAvailableCap(address _user) internal view returns (uint256 available) {
-        uint256 raw = _getRawAvailableCap(_user);
+    function _getAvailableCap(address _user) internal view returns (uint256) {
+        return _availFromRaw(_user, _getRawAvailableCap(_user));
+    }
+
+    // Same as _getAvailableCap but its raw base includes expired (non-removed) locks, so it
+    // reflects the cap that is still settlement-claimable after a lock expires.  Used by the
+    // view-layer getter so the UI's "available cap" matches the contract in every state —
+    // including ROI-driven exhaustion, where getROIData() reports liveETH = 0.
+    function _getAvailableCapInclExpired(address _user) internal view returns (uint256) {
+        return _availFromRaw(_user, _getRawAvailableCapInclExpired(_user));
+    }
+
+    // Shared core: raw cap − pending ROI − live ROI accruing across all active streams.
+    // (Extracted verbatim from _getAvailableCap so its behavior is unchanged.)
+    function _availFromRaw(address _user, uint256 raw) private view returns (uint256 available) {
         if (raw == 0) return 0;
 
         uint256 pending = _roiPendingETH[_user];

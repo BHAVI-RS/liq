@@ -1,12 +1,12 @@
 {
   "network": "polygonAmoy",
-  "deployedAt": "2026-06-13T02:51:22.761Z",
-  "deployBlock": 40058328,
+  "deployedAt": "2026-06-13T07:08:31.800Z",
+  "deployBlock": 40068614,
   "usdtAddress": "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9",
   "tokenAddress": "0x39544CBb2aB89E64aD74c731Ee690D2923bB209f",
-  "liquidityAddress": "0x5eD0157fB9D2246875015D64dA16fDDDFDa5045c",
-  "facetAddress": "0x5027c2c3Fb467F8829F75FF932E8C91bf1630111",
-  "roiFacetAddress": "0xD2ECCbbe63667f26a4e02540F8e2c328E1ce3Ac7",
-  "libAddress": "0x79c48dB6Ee830866b62A58100Decaf082d277F2E",
-  "libViewAddress": "0x02606bc95D3a03c691676D7a4799786eC9419B82"
+  "liquidityAddress": "0x881978c5fa91670371DCbb90458Ad22b967Ab2Fe",
+  "facetAddress": "0x1ABa2A7830379647C36FA65C4f001F131c86E8ac",
+  "roiFacetAddress": "0xbfE610E95cFe2eE804DD39F459471ee469d9569B",
+  "libAddress": "0x7e992621a87311102A8e88F25203405A5ad58236",
+  "libViewAddress": "0x5E9b9a21469d8443dE2C57573aacc3AD5605575E"
 }

@@ -1016,7 +1016,7 @@ async function loadDashboard(silent = false) {
   try {
     const _latestBlockNum = await provider.getBlockNumber();
     const _fromBlock      = getFromBlock(_latestBlockNum);
-    const [lpLocks, commStats, stakingReward, platformToken, latestBlock, roiData, capPausedAtRaw, roiClaimRecords] = await Promise.all([
+    const [lpLocks, commStats, stakingReward, platformToken, latestBlock, roiData, capPausedAtRaw, roiClaimRecords, availCapRaw] = await Promise.all([
       contract.getUserLPLocks(walletAddress).catch(() => []),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
@@ -1025,6 +1025,9 @@ async function loadDashboard(silent = false) {
       contract.getROIData(walletAddress).catch(() => null),
       contract.getCapPausedAt(walletAddress).catch(() => 0),
       contract.getROIClaimRecords(walletAddress).catch(() => []),
+      // Authoritative live available cap (active locks) — matches the contract's accrual gate.
+      // Used instead of reconstructing from getROIData, whose liveETH reads 0 at exhaustion.
+      contract.getAvailableCap(walletAddress).catch(() => null),
     ]);
     // Silent poll: if every critical call failed the RPC is down — keep existing display
     if (silent && lpLocks.length === 0 && platformToken === null) return;
@@ -1279,7 +1282,12 @@ async function loadDashboard(silent = false) {
     const pnlPctEl = document.getElementById('dashPnLPct');
     pnlPctEl.style.color  = pnlCls;
     {
-      const _effCapRef = Math.max(0, capRemETH - roiLiveETH - roiPendingETH);
+      // Prefer the contract's authoritative live available cap (rawActive − pending − REAL live
+      // accrual). Falls back to the local reconstruction only if the getter is unavailable —
+      // note the reconstruction under-counts ROI at exhaustion (liveETH=0), which this fixes.
+      const _effCapRef = (availCapRaw != null)
+        ? parseFloat(ethers.utils.formatEther(availCapRaw))
+        : Math.max(0, capRemETH - roiLiveETH - roiPendingETH);
       _dashEffCapRefBase  = _effCapRef;
       _dashCapRawAtLoad   = capRemETH;
       _dashCapIsEligible  = isEligible;
