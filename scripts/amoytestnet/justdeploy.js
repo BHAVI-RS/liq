@@ -1,6 +1,7 @@
 const hre  = require("hardhat");
 const fs   = require("fs");
 const path = require("path");
+const { deployAndWireViewFacet, mergedLiquidityAbi } = require("./_viewfacet");
 
 const UNI_ROUTER     = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
 const UNI_FACTORY    = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
@@ -303,7 +304,7 @@ async function main() {
 
   const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
     signer: deployer,
-    libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
+    libraries: { LiquidityMath: libAddress },
   });
   const liquidity = await Liquidity.deploy(
     UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress,
@@ -317,6 +318,14 @@ async function main() {
 
   const artifact = hre.artifacts.readArtifactSync("Liquidity");
   const liq      = new hre.ethers.Contract(liquidityAddress, artifact.abi, deployer);
+
+  // ── View facet (holds the moved getters + batch views; reached via fallback) ──
+  const viewFacetAddress = await deployAndWireViewFacet(hre, {
+    deployer, liquidity: liq, factory: UNI_FACTORY, weth: DEPLOYED_USDT, token: tokenAddress,
+    mathAddr: libAddress, viewLibAddr: libViewAddress, overrides: DEPLOY_OVERRIDES, mine,
+  });
+  console.log(`  LiquidityViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
+  const mergedAbi = mergedLiquidityAbi(hre);
 
   // ── Write contract-config.js ──────────────────────────────────────────────
   console.log("\n" + sep()); console.log("  WRITE CONFIG"); console.log(sep());
@@ -335,8 +344,9 @@ const USDT_ADDRESS            = "${DEPLOYED_USDT}";
 const DEPLOY_BLOCK            = ${deployBlock};
 const FACET_ADDRESS           = "${facetAddress}";
 const ROI_FACET_ADDRESS       = "${roiFacetAddress}";
+const VIEW_FACET_ADDRESS      = "${viewFacetAddress}";
 
-const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
+const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
 `;
   fs.writeFileSync(path.join(__dirname, "..", "..", "contract-config.js"), configContent);
   fs.writeFileSync(path.join(__dirname, "..", "..", "frontend", "contract-config.js"), configContent);

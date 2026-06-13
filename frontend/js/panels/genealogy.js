@@ -22,12 +22,28 @@ function switchGeneView(mode) {
   }
 }
 
+// Fetches the entire downline under `addr` in a SINGLE RPC call (contract.getDownline does
+// the tree traversal on-chain) instead of one getReferrals() call per node. The flattened
+// nodes are rebuilt into the same { addr, children } shape the rest of the panel expects.
+// Each node is annotated with `_inv` (the member's total invested, in USDT/ETH units) so
+// callers no longer need a separate userTotalInvested() call per member either.
+// `depth` is the 1-based level of `addr`; the genealogy historically showed up to level 10,
+// so we request (11 - depth) levels of referrals below the requested node.
 async function fetchGeneTree(addr, depth) {
-  if (depth > 10) return { addr, children: [] };
-  let refs = [];
-  try { refs = await contract.getReferrals(addr); } catch(_) {}
-  const children = await Promise.all(refs.map(r => fetchGeneTree(r, depth + 1)));
-  return { addr, children };
+  const maxDepth = Math.max(0, 11 - (depth || 1));
+  let nodes = [];
+  try { nodes = await contract.getDownline(addr, maxDepth); } catch(_) {}
+  if (!nodes || nodes.length === 0) return { addr, children: [], _inv: 0 };
+  const objs = nodes.map(n => ({
+    addr:     n.addr,
+    children: [],
+    _inv:     parseFloat(ethers.utils.formatEther(n.totalInvested)),
+  }));
+  for (let i = 1; i < nodes.length; i++) {
+    const p = Number(nodes[i].parent);
+    if (objs[p]) objs[p].children.push(objs[i]);
+  }
+  return objs[0];
 }
 
 function _geneCollectAddrs(node, result = []) {
@@ -255,15 +271,13 @@ async function loadGenealogy() {
     const activeCount = Number(activeCountRaw);
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
 
-    // Fetch investment amounts for every node (shared by list + tree)
+    // Investment amounts now arrive with the downline (node._inv) — no per-node RPC calls.
     const allAddrs = _geneCollectAddrs(treeData);
     _geneInvestedMap = new Map();
-    await Promise.all(allAddrs.map(async a => {
-      try {
-        const amt = await contract.userTotalInvested(a);
-        _geneInvestedMap.set(a, parseFloat(ethers.utils.formatEther(amt)));
-      } catch(_) { _geneInvestedMap.set(a, 0); }
-    }));
+    (function _fillInv(node) {
+      _geneInvestedMap.set(node.addr, node._inv || 0);
+      for (const child of node.children) _fillInv(child);
+    })(treeData);
 
     // Annotate tree nodes with team stats, then build flat lookup map
     _geneComputeStats(treeData);

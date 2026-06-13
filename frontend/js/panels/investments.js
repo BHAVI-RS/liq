@@ -182,18 +182,34 @@ async function loadInvestments() {
     const _totalROI   = _roiLive + _roiPending;
     const _roiPerLock = new Array(lpLocks.length).fill(0);
     let _roiLeft = _totalROI;
-    for (let _fi = 0; _fi < lpLocks.length && _roiLeft > 0; _fi++) {
+    // Attribute a lock's free cap slot to outstanding ROI (helper for the two passes below).
+    const _attribRoiToLock = (_fi) => {
       const _fl = lpLocks[_fi];
-      if (_fl.removed) continue;
-      if (_fl.capPaused) continue;
-      if (Number(_fl.unlockTime) <= effectiveNow) continue;
-      const _fEth     = parseFloat(ethers.utils.formatEther(_fl.ethInvested));
-      const _fCap     = _fEth * 5;
+      const _fEth      = parseFloat(ethers.utils.formatEther(_fl.ethInvested));
+      const _fCap      = _fEth * 5;
       const _fCommUsed = parseFloat(ethers.utils.formatEther(_fl.commissionsCapUsed || ethers.BigNumber.from(0)));
-      const _fSlot    = Math.max(0, _fCap - _fCommUsed);
-      const _fRoi     = Math.min(_roiLeft, _fSlot);
+      const _fSlot     = Math.max(0, _fCap - _fCommUsed);
+      const _fRoi      = Math.min(_roiLeft, _fSlot);
       _roiPerLock[_fi] = _fRoi;
       _roiLeft -= _fRoi;
+    };
+    // Pass 1 — active locks absorb ROI first, mirroring _chargeCap (which only touches
+    // non-expired locks while they still have cap).
+    for (let _fi = 0; _fi < lpLocks.length && _roiLeft > 0; _fi++) {
+      const _fl = lpLocks[_fi];
+      if (_fl.removed || _fl.capPaused) continue;
+      if (Number(_fl.unlockTime) <= effectiveNow) continue; // active only
+      _attribRoiToLock(_fi);
+    }
+    // Pass 2 — overflow ROI (pending beyond active cap) settles against expired but
+    // non-removed locks, mirroring _chargeCapInclExpired in the claim path. Without this
+    // a not-staked (expired) investment showed its full cap − commissionsCapUsed and
+    // ignored outstanding ROI debt, displaying a different value than a staked one.
+    for (let _fi = 0; _fi < lpLocks.length && _roiLeft > 0; _fi++) {
+      const _fl = lpLocks[_fi];
+      if (_fl.removed || _fl.capPaused) continue;
+      if (Number(_fl.unlockTime) > effectiveNow) continue; // expired only
+      _attribRoiToLock(_fi);
     }
 
     const activeCards = [];

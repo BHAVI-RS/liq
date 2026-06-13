@@ -39,6 +39,7 @@
 const hre  = require("hardhat");
 const fs   = require("fs");
 const path = require("path");
+const { deployAndWireViewFacet, mergedLiquidityAbi } = require("./_viewfacet");
 
 // ── Uniswap V2 on Polygon Amoy ────────────────────────────────────────────────
 const UNI_ROUTER  = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
@@ -320,7 +321,7 @@ async function main() {
 
   const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
     signer: deployer,
-    libraries: { LiquidityMath: libAddress, LiquidityViewLib: libViewAddress },
+    libraries: { LiquidityMath: libAddress },
   });
   const liquidity = await Liquidity.deploy(
     UNI_ROUTER, UNI_FACTORY, usdtAddress, tokenAddress, facetAddress, roiFacetAddress,
@@ -334,6 +335,14 @@ async function main() {
 
   const artifact = hre.artifacts.readArtifactSync("Liquidity");
   const liq      = new hre.ethers.Contract(liquidityAddress, artifact.abi, deployer);
+
+  // ── View facet (holds the moved getters + batch views; reached via fallback) ──
+  const viewFacetAddress = await deployAndWireViewFacet(hre, {
+    deployer, liquidity, factory: UNI_FACTORY, weth: usdtAddress, token: tokenAddress,
+    mathAddr: libAddress, viewLibAddr: libViewAddress, overrides: DEPLOY_OVERRIDES, mine,
+  });
+  console.log(`  LiquidityViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
+  const mergedAbi = mergedLiquidityAbi(hre);
 
   // ─────────────────────────────────────────────────────────────
   // PHASE 3 — REGISTER TOKEN + SEED POOL
@@ -513,7 +522,9 @@ const DEPLOY_BLOCK            = ${deployBlock};
 const FACET_ADDRESS           = "${facetAddress}";
 const ROI_FACET_ADDRESS       = "${roiFacetAddress}";
 
-const CONTRACT_ABI = ${JSON.stringify(artifact.abi, null, 2)};
+const VIEW_FACET_ADDRESS      = "${viewFacetAddress}";
+
+const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
 `;
 
   const rootConfig     = path.join(__dirname, "..", "..", "contract-config.js");

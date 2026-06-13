@@ -541,11 +541,17 @@ async function loadLandingStats() {
     // ── Slow path: wealth built = sum of all users' current wealth (best-effort) ──
     try {
       const allUsers = await readContract.getAllRegisteredUsers();
-      const wealthParams = await Promise.all(
-        allUsers.map(a => readContract.getWealthParams(a).catch(() => null))
-      );
+      // One getWealthParamsBatch per chunk (reads every user's wealth on-chain) instead of
+      // one getWealthParams() RPC call per registered user. Chunked to bound eth_call gas.
       let totalWealthETH = 0;
-      for (const p of wealthParams) totalWealthETH += _computeWealthLanding(p);
+      const _CH = 50;
+      for (let _i = 0; _i < allUsers.length; _i += _CH) {
+        const _chunk = allUsers.slice(_i, _i + _CH);
+        let _wps = [];
+        try { _wps = await readContract.getWealthParamsBatch(_chunk); }
+        catch (_) { _wps = []; }
+        for (const p of _wps) totalWealthETH += _computeWealthLanding(p);
+      }
       const full = {
         ...partial,
         wealthBuilt: totalWealthETH > 0

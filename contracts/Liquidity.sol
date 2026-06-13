@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "./LiquidityStorage.sol";
 import "./LiquidityMath.sol";
-import "./LiquidityViewLib.sol";
 import "./LiquidityFacet.sol";
 import "./LiquidityROIFacet.sol";
 
@@ -35,6 +34,12 @@ contract Liquidity is LiquidityStorage {
     address private immutable WETH;
     address private immutable _facet;
     address private immutable _roiFacet;
+
+    // Read-only view/getter facet. All getX()/batch views were moved out of this contract
+    // (to keep it under the 24 KB mainnet limit) into LiquidityViewFacet; unknown selectors
+    // are forwarded there via fallback(). Stored (not a constructor immutable) so the existing
+    // deploy flow / constructor signature is unchanged — owner wires it once with setViewFacet().
+    address private _viewFacet;
 
     uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
     uint256 private constant USDT_PER_ETH      = 1;
@@ -444,9 +449,10 @@ contract Liquidity is LiquidityStorage {
 
         _callFacet(abi.encodeCall(LiquidityFacet.restakeLPExt, (_lockIndex, _durationDays)));
 
-        // Restore ROI stream start times now that the restaked lock provides fresh cap.
+        // Resume ROI accrual if re-locking this lock reactivated dormant unused cap.
+        // NOTE: commissionsCapUsed is deliberately NOT reset — restaking carries cap forward
+        // unchanged (consumed stays consumed, unused stays usable); only invest() grants new cap.
         if (_capPausedAt[msg.sender] > 0) {
-            userLPLocks[msg.sender][_lockIndex].commissionsCapUsed = 0;
             _capPausedAt[msg.sender] = 0;
             if (hadNoActiveCap && _lastExpiry > 0) {
                 // All locks had expired before _chargeCap ran; recipientSince was not reset.
@@ -470,7 +476,7 @@ contract Liquidity is LiquidityStorage {
             }
         } else if (hadNoActiveCap) {
             // Natural expiry: no commission arrived after expiry to trigger _chargeCap.
-            userLPLocks[msg.sender][_lockIndex].commissionsCapUsed = 0;
+            // commissionsCapUsed is left as-is (carried forward); only resume accrual.
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 
@@ -647,173 +653,9 @@ contract Liquidity is LiquidityStorage {
     }
 
     // ── View functions ────────────────────────────────────────────────────────
-    function getActiveDirectReferralCount(address _user) public view returns (uint256) {
-        return activeReferralCount[_user];
-    }
-    function getPlatformStats() external view returns (
-        uint256 _totalUsers, uint256 _totalEthInvested, uint256 _totalStakingRewardsPaidETH
-    ) {
-        return (totalRegisteredUsers + 1, totalEthInvested, totalStakingRewardsPaidETH);
-    }
-    function getAllRegisteredUsers() external view returns (address[] memory) {
-        return allRegisteredUsers;
-    }
-    function getUserLPLocks(address _user) external view returns (LPLock[] memory) {
-        return userLPLocks[_user];
-    }
-    function getRegisteredTokens() external view returns (address[] memory) {
-        return registeredTokens;
-    }
-    function getToken(address _tokenAddress) external view returns (Token memory) {
-        return tokens[_tokenAddress];
-    }
-    function getReferrals(address _user) external view returns (address[] memory) {
-        return users[_user].referrals;
-    }
-    function getReferrer(address _user) external view returns (address) {
-        return users[_user].referrer;
-    }
-    function getContractTokenBalance(address _token) external view returns (uint256) {
-        return IERC20(_token).balanceOf(address(this));
-    }
-    function getStakingReward(address _user) external view returns (
-        uint256 totalAccumulated, uint256 previewNewTokens, uint256 lifetimeClaimed
-    ) {
-        uint256 price = LiquidityMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH);
-        LPLock[] memory locks = userLPLocks[_user];
-        return LiquidityViewLib.computeStakingReward(locks, price);
-    }
-    function getUserCommissionStats(address _user) external view returns (
-        uint256 earned, uint256, uint256 totalCap, uint256 remainingCap, uint256 active
-    ) {
-        LPLock[] memory locks = userLPLocks[_user];
-        return LiquidityViewLib.computeCommissionStats(
-            locks, userCommissionsEarned[_user], userTotalInvested[_user], block.timestamp
-        );
-    }
-    function getDirectRefsInfo(address user) external view returns (DirectRefInfo[] memory result) {
-        address[] memory refs = users[user].referrals;
-        uint256 len = refs.length;
-        result = new DirectRefInfo[](len);
-        for (uint256 i = 0; i < len; ) {
-            address ref = refs[i];
-            result[i].addr          = ref;
-            result[i].totalInvested = userTotalInvested[ref];
-            result[i].directRefCount = users[ref].referrals.length;
-            (,, uint256 tc, uint256 rc,) = LiquidityViewLib.computeCommissionStats(
-                userLPLocks[ref], userCommissionsEarned[ref], userTotalInvested[ref], block.timestamp
-            );
-            result[i].remainingCap = rc;
-            result[i].totalCap     = tc;
-            unchecked { i++; }
-        }
-    }
-    function getWealthParams(address _user) external view returns (WealthParams memory p) {
-        LPLock[] memory locks = userLPLocks[_user];
-        return LiquidityViewLib.computeWealthParams(
-            locks, userCommissionsEarned[_user],
-            LiquidityMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH),
-            LP_LOCK_DURATION, UNISWAP_FACTORY, WETH
-        );
-    }
-    function getStakingRatesForAmount(uint256 ethInvestedWei) external view returns (
-        uint256[6] memory durSecs, uint256[6] memory ratesPPM
-    ) {
-        uint256 investUSDT = ethInvestedWei * USDT_PER_ETH / 1e18;
-        bool hasReward = investUSDT >= 100;
-        uint256 tierIdx = hasReward ? LiquidityMath.getTierIndex(investmentTiers, ethInvestedWei) : 0;
-        for (uint256 i = 0; i < 6; ) {
-            durSecs[i]  = stakingDurations[i];
-            ratesPPM[i] = hasReward ? stakingRates[i][tierIdx][0] : 0;
-            unchecked { i++; }
-        }
-    }
-    function setRefLabel(address _ref, bytes calldata _label) external {
-        _refLabels[msg.sender][_ref] = _label;
-    }
-    function getRefLabel(address _owner, address _ref) external view returns (bytes memory) {
-        return _refLabels[_owner][_ref];
-    }
-    function getPriceHistory(address _token) external view returns (PriceSnap[] memory) {
-        return _priceHistory[_token];
-    }
-    function getTradeHistory(address _token) external view returns (TradeSnap[] memory) {
-        return _tradeHistory[_token];
-    }
-    function getCommissionRecords(address _user) external view returns (CommissionRecord[] memory) {
-        return _commissionRecords[_user];
-    }
-    function getMissedRecords(address _user) external view returns (MissedRecord[] memory) {
-        return _missedRecords[_user];
-    }
-    function getInvestRecords(address _user) external view returns (InvestRecord[] memory) {
-        return _investRecords[_user];
-    }
-    function getClaimRecords(address _user) external view returns (ClaimRecord[] memory) {
-        return _claimRecords[_user];
-    }
-    function getROIClaimRecords(address _user) external view returns (ClaimRecord[] memory) {
-        return _roiClaimRecords[_user];
-    }
-    function getLPEventRecords(address _user) external view returns (LPEventRecord[] memory) {
-        return _lpEventRecords[_user];
-    }
-
-    function getCapPausedAt(address user) external view returns (uint64) {
-        return _capPausedAt[user];
-    }
-
-    // ── ROI view functions (read directly from inherited storage) ────────────
-    // These MUST NOT delegate to the ROI facet via a regular CALL — that would
-    // read the facet's own empty storage instead of Liquidity.sol's storage.
-    function getROIPending(address recipient) external view returns (uint256 total) {
-        total = _roiPendingETH[recipient];
-        StreamRef[] storage arr = _activeROIStreams[recipient];
-        for (uint256 i = 0; i < arr.length; ) {
-            StreamRef storage ref = arr[i];
-            ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
-            if (!stream.ended) total += _calcAccrued(stream, ref.investor, ref.lockIndex, ref.level);
-            unchecked { i++; }
-        }
-    }
-    // Returns settled pending and live (unsettled) accrued separately — used by the frontend
-    // dashboard and rewards tab to display and tick the ROI commission counters.
-    function getROIData(address recipient) external view returns (uint256 liveETH, uint256 pendingETH) {
-        pendingETH = _roiPendingETH[recipient];
-        // Cap is paused (exhausted by _chargeCap): streams were pre-settled into _roiPendingETH
-        // and recipientSince was reset.  Any _calcAccruedRaw from that point forward is
-        // post-exhaustion accrual which must NOT be shown or claimable.
-        if (_capPausedAt[recipient] > 0) return (0, pendingETH);
-        // Active locks fully used but expired locks still have remaining cap: allow showing
-        // the ROI that accrued during the lock period (capped at lock.unlockTime by _calcAccruedRaw).
-        if (_getRawAvailableCapInclExpired(recipient) == 0) return (0, pendingETH);
-        // Live cap exhausted (pending + live ROI consumed raw cap) even though _capPausedAt
-        // was not set — ROI has stopped accruing via _calcAccrued gate; show nothing live.
-        if (_getAvailableCap(recipient) == 0) return (0, pendingETH);
-        StreamRef[] storage arr = _activeROIStreams[recipient];
-        for (uint256 i = 0; i < arr.length; ) {
-            StreamRef storage ref = arr[i];
-            ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
-            // Raw accrual: endTs is capped at investor lock.unlockTime so value is fixed after
-            // expiry. Frontend caps the claimable zone at the settlement cap; over-cap shows red.
-            if (!stream.ended) liveETH += _calcAccruedRaw(stream, ref.investor, ref.lockIndex, ref.level);
-            unchecked { i++; }
-        }
-    }
-    function getActiveROIStreams(address recipient) external view returns (StreamRef[] memory) {
-        return _activeROIStreams[recipient];
-    }
-    function getROIStreamInfo(address investor, uint256 lockIndex, uint8 level)
-        external view returns (ROIStream memory)
-    {
-        return _roiStreams[investor][lockIndex][level];
-    }
-    function getROIAccrued(address investor, uint256 lockIndex, uint8 level)
-        external view returns (uint256)
-    {
-        ROIStream storage stream = _roiStreams[investor][lockIndex][level];
-        return _calcAccrued(stream, investor, lockIndex, level);
-    }
+    // All read-only getters and batch/aggregation views live in LiquidityViewFacet and are
+    // reached through fallback() below. getTWAPPrice() stays here because it is called
+    // internally by the ROI claim functions.
 
     // ── Direct swap functions (records every trade in _tradeHistory) ─────────
     function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant {
@@ -856,7 +698,29 @@ contract Liquidity is LiquidityStorage {
         }));
     }
 
+    // One-time wiring of the read-only view facet (see _viewFacet docs above).
+    function setViewFacet(address facet_) external onlyOwner {
+        _viewFacet = facet_;
+    }
+
     receive() external payable {}
+
+    // Forward every selector this contract does not implement to the view facet via
+    // DELEGATECALL so the moved getters/batch views execute in this contract's storage.
+    // Reads come in as eth_call (frontend), so although delegatecall is not `view` the call
+    // never persists state; ethers decodes the returned ABI data exactly as before.
+    fallback() external payable {
+        address vf = _viewFacet;
+        require(vf != address(0));
+        assembly {
+            calldatacopy(0, 0, calldatasize())
+            let ok := delegatecall(gas(), vf, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            switch ok
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
+        }
+    }
 }
 
 interface IUniswapV2Router02 {

@@ -146,3 +146,16 @@ struct DirectRefInfo {
     uint256 remainingCap;   // activeCap: cap from locks still within unlock window
     uint256 totalCap;       // activeCap + pausedCap
 }
+
+// Flattened downline node returned by getDownline().
+// Lets the frontend rebuild the whole referral tree (genealogy + team stats) from a
+// single RPC call instead of one getReferrals()/userTotalInvested() call per member.
+// parent is the index (in the returned array) of this node's referrer; the root node
+// is at index 0 with parent == 0 and depth == 0. Children are reconstructed client-side
+// by grouping nodes under their parent index.
+struct DownlineNode {
+    address addr;
+    uint32  parent;        // index into the returned array
+    uint32  depth;         // 0 = root, 1 = direct referral, …
+    uint256 totalInvested; // userTotalInvested[addr]
+}

@@ -111,21 +111,25 @@ async function _loadDashTeamWealth() {
       _dashUpdateTeamWealthDisplay();
       return;
     }
-    // Batch to 5 concurrent calls — firing all 50+ at once floods Amoy testnet RPC
-    const batchSize = 5;
+    // One getWealthParamsBatch + one getROIDataBatch per chunk (each does the per-member
+    // reads on-chain) instead of 2 RPC calls per member. Chunked to keep each eth_call's
+    // gas bounded for large teams.
+    const batchSize = 40;
     const paramsList = [];
     const roiList    = [];
     for (let _bi = 0; _bi < allAddrs.length; _bi += batchSize) {
       const _chunk = allAddrs.slice(_bi, _bi + batchSize);
-      const _res   = await Promise.all(_chunk.map(a => Promise.all([
-        contract.getWealthParams(a).catch(() => null),
-        contract.getROIData(a).catch(() => null),
-      ])));
-      for (const [_wp, _rd] of _res) {
-        paramsList.push(_wp);
-        roiList.push(_rd
-          ? parseFloat(ethers.utils.formatEther(_rd.liveETH || 0)) + parseFloat(ethers.utils.formatEther(_rd.pendingETH || 0))
-          : 0);
+      const [_wps, _roi] = await Promise.all([
+        contract.getWealthParamsBatch(_chunk).catch(() => _chunk.map(() => null)),
+        contract.getROIDataBatch(_chunk).catch(() => [[], []]),
+      ]);
+      const _live = _roi[0] || [], _pend = _roi[1] || [];
+      for (let _i = 0; _i < _chunk.length; _i++) {
+        paramsList.push(_wps[_i] || null);
+        roiList.push(
+          parseFloat(ethers.utils.formatEther(_live[_i] || 0)) +
+          parseFloat(ethers.utils.formatEther(_pend[_i] || 0))
+        );
       }
     }
     const _combined = paramsList.map((_wp, _i) => ({ _wp, _roi: roiList[_i] || 0 })).filter(x => x._wp !== null);
@@ -357,7 +361,7 @@ function _dashStartROITicker() {
       const badgeEl = document.getElementById('dashCapBadge');
       if (capEl) {
         const capNow = Math.max(0, _dashEffCapRefBase - elapsed * _dashROIRatePerSec);
-        capEl.textContent = '$' + (capNow * USDT_PER_ETH).toFixed(2) + ' cap remaining';
+        capEl.textContent = '$' + (capNow * USDT_PER_ETH).toFixed(2) + ' available cap';
         if (badgeEl && capNow <= 0) {
           badgeEl.textContent = 'EXHAUSTED';
           badgeEl.style.color = '#ef4444';
@@ -956,15 +960,16 @@ async function _loadDashTeamStats() {
       bizEl.textContent = '—';
       return;
     }
-    const amounts = await Promise.all(
-      allAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))
-    );
+    // Invested amounts arrived with the downline (node._inv) — no per-member RPC calls.
     let teamVolume = 0, teamBusinessETH = 0;
-    for (const amt of amounts) {
-      const eth = parseFloat(ethers.utils.formatEther(amt));
-      if (eth > 0) teamVolume++;
-      teamBusinessETH += eth;
-    }
+    (function _walk(node, isRoot) {
+      if (!isRoot) {
+        const eth = node._inv || 0;
+        if (eth > 0) teamVolume++;
+        teamBusinessETH += eth;
+      }
+      for (const child of node.children) _walk(child, false);
+    })(treeData, true);
     volEl.textContent  = teamVolume;
     bizEl.innerHTML    = teamBusinessETH > 0 ? fmtUSDT(teamBusinessETH, {decimals:2}) : '0';
   } catch(e) {
@@ -1207,25 +1212,30 @@ async function loadDashboard(silent = false) {
           investorMap.get(key).push(ref);
         }
         let ratePerSec = 0;
-        await Promise.all([...investorMap.entries()].map(async ([, refs]) => {
-          try {
-            const locks = await contract.getUserLPLocks(refs[0].investor);
-            for (const ref of refs) {
-              const lock = locks[Number(ref.lockIndex)];
-              if (!lock || lock.removed) continue;
-              const unlockTime = Number(lock.unlockTime);
-              const lockedAt   = Number(lock.lockedAt);
-              if (_effNowCapture >= unlockTime) continue;
-              const lockDur = unlockTime - lockedAt;
-              if (lockDur <= 0) continue;
-              const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
-              const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
-              if (ratePPM === 0) continue;
-              const commRate = ROI_RATES[Number(ref.level)] || 0;
-              ratePerSec += ethInv * ratePPM * commRate / (50_000_000_000 * lockDur);
-            }
-          } catch(_) {}
-        }));
+        // Fetch every distinct investor's LP locks in ONE batch call instead of one
+        // getUserLPLocks() per investor.
+        const _invEntries = [...investorMap.entries()];
+        const _invAddrs   = _invEntries.map(([, refs]) => refs[0].investor);
+        let _locksArr = [];
+        try { _locksArr = await contract.getUserLPLocksBatch(_invAddrs); } catch(_) { _locksArr = []; }
+        _invEntries.forEach(([, refs], _ei) => {
+          const locks = _locksArr[_ei];
+          if (!locks) return;
+          for (const ref of refs) {
+            const lock = locks[Number(ref.lockIndex)];
+            if (!lock || lock.removed) continue;
+            const unlockTime = Number(lock.unlockTime);
+            const lockedAt   = Number(lock.lockedAt);
+            if (_effNowCapture >= unlockTime) continue;
+            const lockDur = unlockTime - lockedAt;
+            if (lockDur <= 0) continue;
+            const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+            const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+            if (ratePPM === 0) continue;
+            const commRate = ROI_RATES[Number(ref.level)] || 0;
+            ratePerSec += ethInv * ratePPM * commRate / (50_000_000_000 * lockDur);
+          }
+        });
         // Don't show a growing rate when the contract already reports no live accrual
         // (liveETH=0 means cap is exhausted or paused — matches getROIData's cap gates).
         // Also zero rate when the effective cap reference is 0: the new investment's cap
@@ -1276,14 +1286,13 @@ async function loadDashboard(silent = false) {
       _dashCapPaused      = Number(capPausedAtRaw) > 0;
       _dashCapLockExpired = !isEligible && isPaused && !_dashCapPaused;
 
-      let _badgeTxt, _badgeColor, _badgeBg, _badgeBorder, _capLine;
+      let _badgeTxt, _badgeColor, _badgeBg, _badgeBorder;
       if (isEligible && _effCapRef > 0.0001) {
         // Active lock with cap headroom available.
         _badgeTxt    = 'ACTIVE';
         _badgeColor  = '#4ade80';
         _badgeBg     = 'rgba(74,222,128,0.12)';
         _badgeBorder = 'rgba(74,222,128,0.3)';
-        _capLine     = `<span id="dashCapRem" style="font-size:10px;color:var(--muted);">$${(_effCapRef * USDT_PER_ETH).toFixed(2)} cap remaining</span>`;
       } else if (isEligible) {
         // Active lock exists but outstanding ROI has already consumed the available cap
         // (e.g. previous package exhausted its portion — new investment doesn't restore
@@ -1293,33 +1302,33 @@ async function loadDashboard(silent = false) {
         _badgeColor  = '#ef4444';
         _badgeBg     = 'rgba(239,68,68,0.12)';
         _badgeBorder = 'rgba(239,68,68,0.3)';
-        _capLine     = `<span style="font-size:10px;color:var(--muted);">claim ROI to restore accrual</span>`;
       } else if (hasAdminPausedCap) {
         // No active cap left, but at least one investment has its cap admin-paused with remaining headroom.
         _badgeTxt    = 'PAUSED';
         _badgeColor  = '#eab308';
         _badgeBg     = 'rgba(234,179,8,0.12)';
         _badgeBorder = 'rgba(234,179,8,0.3)';
-        _capLine     = `<span style="font-size:10px;color:var(--muted);">$${(adminPausedCapETH * USDT_PER_ETH).toFixed(2)} paused · resumable by admin</span>`;
       } else if (_dashCapPaused) {
         _badgeTxt    = 'CAP PAUSED';
         _badgeColor  = '#ef4444';
         _badgeBg     = 'rgba(239,68,68,0.12)';
         _badgeBorder = 'rgba(239,68,68,0.3)';
-        _capLine     = `<span style="font-size:10px;color:var(--muted);">invest again to restore cap</span>`;
       } else if (_dashCapLockExpired) {
         _badgeTxt    = 'LOCK EXPIRED';
         _badgeColor  = '#f97316';
         _badgeBg     = 'rgba(249,115,22,0.12)';
         _badgeBorder = 'rgba(249,115,22,0.3)';
-        _capLine     = `<span style="font-size:10px;color:var(--muted);">$${(pausedCapETH * USDT_PER_ETH).toFixed(2)} settable from expired lock</span>`;
       } else {
         _badgeTxt    = 'NO CAP';
         _badgeColor  = '#ef4444';
         _badgeBg     = 'rgba(239,68,68,0.12)';
         _badgeBorder = 'rgba(239,68,68,0.3)';
-        _capLine     = `<span style="font-size:10px;color:var(--muted);">invest to earn a cap</span>`;
       }
+      // Always show the live available cap (active cap − pending ROI − live ROI),
+      // mirroring the contract's _getAvailableCap. The colored badge above conveys the
+      // state (ACTIVE / EXHAUSTED / PAUSED / …); the figure is the available cap in USDT.
+      const _capLine =
+        `<span id="dashCapRem" style="font-size:10px;color:var(--muted);">$${(_effCapRef * USDT_PER_ETH).toFixed(2)} available cap</span>`;
       pnlPctEl.innerHTML =
         `<div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
            <span id="dashCapBadge" style="font-size:9px;font-family:var(--font-mono);letter-spacing:1px;
@@ -1656,20 +1665,10 @@ async function _refreshRefPopupStats(addr) {
     if (invEl) invEl.innerHTML = totalInv > 0 ? fmtUSDT(totalInv, {decimals:2}) : '0';
 
     const treeData  = await fetchGeneTree(addr, 1);
-    const teamAddrs = _geneCollectAddrs(treeData).slice(1);
     let teamVol = 0, teamBizETH = 0, teamWealthETH = 0;
-    if (teamAddrs.length > 0) {
-      const [amts, wps] = await Promise.all([
-        Promise.all(teamAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
-        Promise.all(teamAddrs.map(a => contract.getWealthParams(a).catch(() => null))),
-      ]);
-      for (let i = 0; i < amts.length; i++) {
-        const e = parseFloat(ethers.utils.formatEther(amts[i]));
-        if (e > 0) teamVol++;
-        teamBizETH   += e;
-        teamWealthETH += _computeWealthFromParams(wps[i]);
-      }
-    }
+    const teamAddrs = await _refPopTeamAgg(treeData, v => {
+      teamVol = v.vol; teamBizETH = v.biz; teamWealthETH = v.wealth;
+    });
     const twEl = document.getElementById('refPopTeamWealthVal');
     if (twEl) twEl.innerHTML = teamWealthETH > 0 ? fmtUSDT(teamWealthETH, {decimals:2}) : '0';
     const tbEl = document.getElementById('refPopTeamBizVal');
@@ -1733,6 +1732,29 @@ function _computeWealthFromParams(params) {
 
   const lpFees = Math.max(0, totalCurrentLP - totalInvestedETH);
   return refEarningsETH + lpFees + totalInvestedETH + stakingETH;
+}
+
+// Aggregates a referral's downline team stats (volume, business, wealth) with batched reads:
+// invested comes from the downline nodes (_inv, already fetched by fetchGeneTree), and wealth
+// from one getWealthParamsBatch per chunk — instead of one userTotalInvested()+getWealthParams()
+// pair per team member. Returns the flat team address list and reports {vol,biz,wealth} via cb.
+async function _refPopTeamAgg(treeData, cb) {
+  const teamAddrs = _geneCollectAddrs(treeData).slice(1);
+  let vol = 0, biz = 0, wealth = 0;
+  const invMap = new Map();
+  (function _w(node) { invMap.set(node.addr.toLowerCase(), node._inv || 0); node.children.forEach(_w); })(treeData);
+  for (const a of teamAddrs) { const e = invMap.get(a.toLowerCase()) || 0; if (e > 0) vol++; biz += e; }
+  if (teamAddrs.length > 0) {
+    const CH = 40;
+    for (let i = 0; i < teamAddrs.length; i += CH) {
+      const chunk = teamAddrs.slice(i, i + CH);
+      let wps = [];
+      try { wps = await contract.getWealthParamsBatch(chunk); } catch(_) { wps = chunk.map(() => null); }
+      for (const wp of wps) wealth += _computeWealthFromParams(wp);
+    }
+  }
+  cb({ vol, biz, wealth });
+  return teamAddrs;
 }
 
 function _startRefPopupTicker() {
@@ -1810,20 +1832,10 @@ async function openRefPopup(addr) {
     const missedETH = await _computeMissedETHForAddr(addr);
 
     const treeData  = await fetchGeneTree(addr, 1);
-    const teamAddrs = _geneCollectAddrs(treeData).slice(1);
     let teamVol = 0, teamBizETH = 0, teamWealthETH = 0;
-    if (teamAddrs.length > 0) {
-      const [amts, wps] = await Promise.all([
-        Promise.all(teamAddrs.map(a => contract.userTotalInvested(a).catch(() => ethers.BigNumber.from(0)))),
-        Promise.all(teamAddrs.map(a => contract.getWealthParams(a).catch(() => null))),
-      ]);
-      for (let i = 0; i < amts.length; i++) {
-        const e = parseFloat(ethers.utils.formatEther(amts[i]));
-        if (e > 0) teamVol++;
-        teamBizETH   += e;
-        teamWealthETH += _computeWealthFromParams(wps[i]);
-      }
-    }
+    await _refPopTeamAgg(treeData, v => {
+      teamVol = v.vol; teamBizETH = v.biz; teamWealthETH = v.wealth;
+    });
 
     const stats = [
       { label: 'WEALTH',             val: wealthETH     > 0 ? fmtUSDT(wealthETH,     {decimals:2}) : '0', color: '#4ade80',     id: 'refPopWealthVal' },

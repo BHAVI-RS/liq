@@ -617,13 +617,10 @@ contract LiquidityFacet is LiquidityStorage {
             sIdx = 0;
         }
 
-        // Exhaust any remaining cap — restaking does not grant a new cap period.
-        // commissionsCapUsed already tracks consumed cap; we mark the rest as used
-        // so the re-locked window cannot receive new referral/ROI commissions.
-        {
-            uint256 fullCap = lock.ethInvested * 5;
-            if (lock.commissionsCapUsed < fullCap) lock.commissionsCapUsed = fullCap;
-        }
+        // Cap is a lifetime 5× per principal: restaking neither restores already-consumed
+        // cap nor grants a new cap period. commissionsCapUsed is left untouched here so any
+        // unused cap carries forward into the re-locked window and consumed cap stays consumed.
+        // New cap is only ever gained via invest() (which appends a fresh lock).
 
         lock.lockedAt         = block.timestamp;
         lock.unlockTime       = block.timestamp + _durationDays * 2;
