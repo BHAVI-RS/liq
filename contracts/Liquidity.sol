@@ -41,7 +41,7 @@ contract Liquidity is LiquidityStorage {
     // deploy flow / constructor signature is unchanged — owner wires it once with setViewFacet().
     address private _viewFacet;
 
-    uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
+    uint256 private constant LP_LOCK_DURATION  = 540; // 90 days scaled: 1 day = 6 s (testing)
     uint256 private constant USDT_PER_ETH      = 1;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant REGISTRATION_FEE  = 1e18 / USDT_PER_ETH; // 1 USDT legitimacy check
@@ -347,36 +347,17 @@ contract Liquidity is LiquidityStorage {
 
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
 
-        // Restore ROI stream start times now that a new lock restores available cap.
+        // Restore ROI accrual now that this new lock supplies fresh cap. Cap-exhausted-while-staked
+        // ROI is HELD — it stays claimable against the new cap, settled lazily at claim time — so
+        // there is NO per-stream loop here (O(locks), unbounded-stream safe) and nothing is forfeited.
+        // Only a genuine natural expiry (a lock actually past its unlock time) settles pre-expiry ROI
+        // and forfeits the post-expiry no-stake gap (rule 2), via _handleNaturalExpiryResume.
         if (_capPausedAt[msg.sender] > 0) {
             _capPausedAt[msg.sender] = 0;
             if (hadNoActiveCap && _lastExpiry > 0) {
-                // All active locks had expired when _chargeCap was triggered by a commission.
-                // _chargeCap skipped pre-settlement (rawAvailable was 0) so recipientSince was
-                // never reset — treat identically to the natural-expiry path below.
                 _handleNaturalExpiryResume(msg.sender, _lastExpiry);
-            } else {
-                // Commission-exhausted active locks (_lastExpiry = 0): _chargeCap pre-settled
-                // streams and reset recipientSince to pause time. Record gap ROI as missed so
-                // the gap period (pause → reinvest) does not retroactively accrue on new cap.
-                StreamRef[] storage capRefs = _activeROIStreams[msg.sender];
-                uint256 capRefLen = capRefs.length;
-                for (uint256 k = 0; k < capRefLen; ) {
-                    ROIStream storage capStream =
-                        _roiStreams[capRefs[k].investor][capRefs[k].lockIndex][capRefs[k].level];
-                    if (!capStream.ended) {
-                        uint256 gapROI = _calcAccruedRaw(capStream, capRefs[k].investor, capRefs[k].lockIndex, capRefs[k].level);
-                        if (gapROI > 0) {
-                            capStream.historicalMissedETH += uint128(gapROI);
-                        }
-                        capStream.recipientSince = uint64(block.timestamp);
-                    }
-                    unchecked { k++; }
-                }
             }
         } else if (hadNoActiveCap) {
-            // Natural expiry (or no prior investment): lock expired or user never had a lock.
-            // Settle pre-expiry ROI and record gap as missed.
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 
@@ -459,31 +440,14 @@ contract Liquidity is LiquidityStorage {
         // Resume ROI accrual if re-locking this lock reactivated dormant unused cap.
         // NOTE: commissionsCapUsed is deliberately NOT reset — restaking carries cap forward
         // unchanged (consumed stays consumed, unused stays usable); only invest() grants new cap.
+        // Cap-exhausted ROI is HELD (claimable against carried-forward cap, settled at claim) — no
+        // per-stream loop, nothing forfeited. Only a genuine natural expiry settles & bounds (rule 2).
         if (_capPausedAt[msg.sender] > 0) {
             _capPausedAt[msg.sender] = 0;
             if (hadNoActiveCap && _lastExpiry > 0) {
-                // All locks had expired before _chargeCap ran; recipientSince was not reset.
                 _handleNaturalExpiryResume(msg.sender, _lastExpiry);
-            } else {
-                // Commission-exhausted active locks or normal cap-pause: record gap as missed.
-                StreamRef[] storage capRefs = _activeROIStreams[msg.sender];
-                uint256 capRefLen = capRefs.length;
-                for (uint256 k = 0; k < capRefLen; ) {
-                    ROIStream storage capStream =
-                        _roiStreams[capRefs[k].investor][capRefs[k].lockIndex][capRefs[k].level];
-                    if (!capStream.ended) {
-                        uint256 gapROI = _calcAccruedRaw(capStream, capRefs[k].investor, capRefs[k].lockIndex, capRefs[k].level);
-                        if (gapROI > 0) {
-                            capStream.historicalMissedETH += uint128(gapROI);
-                        }
-                        capStream.recipientSince = uint64(block.timestamp);
-                    }
-                    unchecked { k++; }
-                }
             }
         } else if (hadNoActiveCap) {
-            // Natural expiry: no commission arrived after expiry to trigger _chargeCap.
-            // commissionsCapUsed is left as-is (carried forward); only resume accrual.
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 

@@ -53,18 +53,21 @@ contract LiquidityROIFacet is LiquidityStorage {
     ) internal returns (uint256 settled) {
         if (stream.recipient != address(0)) {
             uint256 accrued = _calcAccruedRaw(stream, investor, lockIndex, level);
-            if (capRemaining > 0) {
+            if (accrued > 0) {
                 settled = accrued < capRemaining ? accrued : capRemaining;
                 if (settled > 0) {
                     stream.roiPaidETH += uint128(settled);
                     _roiPendingETH[stream.recipient] += settled;
                 }
+                // Held-ROI: advance only by the settled-equivalent time; the over-cap remainder
+                // (accrued − settled) stays claimable once the recipient regains cap. No forfeiture.
+                _advanceRecipientSince(stream, investor, lockIndex, accrued, settled, block.timestamp);
+            } else {
+                stream.recipientSince = uint64(block.timestamp);
             }
-            if (accrued > settled) {
-                stream.historicalMissedETH += uint128(accrued - settled);
-            }
+        } else {
+            stream.recipientSince = uint64(block.timestamp);
         }
-        stream.recipientSince = uint64(block.timestamp);
     }
 
     function _removeFromActive(address who, address investor, uint64 lockIndex, uint8 level) internal {
@@ -114,18 +117,21 @@ contract LiquidityROIFacet is LiquidityStorage {
     ) internal returns (uint256 settled) {
         if (stream.recipient != address(0)) {
             uint256 accrued = _calcAccruedRawAt(stream, investor, lockIndex, level, endBound);
-            if (capRemaining > 0) {
+            if (accrued > 0) {
                 settled = accrued < capRemaining ? accrued : capRemaining;
                 if (settled > 0) {
                     stream.roiPaidETH += uint128(settled);
                     _roiPendingETH[stream.recipient] += settled;
                 }
+                // Held-ROI: advance only by the settled-equivalent time (bounded at endBound); the
+                // over-cap remainder stays claimable once cap regains. No forfeiture.
+                _advanceRecipientSince(stream, investor, lockIndex, accrued, settled, endBound);
+            } else {
+                stream.recipientSince = uint64(endBound);
             }
-            if (accrued > settled) {
-                stream.historicalMissedETH += uint128(accrued - settled);
-            }
+        } else {
+            stream.recipientSince = uint64(endBound);
         }
-        stream.recipientSince = uint64(endBound);
     }
 
     // ── External (DELEGATECALL) mutators ──────────────────────────────────────
@@ -145,19 +151,36 @@ contract LiquidityROIFacet is LiquidityStorage {
             stream.recipient      = address(0);
             unchecked { i++; }
         }
+        // Recompute this lock's skip-log from scratch for the new period (bounded: it only ever
+        // holds the current period's overflow levels).
+        delete _skippedROIStreams[investor][lockIndex];
 
         // Walk exactly 10 levels up the referral chain; assign whoever is there.
         address cur = users[investor].referrer;
         for (uint8 i = 0; i < 10; ) {
             if (cur == address(0) || !users[cur].isRegistered) break;
-            ROIStream storage stream = _roiStreams[investor][lockIndex][i];
-            stream.recipient      = cur;
-            stream.recipientSince = uint64(block.timestamp);
-            _activeROIStreams[cur].push(StreamRef({
-                investor:  investor,
-                lockIndex: uint64(lockIndex),
-                level:     i
-            }));
+            // Bound the recipient's live-stream array at MAX_ACTIVE_ROI_STREAMS so every
+            // per-recipient loop stays O(M) and invest()/claim gas can never exceed the block
+            // limit no matter how large the downline grows. Over the cap the level is recorded as
+            // skipped and left INERT — recipient stays address(0): no accrual (_calcAccrued* returns
+            // 0), not enumerated, not claimable. A restake re-runs this assignment, so a skipped
+            // level can become live later once the recipient's active slots free up.
+            if (_activeROIStreams[cur].length < MAX_ACTIVE_ROI_STREAMS) {
+                ROIStream storage stream = _roiStreams[investor][lockIndex][i];
+                stream.recipient      = cur;
+                stream.recipientSince = uint64(block.timestamp);
+                _activeROIStreams[cur].push(StreamRef({
+                    investor:  investor,
+                    lockIndex: uint64(lockIndex),
+                    level:     i
+                }));
+            } else {
+                _skippedROIStreams[investor][lockIndex].push(StreamRef({
+                    investor:  investor,
+                    lockIndex: uint64(lockIndex),
+                    level:     i
+                }));
+            }
             cur = users[cur].referrer;
             unchecked { i++; }
         }

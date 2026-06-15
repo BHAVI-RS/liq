@@ -100,7 +100,7 @@ async function deploy() {
   await (await liq.addToken(hordexAddr, "Hordex", "HORDEX")).wait();
   await (await liq.seedPool(hordexAddr, SEED, SEED)).wait();
 
-  // ── Warm both TWAPs (two observations ≥ 30 s apart) ──
+  // ── Warm both TWAPs (two observations ≥ TWAP_PERIOD apart; period is 30 s) ──
   await (await liq.updateTokenTWAP(hordexAddr)).wait();
   await (await liq.updateTWAP()).wait();
   await increaseTime(31);
@@ -126,8 +126,8 @@ async function scenarioAEarnsFromB(ctx) {
   await (await liq.connect(A).invest(hordexAddr, PKG)).wait();
   await increaseTime(5);
   await (await liq.connect(B).invest(hordexAddr, PKG)).wait();
-  // A's lock (LP_LOCK_DURATION = 180 s) — advance past it so removeLPDirect is allowed.
-  await increaseTime(220);
+  // A's lock (LP_LOCK_DURATION = 540 s) — advance past it so removeLPDirect is allowed.
+  await increaseTime(560);
   // keep TWAP fresh for the eventual claim's getTWAPPrice()
   await (await liq.updateTWAP()).wait();
   await (await liq.updateTokenTWAP(hordexAddr)).wait();

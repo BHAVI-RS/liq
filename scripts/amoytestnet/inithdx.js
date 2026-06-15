@@ -1,12 +1,16 @@
-// Deploy Liquidity contracts using the pre-deployed HDX token, seed the pool,
-// warm up TWAP, and register the initial referral tree.
+// Deploy Liquidity contracts (incl. a fresh Uniswap V2 factory + router) using the
+// pre-deployed HDX token, seed the pool, warm up TWAP, register the referral tree,
+// then invest from each account.
 //
-// Referral tree:
+// Referral tree + investments ($250 → acc[1,2,5,7] · $25 → acc[3,4,6] · acc[0] none):
 //   acc[0]  (deployer, auto-registered as owner)
-//   └─ acc[1]
-//      ├─ acc[2]
-//      ├─ acc[3]
-//      └─ acc[4]
+//   └─ acc[1]                 $250
+//      ├─ acc[2]              $250
+//      │  ├─ acc[5]           $250
+//      │  │  └─ acc[7]        $250
+//      │  └─ acc[6]           $25
+//      ├─ acc[3]              $25
+//      └─ acc[4]              $25
 //
 // USAGE:
 //   npx hardhat run scripts/amoytestnet/inithdx.js --network polygonAmoy
@@ -17,8 +21,8 @@ const path = require("path");
 const { deployAndWireViewFacet, mergedLiquidityAbi } = require("./_viewfacet");
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const UNI_ROUTER   = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
-const UNI_FACTORY  = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
+// Uniswap V2 Factory + Router are deployed FRESH each run (see PHASE 1) from
+// contracts/uniswapamoy, so the script no longer depends on a one-time external DEX.
 const DEPLOYED_USDT        = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
 const PLATFORM_TOKEN       = "0x39544CBb2aB89E64aD74c731Ee690D2923bB209f";
 
@@ -26,10 +30,30 @@ const HDX_TO_LIQUIDITY     = hre.ethers.parseEther("10000000"); // 10 M HDX
 const SEED_USDT            = hre.ethers.parseEther("1");        // 1 USDT
 const SEED_TOKENS          = hre.ethers.parseEther("1");        // 1 HDX  → price = 1 USDT
 const REGISTRATION_FEE     = hre.ethers.parseEther("1");        // 1 USDT legitimacy check per account
-const TWAP_WAIT_SECS       = 31;
+const TWAP_WAIT_SECS       = 31;       // must exceed TWAP_PERIOD (30 s) so the 2nd obs lands
 
-const FUND_AMOUNT    = hre.ethers.parseEther("0.05");
-const FUND_THRESHOLD = hre.ethers.parseEther("0.04");
+const FUND_AMOUNT    = hre.ethers.parseEther("0.5");  // POL for gas (register + invest)
+const FUND_THRESHOLD = hre.ethers.parseEther("0.4");
+
+// Referral tree (referrer index → child indices):
+//   acc[0] → acc[1] | acc[1] → acc[2,3,4] | acc[2] → acc[5,6] | acc[5] → acc[7]
+const REFERRAL_TREE = [
+  { referrer: 0, children: [1] },
+  { referrer: 1, children: [2, 3, 4] },
+  { referrer: 2, children: [5, 6] },
+  { referrer: 5, children: [7] },
+];
+// USDT each account invests after registering (acc[0] invests nothing).
+const INVEST_USDT = {
+  1: hre.ethers.parseEther("250"),
+  2: hre.ethers.parseEther("250"),
+  3: hre.ethers.parseEther("25"),
+  4: hre.ethers.parseEther("25"),
+  5: hre.ethers.parseEther("250"),
+  6: hre.ethers.parseEther("25"),
+  7: hre.ethers.parseEther("250"),
+};
+const TOTAL_ACCOUNTS = 8; // acc[0..7]
 
 const TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -104,13 +128,13 @@ async function waitForTwap(provider, firstTimestamp) {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
-  const rawKey = process.env.PRIVATE_KEY;
+  const rawKey = process.env.AMOY_PRIVATE_KEY;
   if (!rawKey || rawKey.replace("0x", "").length !== 64) {
-    console.error("❌  PRIVATE_KEY missing or wrong length in .env"); process.exit(1);
+    console.error("❌  AMOY_PRIVATE_KEY missing or wrong length in .env"); process.exit(1);
   }
 
   const provider = hre.ethers.provider;
-  const signers  = deriveWallets(rawKey, provider, 5);
+  const signers  = deriveWallets(rawKey, provider, TOTAL_ACCOUNTS);
   const deployer = signers[0];
   const network  = hre.network.name;
 
@@ -138,14 +162,33 @@ async function main() {
   if (hdxBal < HDX_TO_LIQUIDITY) {
     console.error(`❌  deployer needs ≥ 10,000,000 HDX (has ${hre.ethers.formatEther(hdxBal)})`); process.exit(1);
   }
-  // Need SEED_USDT (1) + REGISTRATION_FEE × 4 sub-accounts = 5 USDT minimum
-  const MIN_USDT = SEED_USDT + REGISTRATION_FEE * 4n;
+  // Deployer must cover: pool seed + (1 USDT registration fee + invest amount) for every account.
+  let _totalInvest = 0n;
+  for (const k of Object.keys(INVEST_USDT)) _totalInvest += INVEST_USDT[k];
+  const MIN_USDT = SEED_USDT
+    + REGISTRATION_FEE * BigInt(Object.keys(INVEST_USDT).length)
+    + _totalInvest;
   if (usdtBal < MIN_USDT) {
     console.error(`❌  deployer needs ≥ ${hre.ethers.formatEther(MIN_USDT)} USDT (has ${hre.ethers.formatEther(usdtBal)})`); process.exit(1);
   }
 
   // ── PHASE 1: Deploy contracts ──────────────────────────────────────────────
   console.log(sep()); console.log("  PHASE 1 — DEPLOY CONTRACTS"); console.log(sep());
+
+  // Deploy a fresh Uniswap V2 Factory + Router (from contracts/uniswapamoy) so each
+  // run is fully self-contained. The router carries the init-code hash matching this
+  // repo's UniswapV2Pair, so pairs created by this factory resolve correctly.
+  const UniswapV2Factory = await hre.ethers.getContractFactory("UniswapV2Factory", deployer);
+  const uniFactory = await UniswapV2Factory.deploy(deployer.address, DEPLOY_OVERRIDES);
+  await uniFactory.waitForDeployment();
+  const factoryAddress = await uniFactory.getAddress();
+  console.log(`  UniswapV2Factory : ${factoryAddress}`);
+
+  const UniswapV2Router02 = await hre.ethers.getContractFactory("UniswapV2Router02", deployer);
+  const uniRouter = await UniswapV2Router02.deploy(factoryAddress, DEPLOYED_USDT, DEPLOY_OVERRIDES);
+  await uniRouter.waitForDeployment();
+  const routerAddress = await uniRouter.getAddress();
+  console.log(`  UniswapV2Router02: ${routerAddress}`);
 
   const LiquidityMath = await hre.ethers.getContractFactory("LiquidityMath", deployer);
   const liquidityMath = await LiquidityMath.deploy(DEPLOY_OVERRIDES);
@@ -165,7 +208,7 @@ async function main() {
     signer: deployer, libraries: { LiquidityMath: libAddress },
   });
   const liquidityFacet = await LiquidityFacet.deploy(
-    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, PLATFORM_TOKEN, DEPLOY_OVERRIDES
+    routerAddress, factoryAddress, DEPLOYED_USDT, PLATFORM_TOKEN, DEPLOY_OVERRIDES
   );
   await liquidityFacet.waitForDeployment();
   const facetAddress = await liquidityFacet.getAddress();
@@ -182,7 +225,7 @@ async function main() {
     libraries: { LiquidityMath: libAddress },
   });
   const liquidity = await Liquidity.deploy(
-    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, PLATFORM_TOKEN,
+    routerAddress, factoryAddress, DEPLOYED_USDT, PLATFORM_TOKEN,
     facetAddress, roiFacetAddress, DEPLOY_OVERRIDES
   );
   await liquidity.waitForDeployment();
@@ -196,7 +239,7 @@ async function main() {
 
   // ── View facet (holds the moved getters + batch views; reached via fallback) ──
   const viewFacetAddress = await deployAndWireViewFacet(hre, {
-    deployer, liquidity, factory: UNI_FACTORY, weth: DEPLOYED_USDT, token: PLATFORM_TOKEN,
+    deployer, liquidity, factory: factoryAddress, weth: DEPLOYED_USDT, token: PLATFORM_TOKEN,
     mathAddr: libAddress, viewLibAddr: libViewAddress, overrides: DEPLOY_OVERRIDES, mine,
   });
   console.log(`  LiquidityViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
@@ -212,8 +255,8 @@ const CONTRACT_ADDRESS        = "${liquidityAddress}";
 const TOKEN_ADDRESS           = "${PLATFORM_TOKEN}";
 const TOKEN_ADDRESS_JIGGY     = "";
 const TOKEN_ADDRESS_PANWORLD  = "";
-const ROUTER_ADDRESS          = "${UNI_ROUTER}";
-const FACTORY_ADDRESS         = "${UNI_FACTORY}";
+const ROUTER_ADDRESS          = "${routerAddress}";
+const FACTORY_ADDRESS         = "${factoryAddress}";
 const WETH_ADDRESS            = "${DEPLOYED_USDT}";
 const USDT_ADDRESS            = "${DEPLOYED_USDT}";
 const DEPLOY_BLOCK            = ${deployBlock};
@@ -242,6 +285,8 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
     deployBlock,
     usdtAddress:     DEPLOYED_USDT,
     tokenAddress:    PLATFORM_TOKEN,
+    routerAddress,
+    factoryAddress,
     liquidityAddress,
     facetAddress,
     roiFacetAddress,
@@ -270,7 +315,7 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   // reserves to ~0 so the seed below can establish a clean 1:1 price.
   {
     const _factoryCt = new hre.ethers.Contract(
-      UNI_FACTORY,
+      factoryAddress,
       ["function getPair(address,address) view returns (address)"],
       deployer
     );
@@ -287,9 +332,9 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
       const _lpBal = await _pairCt.balanceOf(deployer.address);
       if (_lpBal > 0n) {
         console.log(`  Existing pair found — draining deployer LP (${hre.ethers.formatEther(_lpBal)} LP)…`);
-        await mine(() => _pairCt.approve(UNI_ROUTER, _lpBal, TX_OVERRIDES));
+        await mine(() => _pairCt.approve(routerAddress, _lpBal, TX_OVERRIDES));
         const _routerCt = new hre.ethers.Contract(
-          UNI_ROUTER,
+          routerAddress,
           ["function removeLiquidity(address,address,uint256,uint256,uint256,address,uint256) returns (uint256,uint256)"],
           deployer
         );
@@ -326,10 +371,10 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   await mine(() => liq.updateTWAP(TX_OVERRIDES));
   console.log("  Observation 1 ✓  —  TWAP ready");
 
-  // ── PHASE 5: Fund sub-wallets [1..4] for gas + 1 USDT registration fee ──────
-  console.log("\n" + sep()); console.log("  PHASE 5 — FUND SUB-WALLETS [1..4]"); console.log(sep());
-  for (let i = 1; i <= 4; i++) {
-    // POL for gas
+  // ── PHASE 5: Fund sub-wallets [1..7] (POL gas + USDT: 1 fee + invest amount) ─
+  console.log("\n" + sep()); console.log("  PHASE 5 — FUND SUB-WALLETS [1..7]"); console.log(sep());
+  for (let i = 1; i < TOTAL_ACCOUNTS; i++) {
+    // POL for gas (registration + investment)
     const bal = await provider.getBalance(signers[i].address);
     if (bal < FUND_THRESHOLD) {
       await mine(() => deployer.sendTransaction({
@@ -342,36 +387,41 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
     } else {
       console.log(`  acc[${i}]  ${signers[i].address}  →  ${hre.ethers.formatEther(bal)} POL (sufficient, skipped)`);
     }
-    // 1 USDT for the registration legitimacy fee
+    // USDT: 1 registration fee + this account's invest amount
+    const needUsdt   = REGISTRATION_FEE + (INVEST_USDT[i] || 0n);
     const usdtBalSub = await usdtCt.balanceOf(signers[i].address);
-    if (usdtBalSub < REGISTRATION_FEE) {
-      await mine(() => usdtCt.transfer(signers[i].address, REGISTRATION_FEE, TX_OVERRIDES));
-      console.log(`  acc[${i}]  →  sent 1 USDT (registration fee) ✓`);
+    if (usdtBalSub < needUsdt) {
+      const topUp = needUsdt - usdtBalSub;
+      await mine(() => usdtCt.transfer(signers[i].address, topUp, TX_OVERRIDES));
+      console.log(`  acc[${i}]  →  sent ${hre.ethers.formatEther(topUp)} USDT (fee + invest) ✓`);
     } else {
-      console.log(`  acc[${i}]  →  already has ≥ 1 USDT (skipped)`);
+      console.log(`  acc[${i}]  →  already has ≥ ${hre.ethers.formatEther(needUsdt)} USDT (skipped)`);
     }
   }
 
-  // ── PHASE 6: Register accounts ────────────────────────────────────────────
+  // ── PHASE 6: Register accounts per the referral tree ───────────────────────
   console.log("\n" + sep()); console.log("  PHASE 6 — REGISTER ACCOUNTS"); console.log(sep());
   console.log(`  (each account approves 1 USDT legitimacy fee before registering)`);
+  for (const { referrer, children } of REFERRAL_TREE) {
+    for (const i of children) {
+      const usdtN = new hre.ethers.Contract(DEPLOYED_USDT, TOKEN_ABI, signers[i]);
+      await mine(() => usdtN.approve(liquidityAddress, REGISTRATION_FEE, TX_OVERRIDES));
+      const liqN = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[i]);
+      await mine(() => liqN.register(signers[referrer].address, TX_OVERRIDES));
+      console.log(`  acc[${i}] registered under acc[${referrer}] ✓`);
+    }
+  }
 
-  // acc[1] under acc[0]
-  const usdt1 = new hre.ethers.Contract(DEPLOYED_USDT, TOKEN_ABI, signers[1]);
-  await mine(() => usdt1.approve(liquidityAddress, REGISTRATION_FEE, TX_OVERRIDES));
-  console.log(`  acc[1] approved 1 USDT ✓`);
-  const liq1 = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[1]);
-  await mine(() => liq1.register(deployer.address, TX_OVERRIDES));
-  console.log(`  acc[1] registered under acc[0] ✓`);
-
-  // acc[2], acc[3], acc[4] under acc[1]
-  for (const i of [2, 3, 4]) {
+  // ── PHASE 7: Invest ($250 → acc[1,2,5,7] · $25 → acc[3,4,6] · acc[0] none) ──
+  console.log("\n" + sep()); console.log("  PHASE 7 — INVEST"); console.log(sep());
+  for (let i = 1; i < TOTAL_ACCOUNTS; i++) {
+    const amount = INVEST_USDT[i] || 0n;
+    if (amount === 0n) { console.log(`  acc[${i}] — no investment (skipped)`); continue; }
     const usdtN = new hre.ethers.Contract(DEPLOYED_USDT, TOKEN_ABI, signers[i]);
-    await mine(() => usdtN.approve(liquidityAddress, REGISTRATION_FEE, TX_OVERRIDES));
-    console.log(`  acc[${i}] approved 1 USDT ✓`);
+    await mine(() => usdtN.approve(liquidityAddress, amount, TX_OVERRIDES));
     const liqN = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[i]);
-    await mine(() => liqN.register(signers[1].address, TX_OVERRIDES));
-    console.log(`  acc[${i}] registered under acc[1] ✓`);
+    await mine(() => liqN.invest(PLATFORM_TOKEN, amount, TX_OVERRIDES));
+    console.log(`  acc[${i}] invested ${hre.ethers.formatEther(amount)} USDT ✓`);
   }
 
   // ── Done ──────────────────────────────────────────────────────────────────
@@ -382,7 +432,8 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   console.log(`  HDX token   : ${PLATFORM_TOKEN}`);
   console.log(`  Deploy block: ${deployBlock}`);
   console.log(`  TWAP        : ready`);
-  console.log(`  Accounts    : acc[0] owner, acc[1]→acc[0], acc[2/3/4]→acc[1]`);
+  console.log(`  Tree        : acc[1]→acc[0], acc[2/3/4]→acc[1], acc[5/6]→acc[2], acc[7]→acc[5]`);
+  console.log(`  Invested    : $250 → acc[1,2,5,7] · $25 → acc[3,4,6] · acc[0] none`);
   console.log(sep("═") + "\n");
 }
 

@@ -6,7 +6,7 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1781372238878"></script>
+  <script src="contract-config.js?v=1781488139485"></script>
   <link rel="stylesheet" href="css/base.css?v=3"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
   <link rel="stylesheet" href="css/components.css?v=3"/>
@@ -82,7 +82,7 @@
         </div>
         <div class="landing-stat">
           <div class="landing-stat-val" id="ls-staking-rewards">—</div>
-          <div class="landing-stat-label">Staking Rewards Paid</div>
+          <div class="landing-stat-label">Staking Rewards Accrued</div>
         </div>
       </div>
 
@@ -422,7 +422,7 @@
         <div id="dashTeamVolume" class="dash-stat-val" style="color:var(--cream);">—</div>
         <div class="dash-stat-sub">active users under you</div>
       </div>
-      <div class="dash-stat-card" id="dashCard-roicomm" onclick="navToRewards('roicomm')" title="Click to view ROI commissions" style="cursor:pointer;">
+      <div class="dash-stat-card" id="dashCard-roicomm" onclick="showDashROILevelPopup()" title="Click for live ROI by level" style="cursor:pointer;">
         <div class="dash-stat-label">ROI COMMISSIONS <span class="dash-stat-chart-hint">→</span></div>
         <div id="dashROICommissions" class="dash-stat-val" style="color:#a78bfa;">—</div>
         <div id="dashROICommSub" class="dash-stat-sub">live <span style="color:#a78bfa;font-size:9px;">●</span></div>

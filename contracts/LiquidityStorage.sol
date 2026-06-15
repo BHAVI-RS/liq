@@ -53,6 +53,23 @@ abstract contract LiquidityStorage {
     // (higher-rate) stream from the same lock — "one stream per lock" rule.
     mapping(address => StreamRef[])                        internal _deferredROIStreams;
 
+    // Hard cap on how many simultaneously-live ROI streams a single recipient may hold in
+    // _activeROIStreams. Every per-recipient loop (available-cap, settlement, _chargeCap
+    // pre-settle, natural-expiry resume) iterates this array, and those run for each ancestor
+    // during invest()'s commission distribution — so an unbounded array let a popular upline's
+    // downline invests blow past the block gas limit. Bounding it makes invest()/claim gas O(M)
+    // and DoS-proof. Overflow assignments are recorded in _skippedROIStreams (inert) instead of
+    // pushed here. A recipient's lifetime earnings are already 5×-capped, so this only limits how
+    // many downline locks accrue *concurrently*; restaking re-runs assignment, so a skipped level
+    // can become live later once active slots free up.
+    // Sizing (Method 2): commission distribution now charges COMMITTED cap (O(locks)) and never
+    // iterates ancestors' stream arrays, so investing under a popular upline is O(locks) regardless
+    // of how many streams they hold. The cap now only bounds a recipient's OWN paths — the
+    // natural-expiry resume loop and a single-tx claimAllROI (~M × ~6k gas). M=2000 keeps those
+    // ~12M gas (safe under Polygon's 30M block limit) while being effectively unlimited for any real
+    // account (and claims beyond one tx can always be chunked via settleROIStreams/claimPendingROI).
+    uint256 internal constant MAX_ACTIVE_ROI_STREAMS = 2000;
+
     // Helper shared by Liquidity.sol and facets
     function _qualifies(address _user) internal view returns (bool) {
         uint256 total = userTotalInvested[_user];
@@ -85,7 +102,7 @@ abstract contract LiquidityStorage {
     // getROIAccrued/getROIPending can read directly from inherited storage instead of calling
     // the ROI facet as a regular CALL (which would read the facet's own empty storage).
     uint256 internal constant _ROI_DENOM         = 50_000_000_000;
-    uint256 internal constant _ROI_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
+    uint256 internal constant _ROI_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
 
     function _calcAccrued(
         ROIStream storage stream,
@@ -280,6 +297,23 @@ abstract contract LiquidityStorage {
         accrued = lock.ethInvested * lock.rewardRatePPM * elapsed * rate / (_ROI_DENOM * lockDur);
     }
 
+    // Held-ROI: advance a stream's recipientSince by ONLY the time-equivalent of `settled` (accrual
+    // is linear in time), so any over-cap remainder (accrued − settled) stays claimable later once
+    // the recipient regains cap. `bound` is the upper end of the accrual window: block.timestamp for
+    // a live settle, or a custom end-bound for natural-expiry/retention settles. Nothing is forfeited.
+    function _advanceRecipientSince(
+        ROIStream storage stream, address investor, uint256 lockIndex,
+        uint256 accrued, uint256 settled, uint256 bound
+    ) internal {
+        LPLock storage lock = userLPLocks[investor][lockIndex];
+        uint256 endTs   = bound < lock.unlockTime ? bound : lock.unlockTime;
+        uint256 startTs = stream.recipientSince > lock.lockedAt ? stream.recipientSince : lock.lockedAt;
+        if (endTs <= startTs) { stream.recipientSince = uint64(bound); return; }
+        stream.recipientSince = settled >= accrued
+            ? uint64(endTs)
+            : uint64(startTs + (endTs - startTs) * settled / accrued);
+    }
+
     // Real-time available cap = raw cap − pending ROI − live ROI accruing across all streams.
     // ROI is counted as earned the moment it accrues, so it reduces available cap immediately
     // whether or not the user has claimed it.  _calcAccrued uses this as its gate so that
@@ -319,28 +353,23 @@ abstract contract LiquidityStorage {
         }
     }
 
-    function _chargeCap(address _user, uint256 _amount) internal {
-        // Pre-settlement guard: when this commission would push live cap (raw − pending − ROI)
-        // to zero, pre-settle ROI streams NOW so they are frozen at the cap boundary.
-        // _capPausedAt is set separately only when the raw commission cap across ALL active
-        // locks is genuinely exhausted (remaining > 0 after the FIFO loop below).
-        uint256 rawAvailable = _getRawAvailableCap(_user);
-        bool needsPreSettle = rawAvailable == 0 || _getAvailableCap(_user) <= _amount;
-        if (needsPreSettle && rawAvailable > 0) {
-            StreamRef[] storage sRefs = _activeROIStreams[_user];
-            uint256 sLen = sRefs.length;
-            for (uint256 k = 0; k < sLen; ) {
-                StreamRef storage sRef = sRefs[k];
-                ROIStream storage s = _roiStreams[sRef.investor][sRef.lockIndex][sRef.level];
-                if (!s.ended && s.recipient == _user) {
-                    uint256 a = _calcAccruedRaw(s, sRef.investor, sRef.lockIndex, sRef.level);
-                    if (a > 0) { s.roiPaidETH += uint128(a); _roiPendingETH[_user] += a; }
-                    s.recipientSince = uint64(block.timestamp);
-                }
-                unchecked { k++; }
-            }
-        }
+    // Committed cap available for charging a NEW referral commission: raw cap minus already-settled
+    // pending ROI (O(locks) + O(1)). Method 2: deliberately does NOT subtract live/unsettled ROI, so
+    // the commission path never iterates the recipient's stream array — invest stays O(locks) and is
+    // safe no matter how many streams the recipient holds. Banked (pending) ROI is still protected;
+    // only not-yet-settled ROI yields to a commission at the exact cap boundary and resurfaces as
+    // held ROI at claim time.
+    function _getCommissionCap(address _user) internal view returns (uint256) {
+        uint256 raw  = _getRawAvailableCap(_user);
+        uint256 pend = _roiPendingETH[_user];
+        return raw > pend ? raw - pend : 0;
+    }
 
+    function _chargeCap(address _user, uint256 _amount) internal {
+        // Method 2: no per-stream pre-settle. Over-cap ROI is HELD (settled lazily at claim time,
+        // bounded by remaining cap) rather than frozen here — so this stays O(locks) and never
+        // iterates the recipient's stream array. _capPausedAt is set only when the raw cap across
+        // ALL active locks is genuinely exhausted (remaining > 0 after the FIFO loop below).
         LPLock[] storage locks = userLPLocks[_user];
         uint256 len = locks.length;
         uint256 remaining = _amount;
@@ -371,6 +400,12 @@ abstract contract LiquidityStorage {
     //                    No pre-expiry settlement; the entire accrual window is the gap.
     // In both cases recipientSince is reset so future accrual starts clean from now.
     function _handleNaturalExpiryResume(address _user, uint256 lastExpiry) internal {
+        // Cap-exhausted-while-staked (lastExpiry == 0): ROI is HELD, not forfeited — there is no
+        // no-stake gap to exclude, so nothing to do. The over-cap remainder stays claimable and is
+        // settled lazily at claim time once the recipient's cap regains headroom. Only a genuine
+        // natural expiry (lastExpiry > 0, a lock actually past its unlock time) settles pre-expiry
+        // ROI and forfeits the post-expiry no-stake gap (rule 2 — skin-in-the-game).
+        if (lastExpiry == 0) return;
         // Only pre-expiry settlement needs a cap; gap recording never does.
         uint256 capRem = 0;
         if (lastExpiry > 0) {

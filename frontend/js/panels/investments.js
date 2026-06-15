@@ -491,7 +491,7 @@ async function loadInvestments() {
               <span class="did-label">AVAILABLE</span>
               <span class="did-val">${myTokensInPool > 0 ? fmtNum(myTokensInPool)+' '+td.symbol+'&nbsp;&nbsp;|&nbsp;&nbsp;'+fmtNum(myETHInPool*USDT_PER_ETH)+' USDT' : '—'}</span>
             </div>
-            ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val" style="word-break:break-all;"><a href="https://amoy.polygonscan.com/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr} ↗</a></span></div>` : ''}
+            ${pool ? `<div class="did-row"><span class="did-label">PAIR ADDRESS</span><span class="did-val" style="word-break:break-all;"><a href="${NET.explorer}/address/${pool.pairAddr}" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:none;">${pool.pairAddr} ↗</a></span></div>` : ''}
             <div class="did-row"><span class="did-label"></span><span class="did-val" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               ${isUnlocked ? `<button id="removeLPDirectBtn-${i}" onclick="removeLPDirect(${i}, '${lock.token}', '${lpAmountHex}')" style="background:transparent;border:1px solid #f87171;color:#f87171;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:5px 12px;cursor:pointer;" onmouseover="this.style.background='rgba(248,113,113,0.12)'" onmouseout="this.style.background='transparent'">REMOVE LP</button>` : ''}
               ${removeLPBtn}

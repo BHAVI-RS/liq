@@ -27,7 +27,7 @@ contract LiquidityViewFacet is LiquidityStorage {
     address private immutable WETH;
     address public  immutable platformToken;
 
-    uint256 private constant LP_LOCK_DURATION = 180; // 90 days scaled: 1 day = 2 s (testing)
+    uint256 private constant LP_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
     uint256 private constant USDT_PER_ETH     = 1;
 
     constructor(address _factory, address _weth, address _platform) {

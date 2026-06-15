@@ -1963,6 +1963,157 @@ function showIneligiblePopup(event) {
   </div>`);
 }
 
+// ── Dashboard ROI-by-level popup ───────────────────────────────────────────────
+// Clicking the dashboard ROI COMMISSIONS card opens this instead of jumping to the
+// rewards tab. Shows live-accruing ROI grouped by downline level, ticking each second.
+let _dashROILevelTicker = null;
+let _dashROILevelData   = [];   // [{level, ratePct, count, baseETH, ratePerSec}]
+let _dashROILevelWall   = 0;
+
+function _dashStopROILevelTicker() {
+  if (_dashROILevelTicker) { clearInterval(_dashROILevelTicker); _dashROILevelTicker = null; }
+}
+
+async function showDashROILevelPopup() {
+  const existing = document.getElementById('dashROILevelOverlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'dashROILevelOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:460px;width:100%;box-sizing:border-box;font-family:var(--font-mono);position:relative;max-height:85vh;overflow-y:auto;">
+      <button onclick="var o=document.getElementById('dashROILevelOverlay');if(o)o.remove();"
+        style="position:absolute;top:12px;right:12px;width:26px;height:26px;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;">✕</button>
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">ROI COMMISSIONS · BY LEVEL</div>
+      <div style="font-size:11px;color:var(--cream);margin-bottom:14px;">Live accrual across your active downline streams</div>
+      <div id="dashROILevelBody"><div class="empty-state">Loading<span class="ld"><span></span><span></span><span></span></span></div></div>
+      <div style="margin-top:14px;text-align:right;">
+        <span onclick="var o=document.getElementById('dashROILevelOverlay');if(o)o.remove();navToRewards('roicomm');" style="font-size:10px;color:var(--gold);cursor:pointer;text-decoration:underline;">View full ROI details →</span>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  try {
+    const ROI_RATES_CONTRACT = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
+    const ROI_RATES_PCT      = [50, 10, 5, 2, 0.6, 0.5, 0.45, 0.4, 0.4, 0.35];
+    const [streams, roiData, blk] = await Promise.all([
+      contract.getActiveROIStreams(walletAddress).catch(() => []),
+      contract.getROIData(walletAddress).catch(() => null),
+      contract.provider.getBlock('latest').catch(() => null),
+    ]);
+    if (!document.getElementById('dashROILevelOverlay')) return; // closed while loading
+    const liveETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH)) : 0;
+    const wallNow = Math.floor(Date.now() / 1000);
+    const effNow  = Math.max(blk ? blk.timestamp : wallNow, wallNow);
+
+    const byLevel = new Map(); // level -> {count, baseETH, ratePerSec}
+    if (streams && streams.length) {
+      const uniq    = [...new Set(streams.map(r => r.investor.toLowerCase()))];
+      const lockMap = new Map();
+      const infoMap = new Map();
+      await Promise.all([
+        ...uniq.map(async key => {
+          const addr = streams.find(r => r.investor.toLowerCase() === key).investor;
+          try { lockMap.set(key, await contract.getUserLPLocks(addr)); } catch(_) {}
+        }),
+        ...streams.map(async ref => {
+          const k = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
+          try { infoMap.set(k, await contract.getROIStreamInfo(ref.investor, ref.lockIndex, ref.level)); } catch(_) {}
+        }),
+      ]);
+      for (const ref of streams) {
+        const lvl  = Number(ref.level);
+        const lock = (lockMap.get(ref.investor.toLowerCase()) || [])[Number(ref.lockIndex)];
+        if (!lock || lock.removed) continue;
+        const unlockTime = Number(lock.unlockTime);
+        const lockedAt   = Number(lock.lockedAt);
+        const lockDur    = unlockTime - lockedAt;
+        if (lockDur <= 0) continue;
+        const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+        const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
+        const roiRate = ROI_RATES_CONTRACT[lvl] || 0;
+        const info    = infoMap.get(`${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${lvl}`);
+        const roiPaid = info ? parseFloat(ethers.utils.formatEther(info.roiPaidETH)) : 0;
+        const histPaid= info && info.historicalPaidETH ? parseFloat(ethers.utils.formatEther(info.historicalPaidETH)) : 0;
+        const recSince= info ? Number(info.recipientSince) : lockedAt;
+        const recTs   = Math.max(lockedAt, recSince);
+        const streamRate = (liveETH > 0 && effNow < unlockTime && ratePPM > 0 && roiRate > 0)
+          ? ethInv * ratePPM * roiRate / (50_000_000_000 * lockDur) : 0;
+        const elapsed2 = Math.max(0, Math.min(unlockTime, effNow) - recTs);
+        const accrued  = (liveETH > 0 && ratePPM > 0 && roiRate > 0)
+          ? ethInv * ratePPM * elapsed2 * roiRate / (50_000_000_000 * lockDur) : 0;
+        const e = byLevel.get(lvl) || { count: 0, baseETH: 0, ratePerSec: 0 };
+        e.count      += 1;
+        e.baseETH    += histPaid + roiPaid + Math.max(0, accrued);
+        e.ratePerSec += streamRate;
+        byLevel.set(lvl, e);
+      }
+    }
+
+    _dashROILevelData = [...byLevel.entries()]
+      .map(([level, e]) => ({ level, ratePct: ROI_RATES_PCT[level] !== undefined ? ROI_RATES_PCT[level] : 0, ...e }))
+      .sort((a, b) => a.level - b.level);
+    _dashROILevelWall = wallNow;
+
+    _dashRenderROILevelBody();
+    _dashStopROILevelTicker();
+    _dashROILevelTicker = setInterval(_dashTickROILevel, 1000);
+  } catch (_) {
+    const body = document.getElementById('dashROILevelBody');
+    if (body) body.innerHTML = '<div class="empty-state">Failed to load ROI data.</div>';
+  }
+}
+
+function _dashRenderROILevelBody() {
+  const body = document.getElementById('dashROILevelBody');
+  if (!body) { _dashStopROILevelTicker(); return; }
+  if (!_dashROILevelData.length) {
+    body.innerHTML = '<div class="empty-state">No active ROI streams. Refer active investors to start earning.</div>';
+    return;
+  }
+  let totalETH = 0, totalRate = 0;
+  for (const d of _dashROILevelData) { totalETH += d.baseETH; totalRate += d.ratePerSec; }
+  let rows = '';
+  for (const d of _dashROILevelData) {
+    rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
+      <td style="padding:8px 8px;"><span style="color:var(--cream);">L${d.level + 1}</span> <span style="color:var(--gold);font-size:10px;">${d.ratePct}%</span></td>
+      <td style="padding:8px 8px;color:var(--muted);text-align:center;">${d.count}</td>
+      <td style="padding:8px 8px;text-align:right;"><span id="dashROILvlVal-${d.level}" style="color:#a78bfa;">$${(d.baseETH * USDT_PER_ETH).toFixed(5)}</span></td>
+    </tr>`;
+  }
+  body.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px;">
+      <thead><tr style="border-bottom:1px solid var(--border);">
+        <th style="text-align:left;color:var(--muted);font-weight:400;padding:5px 8px;">LEVEL</th>
+        <th style="text-align:center;color:var(--muted);font-weight:400;padding:5px 8px;">STREAMS</th>
+        <th style="text-align:right;color:var(--muted);font-weight:400;padding:5px 8px;">ACCRUED (USDT)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr style="border-top:1px solid var(--border);">
+        <td style="padding:8px 8px;color:var(--muted);">TOTAL</td>
+        <td></td>
+        <td style="padding:8px 8px;text-align:right;"><span id="dashROILvlTotal" style="color:#a78bfa;font-family:var(--font-display);">$${(totalETH * USDT_PER_ETH).toFixed(5)}</span></td>
+      </tr></tfoot>
+    </table>
+    ${totalRate > 0 ? '<div style="margin-top:8px;font-size:9px;color:var(--muted);text-align:right;">accruing live <span style="color:#4ade80;">●</span></div>' : ''}`;
+}
+
+function _dashTickROILevel() {
+  if (!document.getElementById('dashROILevelOverlay')) { _dashStopROILevelTicker(); return; }
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - _dashROILevelWall);
+  let totalETH = 0;
+  for (const d of _dashROILevelData) {
+    const v = d.baseETH + elapsed * d.ratePerSec;
+    totalETH += v;
+    const el = document.getElementById('dashROILvlVal-' + d.level);
+    if (el) el.textContent = '$' + (v * USDT_PER_ETH).toFixed(5);
+  }
+  const totEl = document.getElementById('dashROILvlTotal');
+  if (totEl) totEl.textContent = '$' + (totalETH * USDT_PER_ETH).toFixed(5);
+}
+
 function navToRewards(section) {
   const cardId = section === 'staking' ? 'rwStakingCard'
                : section === 'lpfees'  ? 'rwLPFeesCard'
@@ -1990,6 +2141,7 @@ function navToGeneView(mode) {
 }
 
 window.loadDashboard        = loadDashboard;
+window.showDashROILevelPopup = showDashROILevelPopup;
 window._dashStopPoll        = _dashStopPoll;
 window._dashStartPoll       = _dashStartPoll;
 window.copyRefLink          = copyRefLink;

@@ -36,7 +36,7 @@ contract LiquidityFacet is LiquidityStorage {
     address private immutable _self;
     address private immutable _deployer;
 
-    uint256 private constant LP_LOCK_DURATION  = 180; // 90 days scaled: 1 day = 2 s (testing)
+    uint256 private constant LP_LOCK_DURATION  = 540; // 90 days scaled: 1 day = 6 s (testing)
     uint256 private constant USDT_PER_ETH      = 1;
     uint256 private constant TWAP_PERIOD       = 30 seconds;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
@@ -226,7 +226,7 @@ contract LiquidityFacet is LiquidityStorage {
                     unchecked { hops++; }
                     if (activeReferralCount[search] <= i) { search = users[search].referrer; continue; }
                     if (search == owner) break;
-                    cachedCap = _getAvailableCap(search);
+                    cachedCap = _getCommissionCap(search); // committed cap (O(locks)) — never iterates streams
                     if (cachedCap > 0) break;
                     search = users[search].referrer;
                 }
@@ -647,7 +647,7 @@ contract LiquidityFacet is LiquidityStorage {
         // New cap is only ever gained via invest() (which appends a fresh lock).
 
         lock.lockedAt         = block.timestamp;
-        lock.unlockTime       = block.timestamp + _durationDays * 2;
+        lock.unlockTime       = block.timestamp + _durationDays * 6; // 1 day = 6 s (testing)
         lock.rewardClaimedETH = 0;
         lock.rewardRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationDays, sIdx);
 

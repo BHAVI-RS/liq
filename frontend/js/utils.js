@@ -42,13 +42,186 @@ function getMeta(addr) {
   return getAllMeta()[addr.toLowerCase()] || {};
 }
 
-// ── POLYGON AMOY GAS OVERRIDES ──
-// Public Amoy RPC requires a minimum tip cap of 25 Gwei.
-// MetaMask's automatic estimate is often ~1.5 Gwei, causing RejectedTx errors.
-const _GAS = {
-  maxFeePerGas:         ethers.utils.parseUnits("60", "gwei"),
-  maxPriorityFeePerGas: ethers.utils.parseUnits("30", "gwei"),
+// ── POLYGON GAS OVERRIDES ──
+// Polygon mainnet base fees swing widely (tens to several-hundred gwei). Both failure modes
+// have to be avoided: a hardcoded cap that's too low is rejected ("maxFeePerGas less than block
+// base fee"), and omitting maxFeePerGas leaves it 0 ("priority fee higher than max fee"). So we
+// keep BOTH fields and let maxFeePerGas TRACK the live base fee: refreshGasFromNetwork() rewrites
+// _GAS to (2× base + tip) on a short interval (wired up in app.js). The values below are just a
+// safe starting default until the first refresh lands. You pay only baseFee + tip — maxFeePerGas
+// is merely the ceiling. The 40-gwei tip clears Polygon's priority-fee floor (MetaMask's ~1.5
+// gwei default stalls).
+let _GAS = {
+  maxFeePerGas:         ethers.utils.parseUnits("600", "gwei"),
+  maxPriorityFeePerGas: ethers.utils.parseUnits("40",  "gwei"),
 };
+// Rewrites _GAS so maxFeePerGas = 2× current base fee + tip — always above the live base fee,
+// without over-reserving the user's POL. Called on a timer from app.js with the read provider.
+async function refreshGasFromNetwork(provider) {
+  try {
+    if (!provider) return;
+    const blk = await provider.getBlock("latest");
+    if (blk && blk.baseFeePerGas) {
+      const tip = ethers.utils.parseUnits("40", "gwei");
+      _GAS = { maxFeePerGas: blk.baseFeePerGas.mul(2).add(tip), maxPriorityFeePerGas: tip };
+    }
+  } catch (_) {}
+}
+
+// ── CONTRACT ERROR DECODING ───────────────────────────────────────────────────
+// Turns the many shapes an ethers v5 / MetaMask revert can take into a clear,
+// user-facing reason. The contract's custom errors are all zero-argument, so we
+// match on the 4-byte selector (keccak256("Name()")[:4]) — version-independent and
+// robust even when estimateGas wraps the data several objects deep.
+
+// Friendly explanations for the errors a normal user can actually hit. Anything not
+// listed falls back to "Reverted: <Name>" so the name is always shown.
+const _ERR_FRIENDLY = {
+  InvalidPackageAmount:             'That package amount is not allowed — pick a listed investment package.',
+  TokenNotRegistered:               'This token is not registered on the platform.',
+  TokenDelisted:                    'This token has been delisted and can no longer be invested in.',
+  TokenInProgress:                  'This token is still launching — please try again in a moment.',
+  InsufficientContractTokenBalance: 'The platform is temporarily low on this token’s reserve. Try a smaller package or a different token.',
+  USDTTransferFailed:               'USDT transfer failed — check your USDT balance and that the spend was approved.',
+  MustSendUSDT:                     'USDT amount missing — enter a valid amount.',
+  PriceUnavailable:                 'The price feed for this token isn’t ready yet. Wait ~1 minute (it needs two price updates) and try again.',
+  TokenTWAPStale:                   'This token’s average price (TWAP) is stale. Make a small trade or wait for a price update, then retry.',
+  TWAPStale:                        'The USDT average price (TWAP) is stale — please retry shortly.',
+  PriceDeviationTooHigh:            'The token price moved too far from its recent average; the trade was blocked to protect you. Try again shortly.',
+  PoolNotFound:                     'No liquidity pool exists for this token yet.',
+  NoLPTokens:                       'No LP tokens were minted (pool ratio / slippage). Try again.',
+  NotRegistered:                    'Your wallet is not registered yet — register before investing.',
+  NothingToClaim:                   'There is nothing to claim right now.',
+  LPStillLocked:                    'These LP tokens are still locked.',
+  AlreadyRemoved:                   'This position has already been removed.',
+  LPAlreadyClaimed:                 'This LP has already been claimed.',
+  ClaimLPFirst:                     'Claim your LP first before doing this.',
+  NotOwner:                         'Only the contract owner can do this — connect the wallet that deployed the contract (the owner address).',
+  TokenAlreadyRegistered:           'This token is already registered on the platform.',
+  InvalidTokenAddress:              'Invalid token address (the zero address is not allowed).',
+  AlreadyRegistered:                'This wallet is already registered.',
+  ReferrerNotRegistered:            'The referrer address is not registered yet.',
+  CannotReferSelf:                  'You cannot refer yourself.',
+  RegistrationFeeFailed:            'The 1 USDT registration fee transfer failed — check your USDT balance and approval.',
+};
+
+// Every zero-arg custom error in the contract suite (union across all facets), so the
+// selector map can name any of them even without a friendly string.
+const _ALL_ERROR_NAMES = [
+  'NotDelegatecall','NotDirectCall','NotOwner','NoETHToWithdraw','ETHWithdrawFailed',
+  'NoTokensToWithdraw','TokenWithdrawFailed','Reentrant','MustSendETH','InsufficientContractTokenBalance',
+  'ETHReturnFailed','SurplusTransferFailed','InvalidPackageAmount','TokenNotRegistered','TokenDelisted',
+  'TokenInProgress','PoolNotFound','NoLPTokens','PriceUnavailable','PriceDeviationTooHigh','AlreadyRemoved',
+  'LPAlreadyClaimed','LPStillLocked','ClaimLPFirst','LPPullFailed','TokenReturnFailed','CommissionTransferFailed',
+  'StakingRewardTransferFailed','NothingToClaim','InsufficientTokenBalance','TokenTransferFailed','InvalidDuration',
+  'InvalidDurationIndex','InvalidTierIndex','InvalidStreakLevel','TWAPStale','TokenTWAPStale','AlreadyRegistered',
+  'NotRegistered','CannotReferSelf','ReferrerNotRegistered','MustSendUSDT','USDTTransferFailed','MustSpecifyTokenAmount',
+  'InvalidTokenAddress','TokenAlreadyRegistered','AlreadyClaimed','LPTransferFailed','RegistrationFeeFailed','LPTransferFailed',
+];
+const _ERR_SELECTORS = {};
+for (const _n of _ALL_ERROR_NAMES) {
+  try { _ERR_SELECTORS[ethers.utils.id(_n + '()').slice(0, 10)] = _n; } catch (_) {}
+}
+
+// Friendlier wording for Uniswap router string reverts (these arrive as Error(string)).
+function _friendlyRouterMsg(s) {
+  if (!s) return s;
+  if (/INSUFFICIENT_(OUTPUT_AMOUNT|A_AMOUNT|B_AMOUNT)/.test(s))
+    return 'Price moved during the transaction (slippage). Please try again.';
+  if (/EXPIRED/.test(s))              return 'The transaction took too long and expired. Please try again.';
+  if (/ds-math-sub-underflow/.test(s)) return 'Pool math underflow — the price moved too far. Please try again.';
+  if (/TRANSFER_FROM_FAILED|TRANSFER_FAILED/.test(s))
+    return 'A token transfer failed — check your balances and approvals.';
+  return s;
+}
+
+// Depth-first walk to find the raw revert data ("0x" + selector + args) wherever the
+// provider buried it (e.data, e.error.data, e.error.error.data, JSON body, etc.).
+function _extractRevertData(e) {
+  const seen = new Set();
+  const stack = [e];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (!cur || typeof cur !== 'object' || seen.has(cur)) continue;
+    seen.add(cur);
+    for (const k of ['data', 'return', 'returnData']) {
+      const v = cur[k];
+      if (typeof v === 'string' && v.startsWith('0x') && v.length >= 10) return v;
+      if (v && typeof v === 'object' && typeof v.data === 'string' && v.data.startsWith('0x')) return v.data;
+    }
+    if (typeof cur.body === 'string') {
+      try { const b = JSON.parse(cur.body); if (b && b.error && typeof b.error.data === 'string') return b.error.data; } catch (_) {}
+    }
+    for (const k of ['error', 'data', 'info', 'cause', 'originalError']) {
+      if (cur[k] && typeof cur[k] === 'object') stack.push(cur[k]);
+    }
+  }
+  return null;
+}
+
+// Main entry: returns a user-facing string explaining any failed contract tx/estimate.
+// `iface` is optional (e.g. contract.interface) — used as a secondary decode path.
+function decodeContractError(e, iface) {
+  // Wallet-level outcomes first.
+  if (e && (e.code === 4001 || e.code === 'ACTION_REJECTED')) return 'You rejected the transaction in your wallet.';
+  if (e && e.code === 'INSUFFICIENT_FUNDS') return 'Not enough MATIC to pay for gas.';
+
+  // Ethers already decoded a custom error.
+  if (e && e.errorName) return _ERR_FRIENDLY[e.errorName] || ('Reverted: ' + e.errorName);
+
+  const data = _extractRevertData(e);
+  if (data && data.length >= 10) {
+    const sel = data.slice(0, 10);
+    // Standard Error(string) — router slippage / require messages.
+    if (sel === '0x08c379a0') {
+      try {
+        const reason = ethers.utils.defaultAbiCoder.decode(['string'], '0x' + data.slice(10))[0];
+        return _friendlyRouterMsg(reason);
+      } catch (_) {}
+    }
+    // Panic(uint256) — overflow / divide-by-zero (e.g. too many ROI streams).
+    if (sel === '0x4e487b71') {
+      try {
+        const code = Number(ethers.utils.defaultAbiCoder.decode(['uint256'], '0x' + data.slice(10))[0]);
+        if (code === 0x11) return 'Internal overflow — this can occur with a very large number of ROI streams. Please contact support.';
+        if (code === 0x12) return 'Internal division-by-zero error. Please contact support.';
+        return 'Internal contract error (panic 0x' + code.toString(16) + ').';
+      } catch (_) {}
+    }
+    // Known zero-arg custom error by selector.
+    if (_ERR_SELECTORS[sel]) {
+      const name = _ERR_SELECTORS[sel];
+      return _ERR_FRIENDLY[name] || ('Reverted: ' + name);
+    }
+    // Last resort: let the ABI try (covers any error with arguments).
+    if (iface) {
+      try { const p = iface.parseError(data); if (p && p.name) return _ERR_FRIENDLY[p.name] || ('Reverted: ' + p.name); } catch (_) {}
+    }
+  }
+
+  // String reasons the provider surfaced without structured data.
+  const raw = (e && (e.reason || (e.error && e.error.message) || (e.data && e.data.message) || e.message)) || '';
+  const friendly = _friendlyRouterMsg(raw);
+  if (friendly && !/cannot estimate gas|UNPREDICTABLE_GAS_LIMIT|^execution reverted$/i.test(friendly.trim())) {
+    return friendly;
+  }
+  if (/out of gas|gas required exceeds/i.test(raw)) {
+    return 'The transaction ran out of gas (you may have many ROI streams). Try again — gas headroom was increased.';
+  }
+  return raw || 'Transaction reverted for an unknown reason.';
+}
+
+// Estimate gas for a contract method and return a limit with headroom, so variable-cost
+// loops (e.g. growing ROI-stream settlement) don't run out of gas on a tight estimate.
+// Throws the original revert (decodable by decodeContractError) if the call would revert.
+async function gasLimitWithBuffer(boundContract, method, args, bufferPct) {
+  const est = await boundContract.estimateGas[method](...args);
+  const pct = bufferPct || 30;
+  return est.mul(100 + pct).div(100);
+}
+
+window.decodeContractError = decodeContractError;
+window.gasLimitWithBuffer   = gasLimitWithBuffer;
 
 // ── TRANSACTION IN-FLIGHT GUARD ──
 let _txInFlight = 0;

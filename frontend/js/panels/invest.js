@@ -397,7 +397,13 @@ async function invest() {
     await approveTx.wait();
 
     toast('Step 2/2 — Confirm investment in MetaMask…', 'info');
-    const tx = await contract.connect(signer).invest(tokenAddr, totalWei, _GAS);
+    // Estimate gas with headroom BEFORE prompting the wallet. This both (a) surfaces any
+    // revert (price stale, slippage, low reserve, not-enough-cap, etc.) up front so the catch
+    // can explain exactly why, and (b) adds 30% over the estimate so the variable-cost ROI
+    // settlement loops (which grow as ROI streams accumulate) don't run out of gas.
+    const _inv      = contract.connect(signer);
+    const _gasLimit = await gasLimitWithBuffer(_inv, 'invest', [tokenAddr, totalWei], 30);
+    const tx        = await _inv.invest(tokenAddr, totalWei, { ..._GAS, gasLimit: _gasLimit });
 
     toast('Transaction sent — waiting for confirmation…', 'info');
 
@@ -437,8 +443,8 @@ async function invest() {
 
   } catch(e) {
     _txDone();
-    const msg = e.reason || e?.error?.message || e.message || 'Unknown error';
-    toast('Investment failed: ' + msg, 'error');
+    console.error('[invest] failed:', e);
+    toast('Investment failed: ' + decodeContractError(e, contract && contract.interface), 'error');
   }
 }
 

@@ -340,7 +340,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
         ? `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TX</span>
            <span style="font-family:var(--font-mono);font-size:11px;color:var(--cream);word-break:break-all;flex:1;">${txHash}</span>`
         : `<span style="color:var(--muted);font-size:10px;letter-spacing:.06em;flex-shrink:0;">TOKEN</span>
-           <a href="https://amoy.polygonscan.com/address/${tokenAddr}" target="_blank" style="font-family:var(--font-mono);font-size:11px;color:var(--gold);word-break:break-all;flex:1;">${tokenAddr}</a>`}
+           <a href="${NET.explorer}/address/${tokenAddr}" target="_blank" style="font-family:var(--font-mono);font-size:11px;color:var(--gold);word-break:break-all;flex:1;">${tokenAddr}</a>`}
       <button onclick="openHistRefSplitPopup('${refSplitId}')" style="flex-shrink:0;padding:5px 12px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);border-radius:4px;color:var(--gold);font-family:var(--font-mono);font-size:10px;letter-spacing:1.2px;cursor:pointer;">REFERRAL SPLIT ›</button>
     </div>
 

@@ -332,7 +332,7 @@ async function loadGenealogy() {
           return `<div class="gene-addr-row" data-addr="${a}" style="justify-content:space-between;gap:12px;cursor:default;flex-wrap:nowrap;">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
               <div class="gene-addr-dot"></div>
-              <a href="https://amoy.polygonscan.com/address/${a}" target="_blank" rel="noopener"
+              <a href="${NET.explorer}/address/${a}" target="_blank" rel="noopener"
                  style="color:var(--cream);text-decoration:none;font-family:var(--font-mono);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                  onclick="event.stopPropagation()">${rowLabel}</a>
               <button onclick="event.stopPropagation();copyAddr('${a}',this)" title="Copy address"

@@ -115,7 +115,8 @@ async function addToken() {
     _logoBase64 = '';
   } catch(e) {
     _txDone();
-    toast('Error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
+    console.error('[addToken] failed:', e);
+    toast('Add token failed: ' + decodeContractError(e, contract && contract.interface), 'error');
   }
 }
 

@@ -77,7 +77,12 @@ function _rwROIStreamsHtml() {
     const levelRate  = ROI_LEVEL_RATES[d.level] !== undefined ? ROI_LEVEL_RATES[d.level] : '—';
     const totalClaimed   = _trulyClaimedETH;
 
-    const _liveMissed = (d.histMissedETH || 0) + (d.liveWindowGapETH || 0);
+    // Split for the per-stream badge: HELD (over-cap, recoverable → yellow) takes precedence;
+    // otherwise MISSED (natural-expiry loss → red). Ticker keeps these updated.
+    const _rowHeldETH   = d.liveWindowGapETH || 0;
+    const _rowMissedETH = d.histMissedETH || 0;
+    const _rowMissShow  = _rowHeldETH > 1e-15 || _rowMissedETH > 1e-15;
+    const _rowMissIsHeld = _rowHeldETH > 1e-15;
     rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
       <td style="padding:8px 8px;cursor:pointer;outline:none;user-select:none;-webkit-tap-highlight-color:transparent;" onclick="showROIStreamPopup(${i})">
         <span style="font-family:var(--font-display);font-size:20px;line-height:1.1;color:var(--gold);">$${fmtNum(d.ethInv * USDT_PER_ETH)}</span>
@@ -97,6 +102,10 @@ function _rwROIStreamsHtml() {
         <div style="margin-top:5px;font-size:9px;white-space:nowrap;">
           <span style="color:var(--muted);">CLAIMABLE </span>
           <span id="rwROIStreamClaimable-${i}" style="color:#a78bfa;">$${(claimableETH * USDT_PER_ETH).toFixed(5)}</span>
+        </div>
+        <div id="rwROIStreamMissedWrap-${i}" style="margin-top:3px;font-size:9px;white-space:nowrap;display:${_rowMissShow ? '' : 'none'};">
+          <span id="rwROIStreamMissedLabel-${i}" style="color:var(--muted);">${_rowMissIsHeld ? 'HELD ' : 'MISSED '}</span>
+          <span id="rwROIStreamMissed-${i}" style="color:${_rowMissIsHeld ? '#fbbf24' : '#ef4444'};">$${((_rowMissIsHeld ? _rowHeldETH : _rowMissedETH) * USDT_PER_ETH).toFixed(5)}</span>
         </div>
       </td>
       <td style="padding:8px 8px;text-align:right;">
@@ -192,8 +201,13 @@ function showROIStreamPopup(i) {
   const _liveClaimable   = Math.min(d.accruedETH, _rwROIAvailableCapETH);
   const claimableETH     = _streamPending + _liveClaimable;
   const _elapsed         = Math.max(0, Math.floor(Date.now() / 1000) - _rwROIFetchWall);
-  const _liveMissed      = (d.histMissedETH || 0) + (d.liveWindowGapETH || 0) + _elapsed * (d.perStreamMissRate || 0);
-  const _hasMissed       = (d.histMissedETH || 0) > 1e-15 || (d.liveWindowGapETH || 0) > 1e-15 || (d.perStreamMissRate || 0) > 0;
+  // Method 2: ROI accruing past the 5x cap while still staked is HELD — recoverable by investing
+  // more (it converts to claimable once cap regains), NOT lost. Only the natural-expiry no-stake
+  // gap (histMissedETH, written on-chain) is genuinely MISSED.
+  const _heldETH         = (d.liveWindowGapETH || 0) + _elapsed * (d.perStreamMissRate || 0);
+  const _missedETH       = (d.histMissedETH || 0);
+  const _showHeld        = _heldETH > 1e-15;
+  const _hasMissed       = _missedETH > 1e-15;
   const accruedTotalETH  = histPaid + d.roiPaidETH + d.accruedETH;
   const _ratePerSec      = (d.streamRate || 0) * USDT_PER_ETH;
   const _ratePerDay      = _ratePerSec * 86400;
@@ -238,10 +252,16 @@ function showROIStreamPopup(i) {
           <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">CLAIMED</div>
           <div style="font-size:14px;color:#4ade80;font-family:var(--font-display);">$${(_trulyClaimedETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
+        ${_showHeld ? `
+        <div style="background:rgba(251,191,36,0.07);border:1px solid rgba(251,191,36,0.22);border-radius:8px;padding:12px;">
+          <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">HELD</div>
+          <div style="font-size:14px;color:#fbbf24;font-family:var(--font-display);">$${(_heldETH * USDT_PER_ETH).toFixed(5)}</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:3px;">over-cap · invest more to claim</div>
+        </div>` : `
         <div style="background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,${_hasMissed ? '0.22' : '0.08'});border-radius:8px;padding:12px;">
           <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">MISSED</div>
-          <div style="font-size:14px;color:${_hasMissed ? '#ef4444' : 'var(--muted)'};font-family:var(--font-display);">${_hasMissed ? '$' + (_liveMissed * USDT_PER_ETH).toFixed(5) : '—'}</div>
-        </div>
+          <div style="font-size:14px;color:${_hasMissed ? '#ef4444' : 'var(--muted)'};font-family:var(--font-display);">${_hasMissed ? '$' + (_missedETH * USDT_PER_ETH).toFixed(5) : '—'}</div>
+        </div>`}
       </div>
     </div>`;
 
@@ -264,8 +284,9 @@ let _rwROICapExhausted = false;  // true when liveETH=0 from contract but _capPa
 let _rwROIAvailableCapETH = Infinity; // remaining unified cap for wallet (Infinity = uncapped / unknown)
 let _rwROIActiveCapETH    = Infinity; // commStats[3]: active-only raw cap — mirrors _getRawAvailableCap
 let _rwROIPendingETH       = 0; // pre-settled pending at last fetch (claimable even when rawCap = 0)
-let _rwROIMissedBaseETH    = 0; // total missed at fetch time (sum of per-stream gap when paused)
-let _rwROIMissedRatePerSec = 0; // rate at which missed amounts grow when paused (ETH/s)
+let _rwROIMissedBaseETH    = 0; // genuinely lost (natural-expiry no-stake gap), static
+let _rwROIHeldBaseETH      = 0; // over-cap ROI HELD (recoverable by investing more) — Method 2
+let _rwROIMissedRatePerSec = 0; // rate the HELD over-cap amount grows while cap is exhausted (ETH/s)
 let _rwROILockExpired           = false; // true when active locks all expired naturally (no _capPausedAt)
 let _rwROIMidExhaustedDetected = false; // set by ticker on first mid-session exhaustion tick; reset by loadRwROI
 let _rwROIRetained             = false; // true when all LP removed but earned ROI is retained on-chain (claimable)
@@ -368,10 +389,17 @@ function _rwStartROITicker() {
       claimableEl.style.color = _claimableUsdt > 0.001 ? 'var(--gold)' : 'var(--muted)';
     }
     const missedEl = document.getElementById('rwROIMissed');
-    if (missedEl && (_rwROIMissedBaseETH > 0.0000001 || _rwROIMissedRatePerSec > 0)) {
-      const _missedTotal = (_rwROIMissedBaseETH + elapsed * _rwROIMissedRatePerSec) * USDT_PER_ETH;
-      missedEl.textContent = '$' + _missedTotal.toFixed(2);
-      missedEl.style.color = '#ef4444';
+    if (missedEl) {
+      // HELD over-cap ROI grows while cap is exhausted (recoverable, yellow); genuine natural-expiry
+      // loss is static (red). Held takes precedence when present.
+      const _heldNow = (_rwROIHeldBaseETH + elapsed * _rwROIMissedRatePerSec) * USDT_PER_ETH;
+      if (_heldNow > 0.0000001) {
+        missedEl.textContent = '$' + _heldNow.toFixed(2);
+        missedEl.style.color = '#fbbf24';
+      } else if (_rwROIMissedBaseETH > 0.0000001) {
+        missedEl.textContent = '$' + (_rwROIMissedBaseETH * USDT_PER_ETH).toFixed(2);
+        missedEl.style.color = '#ef4444';
+      }
     }
 
     const btn = document.getElementById('claimROIBtn');
@@ -475,12 +503,27 @@ function _rwStartROITicker() {
           _pctEl.textContent = (_tot >= 100 ? '100' : _tot.toFixed(2)) + '%';
         }
 
+        // Per-stream badge: HELD (over-cap, recoverable → yellow) grows while cap is blocked;
+        // MISSED (natural-expiry loss → red) is static. Held takes precedence when present.
         const _perMissRate  = _d.perStreamMissRate || 0;
-        const _liveMissedPS = (_d.histMissedETH || 0) + (_d.liveWindowGapETH || 0) + elapsed * _perMissRate;
-        const _missedEl = document.getElementById('rwROIStreamMissed-' + _si);
-        if (_missedEl) _missedEl.textContent = '$' + (_liveMissedPS * USDT_PER_ETH).toFixed(5);
-        const _missedWrapEl = document.getElementById('rwROIStreamMissedWrap-' + _si);
-        if (_missedWrapEl) _missedWrapEl.style.display = _liveMissedPS > 0.0000001 ? '' : 'none';
+        const _heldPS       = (_d.liveWindowGapETH || 0) + elapsed * _perMissRate;
+        const _missedPS     = (_d.histMissedETH || 0);
+        const _missedEl      = document.getElementById('rwROIStreamMissed-' + _si);
+        const _missedLabelEl = document.getElementById('rwROIStreamMissedLabel-' + _si);
+        const _missedWrapEl  = document.getElementById('rwROIStreamMissedWrap-' + _si);
+        if (_missedWrapEl) {
+          if (_heldPS > 0.0000001) {
+            _missedWrapEl.style.display = '';
+            if (_missedLabelEl) _missedLabelEl.textContent = 'HELD ';
+            if (_missedEl) { _missedEl.textContent = '$' + (_heldPS * USDT_PER_ETH).toFixed(5); _missedEl.style.color = '#fbbf24'; }
+          } else if (_missedPS > 0.0000001) {
+            _missedWrapEl.style.display = '';
+            if (_missedLabelEl) _missedLabelEl.textContent = 'MISSED ';
+            if (_missedEl) { _missedEl.textContent = '$' + (_missedPS * USDT_PER_ETH).toFixed(5); _missedEl.style.color = '#ef4444'; }
+          } else {
+            _missedWrapEl.style.display = 'none';
+          }
+        }
       }
     }
   }, 1000);
@@ -708,7 +751,7 @@ function _rwRefHistHtml() {
     const amt     = parseFloat(ethers.utils.formatEther(ev.args.amount));
     const level   = Number(ev.args.level);
     const ratePct = (RATES[level - 1] || 0) / 500;
-    const txUrl   = ev.transactionHash ? `https://amoy.polygonscan.com/tx/${ev.transactionHash}` : null;
+    const txUrl   = ev.transactionHash ? `${NET.explorer}/tx/${ev.transactionHash}` : null;
 
     if (ev._missed) {
       const tipText = ev._missedReason === 'cap'        ? 'Referral cap exceeded — excess spilled to next upline'
@@ -718,7 +761,7 @@ function _rwRefHistHtml() {
         <td class="rw-ref-col-date" style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
         <td class="rw-ref-from-cell" style="padding:7px 8px;">
           <div class="rw-ref-from-inner" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;min-width:0;"><span class="rw-addr-full">${fromDisplay}</span><span class="rw-addr-short">${fromShort}</span></a>
+            <a href="${NET.explorer}/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:rgba(248,113,113,0.7);text-decoration:none;word-break:break-all;min-width:0;"><span class="rw-addr-full">${fromDisplay}</span><span class="rw-addr-short">${fromShort}</span></a>
             <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
           </div>
         </td>
@@ -736,7 +779,7 @@ function _rwRefHistHtml() {
         <td class="rw-ref-col-date" style="padding:7px 8px;color:var(--muted);white-space:nowrap;">${date}</td>
         <td class="rw-ref-from-cell" style="padding:7px 8px;">
           <div class="rw-ref-from-inner" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-            <a href="https://amoy.polygonscan.com/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;min-width:0;"><span class="rw-addr-full">${fromDisplay}</span><span class="rw-addr-short">${fromShort}</span></a>
+            <a href="${NET.explorer}/address/${from}" target="_blank" rel="noopener" title="${from}" style="color:var(--gold);text-decoration:none;word-break:break-all;min-width:0;"><span class="rw-addr-full">${fromDisplay}</span><span class="rw-addr-short">${fromShort}</span></a>
             <button onclick="copyAddr('${from}',this)" title="Copy address" style="padding:2px 4px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:3px;background:var(--surface);color:var(--muted);cursor:pointer;flex-shrink:0;line-height:1;">${_COPY_ICON}</button>
           </div>
         </td>
@@ -1360,8 +1403,9 @@ async function loadRwROI(silent = false) {
     // capETH = ethInv * commRate / 10_000  (mirrors contract's initROIStreamsExt formula)
     // accruedETH = same linear formula as _calcAccrued (recipientSince ≈ lockedAt for new streams)
     let ratePerSec = 0;
-    let missedBaseETH = 0;    // sum of per-stream gap at fetch time (when cap is paused)
-    let missedRatePerSec = 0; // rate at which missed amounts grow when cap is paused
+    let missedBaseETH = 0;    // genuinely lost (natural-expiry no-stake gap), static
+    let heldBaseETH   = 0;    // over-cap ROI HELD (recoverable by investing more) — Method 2
+    let missedRatePerSec = 0; // rate the HELD over-cap amount grows while cap is exhausted (ETH/s)
     const wallNow  = Math.floor(Date.now() / 1000);
     const blockTs  = latestBlock ? latestBlock.timestamp : wallNow;
     const effNow   = Math.max(blockTs, wallNow);
@@ -1498,7 +1542,10 @@ async function loadRwROI(silent = false) {
     // Compute total missed and miss rate from all streams regardless of pause state.
     // Gap = elapsed potential − (paid + currently accruing). Streams with streamRate=0
     // but still within their lock period are missing ROI at the full unblocked rate.
-    missedBaseETH    = _rwROIStreamDetails.reduce((s, d) => s + (d.histMissedETH || 0) + (d.liveWindowGapETH || 0), 0);
+    // Method 2 split: histMissedETH (natural-expiry no-stake gap) is genuinely lost; liveWindowGapETH
+    // (over-cap ROI) is HELD — recoverable by investing more, not forfeited.
+    missedBaseETH    = _rwROIStreamDetails.reduce((s, d) => s + (d.histMissedETH || 0), 0);
+    heldBaseETH      = _rwROIStreamDetails.reduce((s, d) => s + (d.liveWindowGapETH || 0), 0);
     missedRatePerSec = _rwROIStreamDetails.reduce((s, d) => {
       if (d.streamRate === 0 && d.lockDur > 0 && d.periodMax > 0 && effNow < d.unlockTime)
         return s + d.periodMax / d.lockDur;
@@ -1540,7 +1587,8 @@ async function loadRwROI(silent = false) {
             _sd.perStreamMissRate = _sd.periodMax / _sd.lockDur;
         }
         // Recompute missedBaseETH — now liveWindowGapETH holds only the truly missed excess.
-        missedBaseETH = _rwROIStreamDetails.reduce((s, d) => s + (d.histMissedETH || 0) + (d.liveWindowGapETH || 0), 0);
+        missedBaseETH = _rwROIStreamDetails.reduce((s, d) => s + (d.histMissedETH || 0), 0);
+        heldBaseETH   = _rwROIStreamDetails.reduce((s, d) => s + (d.liveWindowGapETH || 0), 0);
         // Streams are now blocked; recompute miss rate using full unblocked stream rates.
         // missedBaseETH was just recomputed above (not 0 at exhaustion anymore).
         missedRatePerSec = _rwROIStreamDetails.reduce((s, d) => {
@@ -1576,6 +1624,7 @@ async function loadRwROI(silent = false) {
       }
       _rwROIStreamDetails.sort((a, b) => b.accruedETH - a.accruedETH);
       missedBaseETH    = 0;
+      heldBaseETH      = 0;
       missedRatePerSec = 0;
     }
 
@@ -1587,6 +1636,7 @@ async function loadRwROI(silent = false) {
     _rwROIActiveCount      = streams.length;
     _rwROIPendingETH       = pendingETH;
     _rwROIMissedBaseETH    = missedBaseETH;
+    _rwROIHeldBaseETH      = heldBaseETH;
     _rwROIMissedRatePerSec = missedRatePerSec;
 
     // Total lifetime accrued = historical claims + current outstanding (pending + live).
@@ -1654,8 +1704,9 @@ async function loadRwROI(silent = false) {
           <div id="rwROILive" style="font-size:16px;color:#a78bfa;font-family:var(--font-display);">$${(totalAccruedETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">MISSED (USDT)</span><span class="rw-stat-label-mob">Missed</span></div>
-          <div id="rwROIMissed" style="font-size:16px;color:${missedBaseETH > 0.000001 ? '#ef4444' : 'var(--muted)'};font-family:var(--font-display);">${missedBaseETH > 0.000001 ? '$' + (missedBaseETH * USDT_PER_ETH).toFixed(2) : '—'}</div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">${heldBaseETH > 0.000001 ? 'HELD (USDT)' : 'MISSED (USDT)'} <span style="color:${heldBaseETH > 0.000001 ? '#fbbf24' : '#ef4444'};font-size:9px;">●</span></span><span class="rw-stat-label-mob">${heldBaseETH > 0.000001 ? 'Held' : 'Missed'}</span></div>
+          <div id="rwROIMissed" style="font-size:16px;color:${heldBaseETH > 0.000001 ? '#fbbf24' : (missedBaseETH > 0.000001 ? '#ef4444' : 'var(--muted)')};font-family:var(--font-display);">${heldBaseETH > 0.000001 ? '$' + (heldBaseETH * USDT_PER_ETH).toFixed(2) : (missedBaseETH > 0.000001 ? '$' + (missedBaseETH * USDT_PER_ETH).toFixed(2) : '—')}</div>
+          ${heldBaseETH > 0.000001 ? '<div style="font-size:8px;color:var(--muted);margin-top:3px;">over-cap · invest more to claim</div>' : ''}
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">CLAIMABLE (USDT)</span><span class="rw-stat-label-mob">Claimable</span></div>

@@ -8,15 +8,50 @@ const _capturedRefParam = (function() {
   catch(_) { return null; }
 })();
 
+// ════════════════════════════════════════════════════════════════════════════
+// NETWORK — switch between mainnet and testnet by commenting ONE block below.
+// Keep contract-config.js in sync: deploy/regenerate it for the matching network
+//   • mainnet → scripts/polygon/mdeploy.js   --network polygon
+//   • amoy    → scripts/amoytestnet/inithdx.js --network polygonAmoy
+// ════════════════════════════════════════════════════════════════════════════
+/* ───── POLYGON MAINNET ─────
+const NET = {
+  chainId: 137, chainIdHex: '0x89', name: 'polygon', label: 'POLYGON',
+  chainName: 'Polygon',
+  rpcUrls:  ['https://polygon-rpc.com'],
+  explorer: 'https://polygonscan.com',
+  readRpc:  'https://polygon-bor-rpc.publicnode.com',
+};
+*/
+// ───── POLYGON AMOY (TESTNET) ─────
+const NET = {
+  chainId: 80002, chainIdHex: '0x13882', name: 'polygon-amoy', label: 'AMOY',
+  chainName: 'Polygon Amoy',
+  rpcUrls:  ['https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk'],
+  explorer: 'https://amoy.polygonscan.com',
+  readRpc:  'https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk',
+};
+
 // Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
 // Transactions still go through the wallet signer; only eth_call goes here.
-// No API key is hardcoded here. Set READ_RPC_URL in contract-config.js (e.g. a
-// domain-restricted Alchemy/Infura endpoint) to use a private provider; otherwise
-// fall back to the public Polygon Amoy RPC. Any browser-exposed key MUST be locked
-// down by the provider's allowed-domains/rate-limit settings.
-const ALCHEMY_AMOY_URL = (typeof READ_RPC_URL !== 'undefined' && READ_RPC_URL)
+// Set READ_RPC_URL in contract-config.js for a private (domain-restricted) provider;
+// otherwise fall back to the active network's public RPC above.
+const READ_RPC = (typeof READ_RPC_URL !== 'undefined' && READ_RPC_URL)
   ? READ_RPC_URL
-  : 'https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk';
+  : NET.readRpc;
+
+// Keep _GAS.maxFeePerGas (utils.js) tracking Polygon's live base fee so transactions are never
+// rejected for "maxFeePerGas less than block base fee" and never over-reserve the user's POL.
+(function _trackGasFees() {
+  if (typeof refreshGasFromNetwork !== 'function') return;
+  let gasProvider;
+  try {
+    gasProvider = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
+  } catch (_) { return; }
+  const tick = () => refreshGasFromNetwork(gasProvider);
+  tick();
+  setInterval(tick, 12000);
+})();
 
 // Returns { total: BigNumber, entries: [] } for the connected wallet.
 // Reads totalMissedCommissions and getMissedRecords from on-chain storage — view calls,
@@ -133,7 +168,7 @@ function waitForEthereum(timeout = 3000) {
   });
 }
 
-const REQUIRED_CHAIN_ID = 80002; // Polygon Amoy
+const REQUIRED_CHAIN_ID = NET.chainId;
 
 async function ensureCorrectNetwork(eth) {
   const chainId = parseInt(await eth.request({ method: 'eth_chainId' }), 16);
@@ -141,7 +176,7 @@ async function ensureCorrectNetwork(eth) {
   try {
     await eth.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: '0x13882' }]  // 80002
+      params: [{ chainId: NET.chainIdHex }]
     });
     return true;
   } catch(switchErr) {
@@ -150,16 +185,17 @@ async function ensureCorrectNetwork(eth) {
         await eth.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: '0x13882',
-            chainName: 'Polygon Amoy',
+            chainId: NET.chainIdHex,
+            chainName: NET.chainName,
             nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-            rpcUrls: ['https://rpc-amoy.polygon.technology']
+            rpcUrls: NET.rpcUrls,
+            blockExplorerUrls: [NET.explorer]
           }]
         });
         return true;
       } catch(_) {}
     }
-    toast('Please switch MetaMask to Polygon Amoy (chain ID 80002).', 'error');
+    toast('Please switch MetaMask to ' + NET.chainName + ' (chain ID ' + NET.chainId + ').', 'error');
     return false;
   }
 }
@@ -180,13 +216,13 @@ function registerEthereumListeners(eth) {
   eth.on('chainChanged', (chainIdHex) => {
     updateNetPill(chainIdHex);
     if (parseInt(chainIdHex, 16) !== REQUIRED_CHAIN_ID) {
-      toast('Wrong network — please switch back to Polygon Amoy.', 'error');
+      toast('Wrong network — please switch back to ' + NET.chainName + '.', 'error');
       return;
     }
     if (_txInFlight === 0 && App.walletAddress) {
       App.walletProvider = new ethers.providers.Web3Provider(eth);
       App.signer         = App.walletProvider.getSigner();
-      App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
+      App.provider       = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
       if (contractAddress) {
         App.contract = new ethers.Contract(contractAddress, CONTRACT_ABI, App.signer);
         _stopChainListeners();
@@ -223,7 +259,7 @@ async function connectWallet() {
     }
     App.signer        = App.walletProvider.getSigner();
     App.walletAddress = await App.signer.getAddress();
-    App.provider      = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
+    App.provider      = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
 
     document.getElementById('connectBtn').textContent = App.walletAddress.slice(0,6) + '...' + App.walletAddress.slice(-4);
     document.getElementById('connectBtn').classList.add('connected');
@@ -263,7 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (el && typeof CONTRACT_ADDRESS !== 'undefined') el.textContent = CONTRACT_ADDRESS;
   const footerLink = document.getElementById('footerContractLink');
   if (footerLink && typeof CONTRACT_ADDRESS !== 'undefined') {
-    footerLink.href = `https://amoy.polygonscan.com/address/${CONTRACT_ADDRESS}`;
+    footerLink.href = `${NET.explorer}/address/${CONTRACT_ADDRESS}`;
     footerLink.textContent = CONTRACT_ADDRESS;
   }
 });
@@ -474,8 +510,10 @@ document.addEventListener('click', (e) => {
 // ── LANDING PAGE STATS ──
 let _landingStatsPollInterval = null;
 
+// Returns { wealth, staking } for one user. `staking` is the live + carry-over staking
+// reward accrual (unclaimed) — summed across all users it gives the platform-wide accrued total.
 function _computeWealthLanding(params) {
-  if (!params || !params.locks) return 0;
+  if (!params || !params.locks) return { wealth: 0, staking: 0 };
   const now = Math.floor(Date.now() / 1000);
   const refEarningsETH = parseFloat(ethers.utils.formatEther(params.refEarnings));
   const tokenPriceEth  = parseFloat(ethers.utils.formatEther(params.platformTokenPriceEth));
@@ -500,7 +538,7 @@ function _computeWealthLanding(params) {
     }
   }
   const lpFees = Math.max(0, totalCurrentLP - totalInvestedETH);
-  return refEarningsETH + lpFees + totalInvestedETH + stakingETH;
+  return { wealth: refEarningsETH + lpFees + totalInvestedETH + stakingETH, staking: stakingETH };
 }
 const _LANDING_STATS_CACHE_KEY = 'hordex_landing_stats_v2';
 
@@ -521,7 +559,7 @@ async function loadLandingStats() {
     if (cached) _applyLandingStats(cached);
   } catch(_) {}
 
-  const readProvider = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
+  const readProvider = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
   const readContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, readProvider);
 
   // ── Fast path: single view call — shows 3 stats with no event scanning ──
@@ -550,19 +588,29 @@ async function loadLandingStats() {
       // One getWealthParamsBatch per chunk (reads every user's wealth on-chain) instead of
       // one getWealthParams() RPC call per registered user. Chunked to bound eth_call gas.
       let totalWealthETH = 0;
+      let totalStakingAccruedETH = 0; // unclaimed live + carry-over accrual across all users
       const _CH = 50;
       for (let _i = 0; _i < allUsers.length; _i += _CH) {
         const _chunk = allUsers.slice(_i, _i + _CH);
         let _wps = [];
         try { _wps = await readContract.getWealthParamsBatch(_chunk); }
         catch (_) { _wps = []; }
-        for (const p of _wps) totalWealthETH += _computeWealthLanding(p);
+        for (const p of _wps) {
+          const _r = _computeWealthLanding(p);
+          totalWealthETH         += _r.wealth;
+          totalStakingAccruedETH += _r.staking;
+        }
       }
+      // Overall accrued staking rewards = already-paid (claimed) + currently-unclaimed accrual.
+      const accruedStakingETH = stakingETH + totalStakingAccruedETH;
       const full = {
         ...partial,
         wealthBuilt: totalWealthETH > 0
           ? ethToUSDT(totalWealthETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT'
           : '0 USDT',
+        stakingRewards: accruedStakingETH > 0
+          ? ethToUSDT(accruedStakingETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT'
+          : partial.stakingRewards,
       };
       _applyLandingStats(full);
       try { localStorage.setItem(_LANDING_STATS_CACHE_KEY, JSON.stringify(full)); } catch(_) {}
@@ -624,7 +672,7 @@ window.addEventListener('load', async () => {
   try {
     eth.autoRefreshOnNetworkChange = false;
     App.walletProvider = new ethers.providers.Web3Provider(eth);
-    App.provider       = new ethers.providers.StaticJsonRpcProvider(ALCHEMY_AMOY_URL, { chainId: 80002, name: 'polygon-amoy' });
+    App.provider       = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
     const accounts = await eth.request({ method: 'eth_accounts' });
 
     if (!accounts || accounts.length === 0 ||
@@ -986,7 +1034,7 @@ function updateNetPill(chainIdHex) {
   if (!pill) return;
   const id = parseInt(chainIdHex, 16);
   if (id === REQUIRED_CHAIN_ID) {
-    pill.textContent = 'AMOY';
+    pill.textContent = NET.label;
     pill.className = 'net-pill sepolia';
   } else {
     pill.textContent = 'WRONG NETWORK';

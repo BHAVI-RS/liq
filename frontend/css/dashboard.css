@@ -241,8 +241,8 @@
 .dis-bar-overcap {
   position: absolute;
   top: 0; bottom: 0;
-  background: #ef4444;
-  opacity: 0.55;
+  background: #fbbf24;
+  opacity: 0.9;
   transition: left 0.9s linear, width 0.9s linear;
 }
 .dis-bar-row {

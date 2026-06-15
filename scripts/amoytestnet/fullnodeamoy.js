@@ -83,9 +83,9 @@ function deriveWallets(rawKey, provider) {
 }
 
 async function main() {
-  const rawKey = process.env.PRIVATE_KEY;
+  const rawKey = process.env.AMOY_PRIVATE_KEY;
   if (!rawKey || rawKey.replace("0x", "").length !== 64) {
-    console.error("❌  PRIVATE_KEY missing or wrong length in .env"); process.exit(1);
+    console.error("❌  AMOY_PRIVATE_KEY missing or wrong length in .env"); process.exit(1);
   }
 
   const provider = hre.ethers.provider;

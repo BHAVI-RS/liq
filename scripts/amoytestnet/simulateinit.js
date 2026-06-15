@@ -28,8 +28,8 @@ const path = require("path");
 const { deployAndWireViewFacet, mergedLiquidityAbi } = require("./_viewfacet");
 
 // ── Config ─────────────────────────────────────────────────────────────────────
-const UNI_ROUTER     = "0x85eaBB2740eD2f9e3b53c51D8e1E7BdA53672825";
-const UNI_FACTORY    = "0xa5d020Eb5a4D537f56F7314d2359f7770DE01a48";
+// Uniswap V2 Factory + Router are deployed FRESH each run (see PHASE 1) from
+// contracts/uniswapamoy, so the script no longer depends on a one-time external DEX.
 const DEPLOYED_USDT  = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
 const PLATFORM_TOKEN = "0x39544CBb2aB89E64aD74c731Ee690D2923bB209f";
 
@@ -145,9 +145,9 @@ function buildTree() {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
-  const rawKey = process.env.PRIVATE_KEY;
+  const rawKey = process.env.AMOY_PRIVATE_KEY;
   if (!rawKey || rawKey.replace("0x", "").length !== 64) {
-    console.error("❌  PRIVATE_KEY missing or wrong length in .env"); process.exit(1);
+    console.error("❌  AMOY_PRIVATE_KEY missing or wrong length in .env"); process.exit(1);
   }
 
   const provider = hre.ethers.provider;
@@ -207,6 +207,21 @@ async function main() {
   // ── PHASE 1: Deploy contracts ──────────────────────────────────────────────
   console.log(sep()); console.log("  PHASE 1 — DEPLOY CONTRACTS"); console.log(sep());
 
+  // Deploy a fresh Uniswap V2 Factory + Router (from contracts/uniswapamoy) so each
+  // run is fully self-contained. The router carries the init-code hash matching this
+  // repo's UniswapV2Pair, so pairs created by this factory resolve correctly.
+  const UniswapV2Factory = await hre.ethers.getContractFactory("UniswapV2Factory", deployer);
+  const uniFactory = await UniswapV2Factory.deploy(deployer.address, DEPLOY_OVERRIDES);
+  await uniFactory.waitForDeployment();
+  const factoryAddress = await uniFactory.getAddress();
+  console.log(`  UniswapV2Factory : ${factoryAddress}`);
+
+  const UniswapV2Router02 = await hre.ethers.getContractFactory("UniswapV2Router02", deployer);
+  const uniRouter = await UniswapV2Router02.deploy(factoryAddress, DEPLOYED_USDT, DEPLOY_OVERRIDES);
+  await uniRouter.waitForDeployment();
+  const routerAddress = await uniRouter.getAddress();
+  console.log(`  UniswapV2Router02: ${routerAddress}`);
+
   const LiquidityMath = await hre.ethers.getContractFactory("LiquidityMath", deployer);
   const liquidityMath = await LiquidityMath.deploy(DEPLOY_OVERRIDES);
   await liquidityMath.waitForDeployment();
@@ -225,7 +240,7 @@ async function main() {
     signer: deployer, libraries: { LiquidityMath: libAddress },
   });
   const liquidityFacet = await LiquidityFacet.deploy(
-    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, PLATFORM_TOKEN, DEPLOY_OVERRIDES
+    routerAddress, factoryAddress, DEPLOYED_USDT, PLATFORM_TOKEN, DEPLOY_OVERRIDES
   );
   await liquidityFacet.waitForDeployment();
   const facetAddress = await liquidityFacet.getAddress();
@@ -242,7 +257,7 @@ async function main() {
     libraries: { LiquidityMath: libAddress },
   });
   const liquidity = await Liquidity.deploy(
-    UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, PLATFORM_TOKEN,
+    routerAddress, factoryAddress, DEPLOYED_USDT, PLATFORM_TOKEN,
     facetAddress, roiFacetAddress, DEPLOY_OVERRIDES
   );
   await liquidity.waitForDeployment();
@@ -256,7 +271,7 @@ async function main() {
 
   // ── View facet (holds the moved getters + batch views; reached via fallback) ──
   const viewFacetAddress = await deployAndWireViewFacet(hre, {
-    deployer, liquidity, factory: UNI_FACTORY, weth: DEPLOYED_USDT, token: PLATFORM_TOKEN,
+    deployer, liquidity, factory: factoryAddress, weth: DEPLOYED_USDT, token: PLATFORM_TOKEN,
     mathAddr: libAddress, viewLibAddr: libViewAddress, overrides: DEPLOY_OVERRIDES, mine,
   });
   console.log(`  LiquidityViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
@@ -272,8 +287,8 @@ const CONTRACT_ADDRESS        = "${liquidityAddress}";
 const TOKEN_ADDRESS           = "${PLATFORM_TOKEN}";
 const TOKEN_ADDRESS_JIGGY     = "";
 const TOKEN_ADDRESS_PANWORLD  = "";
-const ROUTER_ADDRESS          = "${UNI_ROUTER}";
-const FACTORY_ADDRESS         = "${UNI_FACTORY}";
+const ROUTER_ADDRESS          = "${routerAddress}";
+const FACTORY_ADDRESS         = "${factoryAddress}";
 const WETH_ADDRESS            = "${DEPLOYED_USDT}";
 const USDT_ADDRESS            = "${DEPLOYED_USDT}";
 const DEPLOY_BLOCK            = ${deployBlock};
@@ -301,6 +316,8 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
     deployBlock,
     usdtAddress:     DEPLOYED_USDT,
     tokenAddress:    PLATFORM_TOKEN,
+    routerAddress,
+    factoryAddress,
     liquidityAddress,
     facetAddress,
     roiFacetAddress,
@@ -321,7 +338,7 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   // Drain existing deployer LP so the seed below always establishes a clean 1:1 price
   {
     const _factoryCt = new hre.ethers.Contract(
-      UNI_FACTORY,
+      factoryAddress,
       ["function getPair(address,address) view returns (address)"],
       deployer
     );
@@ -338,9 +355,9 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
       const _lpBal = await _pairCt.balanceOf(deployer.address);
       if (_lpBal > 0n) {
         console.log(`  Existing pair found — draining deployer LP (${hre.ethers.formatEther(_lpBal)} LP)…`);
-        await mine(() => _pairCt.approve(UNI_ROUTER, _lpBal, TX_OVERRIDES));
+        await mine(() => _pairCt.approve(routerAddress, _lpBal, TX_OVERRIDES));
         const _routerCt = new hre.ethers.Contract(
-          UNI_ROUTER,
+          routerAddress,
           ["function removeLiquidity(address,address,uint256,uint256,uint256,address,uint256) returns (uint256,uint256)"],
           deployer
         );

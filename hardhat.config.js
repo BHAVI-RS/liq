@@ -7,6 +7,14 @@ const MAINNET_RPC = process.env.MAINNET_RPC_URL
   // publicnode.com is not an archive node — set ALCHEMY_KEY or MAINNET_RPC_URL in .env
   || "https://ethereum.publicnode.com";
 
+// Accepts a private key with or without the 0x prefix; returns [] if missing/invalid
+// so Hardhat can still load read-only networks without a key configured.
+function normalizeKey(key) {
+  if (!key) return [];
+  const hex = key.startsWith("0x") ? key.slice(2) : key;
+  return /^[0-9a-fA-F]{64}$/.test(hex) ? ["0x" + hex] : [];
+}
+
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
@@ -35,9 +43,6 @@ module.exports = {
       chainId: 31337,
       initialBaseFeePerGas: 0,
       allowUnlimitedContractSize: true,
-      // Mainnet forking is opt-in (set FORK_MAINNET=1 with an archive RPC in MAINNET_RPC_URL).
-      // Off by default so `hardhat test` runs on a clean local chain — the contract test suite
-      // deploys its own local Uniswap V2 stack and doesn't need a fork.
       ...(process.env.FORK_MAINNET ? {
         forking: { url: MAINNET_RPC, blockNumber: 21000000 },
       } : {}),
@@ -50,20 +55,21 @@ module.exports = {
       url: "http://127.0.0.1:8545",
       chainId: 31337,
     },
-    sepolia: {
-      url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
-      chainId: 11155111,
-      accounts: (process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length === 64)
-        ? [process.env.PRIVATE_KEY]
-        : [],
-    },
+
+    // Amoy testnet → AMOY_RPC_URL + AMOY_PRIVATE_KEY
     polygonAmoy: {
-      url: process.env.POLYGON_AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
+      url: process.env.AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
       chainId: 80002,
       timeout: 120000,       // 2 min — prevents HeadersTimeoutError on slow RPC
-      accounts: (process.env.PRIVATE_KEY && process.env.PRIVATE_KEY.length === 64)
-        ? [process.env.PRIVATE_KEY]
-        : [],
+      accounts: normalizeKey(process.env.AMOY_PRIVATE_KEY),
+    },
+
+    // Polygon mainnet → RPC_URL + PRIVATE_KEY
+    polygon: {
+      url: process.env.RPC_URL || "https://polygon-rpc.com",
+      chainId: 137,
+      timeout: 120000,       // 2 min — prevents HeadersTimeoutError on slow RPC
+      accounts: normalizeKey(process.env.PRIVATE_KEY),
     },
   },
   defaultNetwork: "hardhat",
