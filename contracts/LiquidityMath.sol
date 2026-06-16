@@ -132,6 +132,57 @@ library LiquidityMath {
         swapAmountOutMin     = expected * (10000 - maxSlippageBPS) / 10000;
     }
 
+    // Hybrid buy split: route up to a slippage-capped amount through the AMM pool, then fill the
+    // remainder from the platform's own token inventory at the post-pool spot price. Used by both
+    // Liquidity.swapBuy (execution) and LiquidityViewFacet.quoteSwapBuy (display) so the quoted
+    // "tokens to receive" matches the trade exactly.
+    //   slippageBps — max effective price slippage (price impact + 0.3% pool fee) on the pool leg
+    //                 (e.g. 200 = 2%). The pool leg never moves the price more than this.
+    //   invBal      — contract's current token balance available to backstop the buy.
+    // Returns the USDT routed to the pool, tokens bought from the pool, tokens sold from inventory,
+    // and the total USDT actually spent (usdtIn - usdtSpent is refunded to the buyer).
+    function calcHybridBuy(
+        uint256 resToken,
+        uint256 resETH,
+        uint256 usdtIn,
+        uint256 invBal,
+        uint256 slippageBps
+    ) public pure returns (
+        uint256 poolUsdt,
+        uint256 poolTokensOut,
+        uint256 invTokensOut,
+        uint256 usdtSpent
+    ) {
+        // Max USDT into the pool keeping avgPrice/spot = (1000*resETH + 997*poolUsdt)/(997*resETH)
+        // within 1 + slippageBps/10000.  => poolUsdt <= resETH*(997*bps - 30000)/9_970_000.
+        uint256 feeAdj      = 997 * slippageBps;
+        uint256 maxPoolUsdt = feeAdj > 30000 ? resETH * (feeAdj - 30000) / 9970000 : 0;
+
+        poolUsdt = usdtIn > maxPoolUsdt ? maxPoolUsdt : usdtIn;
+        if (poolUsdt > 0) {
+            uint256 amtInFee = poolUsdt * 997;
+            poolTokensOut    = (amtInFee * resToken) / (resETH * 1000 + amtInFee);
+        }
+        usdtSpent = poolUsdt;
+
+        uint256 remainingUsdt = usdtIn - poolUsdt;
+        if (remainingUsdt > 0) {
+            uint256 newResETH = resETH + poolUsdt;
+            uint256 newResTok = resToken > poolTokensOut ? resToken - poolTokensOut : 0;
+            if (newResTok > 0) {
+                // Inventory priced at the post-pool spot price (no extra slippage).
+                uint256 wantInv = remainingUsdt * newResTok / newResETH;
+                if (wantInv <= invBal) {
+                    invTokensOut = wantInv;
+                    usdtSpent   += remainingUsdt;                 // full fill — no refund
+                } else {
+                    invTokensOut = invBal;                        // inventory short — partial fill
+                    usdtSpent   += invBal * newResETH / newResTok; // charge only for what we deliver
+                }
+            }
+        }
+    }
+
     // Pure AMM math for the removeLiquidity slippage guards.
     // Extracted from Liquidity._removeLPCore() so this bytecode lives in the library.
     function calcRemoveLPAmounts(

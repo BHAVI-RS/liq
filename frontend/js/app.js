@@ -21,6 +21,7 @@ const NET = {
   rpcUrls:  ['https://polygon-rpc.com'],
   explorer: 'https://polygonscan.com',
   readRpc:  'https://polygon-bor-rpc.publicnode.com',
+  logsRpc:  'https://polygon-bor-rpc.publicnode.com',
 };
 */
 // ───── POLYGON AMOY (TESTNET) ─────
@@ -30,6 +31,9 @@ const NET = {
   rpcUrls:  ['https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk'],
   explorer: 'https://amoy.polygonscan.com',
   readRpc:  'https://polygon-amoy.g.alchemy.com/v2/-QMiF0WNGKGAAY8knMlDk',
+  // Alchemy's free tier caps eth_getLogs at a 10-block range; this public node allows ~10k-block
+  // ranges, so log-based reads (pool trade history) go here instead.
+  logsRpc:  'https://polygon-amoy-bor-rpc.publicnode.com',
 };
 
 // Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
@@ -39,6 +43,21 @@ const NET = {
 const READ_RPC = (typeof READ_RPC_URL !== 'undefined' && READ_RPC_URL)
   ? READ_RPC_URL
   : NET.readRpc;
+
+// Dedicated endpoint for eth_getLogs (the READ_RPC/Alchemy free tier caps getLogs at 10 blocks).
+// Lazily built and shared; used only by log-based features such as the pool trade history.
+const LOGS_RPC = (typeof LOGS_RPC_URL !== 'undefined' && LOGS_RPC_URL)
+  ? LOGS_RPC_URL
+  : (NET.logsRpc || NET.readRpc);
+let _logsProvider = null;
+function getLogsProvider() {
+  if (!_logsProvider) {
+    try { _logsProvider = new ethers.providers.StaticJsonRpcProvider(LOGS_RPC, { chainId: NET.chainId, name: NET.name }); }
+    catch (_) { _logsProvider = null; }
+  }
+  return _logsProvider;
+}
+window.getLogsProvider = getLogsProvider;
 
 // Keep _GAS.maxFeePerGas (utils.js) tracking Polygon's live base fee so transactions are never
 // rejected for "maxFeePerGas less than block base fee" and never over-reserve the user's POL.

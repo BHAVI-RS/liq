@@ -424,11 +424,17 @@ abstract contract LiquidityStorage {
                 if (lastExpiry > 0) {
                     // Pre-expiry: settle ROI accrued from recipientSince up to lastExpiry.
                     preExpiry = _calcAccruedRawAt(s, sRef.investor, sRef.lockIndex, sRef.level, lastExpiry);
-                    if (preExpiry > 0 && capRem > 0) {
+                    if (preExpiry > 0) {
                         uint256 toSettle = preExpiry < capRem ? preExpiry : capRem;
-                        s.roiPaidETH          += uint128(toSettle);
-                        _roiPendingETH[_user] += toSettle;
-                        if (toSettle < capRem) capRem -= toSettle; else capRem = 0;
+                        if (toSettle > 0) {
+                            s.roiPaidETH          += uint128(toSettle);
+                            _roiPendingETH[_user] += toSettle;
+                            capRem -= toSettle;
+                        }
+                        // Pre-expiry held that exceeds the fresh cap was EARNED while staked — it is
+                        // HELD, not forfeited. Preserve it as carry so it settles once cap regains
+                        // (e.g. the recipient invests more). Only the post-expiry gap below is missed.
+                        if (preExpiry > toSettle) s.heldCarryETH += uint128(preExpiry - toSettle);
                     }
                 }
                 // Gap: ROI from lastExpiry (or stream start when lastExpiry=0) to now.

@@ -52,21 +52,36 @@ contract LiquidityROIFacet is LiquidityStorage {
         uint256 capRemaining    // max ETH this settlement may add to pending (0 = record all as missed)
     ) internal returns (uint256 settled) {
         if (stream.recipient != address(0)) {
+            // Settle carried-over held first (over-cap preserved from a prior natural-expiry restake).
+            settled = _settleHeldCarry(stream, capRemaining);
+            capRemaining -= settled;
             uint256 accrued = _calcAccruedRaw(stream, investor, lockIndex, level);
             if (accrued > 0) {
-                settled = accrued < capRemaining ? accrued : capRemaining;
-                if (settled > 0) {
-                    stream.roiPaidETH += uint128(settled);
-                    _roiPendingETH[stream.recipient] += settled;
+                uint256 live = accrued < capRemaining ? accrued : capRemaining;
+                if (live > 0) {
+                    stream.roiPaidETH += uint128(live);
+                    _roiPendingETH[stream.recipient] += live;
+                    settled += live;
                 }
                 // Held-ROI: advance only by the settled-equivalent time; the over-cap remainder
-                // (accrued − settled) stays claimable once the recipient regains cap. No forfeiture.
-                _advanceRecipientSince(stream, investor, lockIndex, accrued, settled, block.timestamp);
+                // (accrued − live) stays claimable once the recipient regains cap. No forfeiture.
+                _advanceRecipientSince(stream, investor, lockIndex, accrued, live, block.timestamp);
             } else {
                 stream.recipientSince = uint64(block.timestamp);
             }
         } else {
             stream.recipientSince = uint64(block.timestamp);
+        }
+    }
+
+    // Draws down a stream's carried-over held ROI into pending, up to capRemaining. Returns the
+    // amount settled so callers can decrement their running cap budget.
+    function _settleHeldCarry(ROIStream storage stream, uint256 capRemaining) internal returns (uint256 c) {
+        if (stream.heldCarryETH > 0 && capRemaining > 0) {
+            c = stream.heldCarryETH < capRemaining ? stream.heldCarryETH : capRemaining;
+            stream.heldCarryETH -= uint128(c);
+            stream.roiPaidETH   += uint128(c);
+            _roiPendingETH[stream.recipient] += c;
         }
     }
 
@@ -116,16 +131,20 @@ contract LiquidityROIFacet is LiquidityStorage {
         uint256 endBound
     ) internal returns (uint256 settled) {
         if (stream.recipient != address(0)) {
+            // Settle carried-over held first (over-cap preserved from a prior natural-expiry restake).
+            settled = _settleHeldCarry(stream, capRemaining);
+            capRemaining -= settled;
             uint256 accrued = _calcAccruedRawAt(stream, investor, lockIndex, level, endBound);
             if (accrued > 0) {
-                settled = accrued < capRemaining ? accrued : capRemaining;
-                if (settled > 0) {
-                    stream.roiPaidETH += uint128(settled);
-                    _roiPendingETH[stream.recipient] += settled;
+                uint256 live = accrued < capRemaining ? accrued : capRemaining;
+                if (live > 0) {
+                    stream.roiPaidETH += uint128(live);
+                    _roiPendingETH[stream.recipient] += live;
+                    settled += live;
                 }
                 // Held-ROI: advance only by the settled-equivalent time (bounded at endBound); the
                 // over-cap remainder stays claimable once cap regains. No forfeiture.
-                _advanceRecipientSince(stream, investor, lockIndex, accrued, settled, endBound);
+                _advanceRecipientSince(stream, investor, lockIndex, accrued, live, endBound);
             } else {
                 stream.recipientSince = uint64(endBound);
             }

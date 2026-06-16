@@ -204,6 +204,7 @@ function _dashTickCountdowns() {
     const rewardTotalEth   = parseFloat(el.dataset.rewardTotalEth || '0');
     const rewardClaimedEth = parseFloat(el.dataset.rewardClaimedEth || '0');
     const priceEth         = parseFloat(el.dataset.priceEth || '0');
+    const payoutPrice      = parseFloat(el.dataset.payoutPrice || '0') || priceEth;
     const tokenSymbol      = el.dataset.tokenSymbol || 'HORDEX';
     const invIndex         = Number(el.dataset.invIndex || '0');
     const tokensAccumulated = parseFloat(el.dataset.tokensAccumulated || '0');
@@ -231,7 +232,7 @@ function _dashTickCountdowns() {
     }
 
     // Claim footer. (reward label is owned exclusively by _invTickStakingRewards at 100ms resolution)
-    const claimTokens = (priceEth > 0 ? pendingETH / priceEth : 0) + tokensAccumulated;
+    const claimTokens = (payoutPrice > 0 ? pendingETH / payoutPrice : 0) + tokensAccumulated;
     const canClaim    = claimTokens > 0;
     const footerEl    = el.querySelector('.dis-staking-footer');
     if (footerEl) {

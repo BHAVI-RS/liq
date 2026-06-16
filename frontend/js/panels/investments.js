@@ -19,6 +19,9 @@ function _fmtContractError(e) {
 var _invLPLocks = [];
 var _invTokenMetaMap = new Map();
 var _invPoolCacheMap = new Map();
+// Staking rewards are paid in platformToken valued at the on-chain TWAP (not spot). Cache it so
+// the displayed claim token count matches the actual payout. 0 = stale/unavailable → fall back to spot.
+var _invStakingPayoutPrice = 0;
 
 function _invStopPoll() {
   if (_invPollInterval) { clearInterval(_invPollInterval); _invPollInterval = null; }
@@ -169,6 +172,10 @@ async function loadInvestments() {
     _invTokenMetaMap = tokenMeta;
     _invPoolCacheMap = poolCache;
 
+    // Platform-token TWAP (ETH/token) — the price the contract pays staking rewards at.
+    _invStakingPayoutPrice = 0;
+    try { _invStakingPayoutPrice = parseFloat(ethers.utils.formatEther(await contract.getTWAPPrice())); } catch(_) {}
+
     const expandedIndices = new Set();
     el.querySelectorAll('.dash-inv-card[data-lock-index]').forEach(card => {
       if (card.querySelector('.dash-inv-details.open'))
@@ -300,7 +307,10 @@ async function loadInvestments() {
       const accumulatedUSDT    = tokensAccumulated * stakingPriceEth * USDT_PER_ETH;
       const liveUSDTNow        = pendingETH * USDT_PER_ETH + accumulatedUSDT;
 
-      const claimableTokensAtPrice = (stakingPriceEth > 0 ? pendingETH / stakingPriceEth : 0) + tokensAccumulated;
+      // Convert pending ETH → tokens at the TWAP payout price (fallback: spot) so the claim button
+      // matches what the contract actually pays; tokensAccumulated is already in token units.
+      const stakingPayoutPrice     = _invStakingPayoutPrice > 0 ? _invStakingPayoutPrice : stakingPriceEth;
+      const claimableTokensAtPrice = (stakingPayoutPrice > 0 ? pendingETH / stakingPayoutPrice : 0) + tokensAccumulated;
       const canClaimStaking        = claimableTokensAtPrice > 0;
 
       const isInActiveLock  = !isUnlocked && !isClaimed && !isRemoved;
@@ -379,13 +389,14 @@ async function loadInvestments() {
              data-reward-total-eth="${rewardTotalETH.toFixed(12)}"
              data-reward-claimed-eth="${rewardClaimedETH.toFixed(12)}"
              data-price-eth="${stakingPriceEth.toFixed(12)}"
+             data-payout-price="${(_invStakingPayoutPrice > 0 ? _invStakingPayoutPrice : stakingPriceEth).toFixed(12)}"
              data-token-symbol="${tokenSymbol}"
              data-token-addr="${lock.token}"
              data-inv-index="${i}"
              data-tokens-accumulated="${tokensAccumulated.toFixed(18)}"
              data-per-sec-usdt="${perSecUSDT.toFixed(12)}">
           <div class="dis-staking-header">
-            <span class="dis-sl-label">STAKING REWARD · ${fmtNum(rewardTotalUSDT)} USDT · ${lockDurLabel} · CONTINUOUS</span>
+            <span class="dis-sl-label">STAKING REWARD · ${lockDurLabel} · CONTINUOUS</span>
             <span class="dis-sl-reward">${initialRewardStr}</span>
           </div>
           ${isInActiveLock ? `<div class="dis-slots">${initialSlotHtml}</div>` : ''}
@@ -477,6 +488,14 @@ async function loadInvestments() {
                   <div style="height:100%;width:${capPct.toFixed(2)}%;background:${capIsFull ? '#f87171' : isCapPaused ? '#eab308' : capIsActive ? '#4ade80' : 'rgba(255,255,255,0.2)'};border-radius:2px;transition:width 0.3s;"></div>
                 </div>
               </span>
+            </div>` : ''}
+            ${rewardTotalETH > 0 ? `<div class="did-row">
+              <span class="did-label">MAX POTENTIAL</span>
+              <span class="did-val" style="color:var(--gold);">$${fmtNum(rewardTotalUSDT)} USDT</span>
+            </div>
+            <div class="did-row">
+              <span class="did-label">PENDING TO CLAIM</span>
+              <span class="did-val">$${fmtNum(Math.max(0, rewardTotalUSDT - rewardClaimedETH * USDT_PER_ETH))} USDT</span>
             </div>` : ''}
             <div class="did-row"><span class="did-label">RESTAKE STREAK</span><div class="did-val">${streakLabel}</div></div>
             <div class="did-row">
@@ -879,12 +898,14 @@ async function claimStakingRewardForLock(lockIndex) {
     const rewardTotalEth   = parseFloat(stakingEl.dataset.rewardTotalEth || '0');
     const rewardClaimedEth = parseFloat(stakingEl.dataset.rewardClaimedEth || '0');
     const priceEth         = parseFloat(stakingEl.dataset.priceEth || '0');
+    const payoutPrice      = parseFloat(stakingEl.dataset.payoutPrice || '0') || priceEth;
     const tokensAccumulated = parseFloat(stakingEl.dataset.tokensAccumulated || '0');
 
     const elapsed      = Math.min(lockDurSecs, Math.max(0, nowSec - lockedAt));
     const earnedETH    = lockDurSecs > 0 ? rewardTotalEth * elapsed / lockDurSecs : 0;
     const pendingETH   = Math.max(0, earnedETH - rewardClaimedEth);
-    const claimTokens  = (priceEth > 0 ? pendingETH / priceEth : 0) + tokensAccumulated;
+    // Token count at the TWAP payout price; value it at spot for the low-claim-value warning.
+    const claimTokens  = (payoutPrice > 0 ? pendingETH / payoutPrice : 0) + tokensAccumulated;
     const claimableUSD = claimTokens * priceEth * USDT_PER_ETH;
 
     if (claimableUSD > 0 && claimableUSD < 1) {

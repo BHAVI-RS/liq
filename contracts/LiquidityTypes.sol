@@ -128,6 +128,8 @@ struct ROIStream {
     uint128 capETH;              // cap for the CURRENT period = ethInvested * commissionRate / 10_000
     uint128 historicalPaidETH;   // cumulative ETH-equiv paid across ALL previous periods (restakes)
     uint128 historicalMissedETH; // cumulative ROI missed (cap-blocked) across ALL previous periods
+    uint128 heldCarryETH;        // over-cap HELD preserved across a natural-expiry restake when the
+                                 // pre-expiry held exceeded the fresh cap — settled first once cap regains
 }
 
 // Pointer stored in _activeROIStreams / _skippedROIStreams per address.

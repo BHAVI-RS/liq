@@ -629,27 +629,65 @@ contract Liquidity is LiquidityStorage {
     // internally by the ROI claim functions.
 
     // ── Direct swap functions (records every trade in _tradeHistory) ─────────
+    // Hybrid buy: route only the slippage-capped portion through the Uniswap pool (so the pool
+    // price never moves more than SWAP_SLIPPAGE_BPS) and fill the remainder from the platform's
+    // own token inventory at the post-pool spot price. If inventory runs out the buy is partially
+    // filled and the unspent USDT is refunded (see calcHybridBuy).
+    uint256 private constant SWAP_SLIPPAGE_BPS = 200; // pool leg capped at 2% slippage
+
     function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant {
         if (_usdtIn == 0) revert MustSendUSDT();
         // Only platform-registered, live tokens may be traded through the contract — prevents
         // arbitrary tokens from polluting _tradeHistory and keeps recorded trades meaningful.
         if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
         if (tokens[_token].removed) revert TokenDelisted();
+
+        // Pool reserves drive both the slippage cap and the inventory price.
+        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
+        if (pair == address(0)) revert PriceUnavailable();
+        (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
+        address t0     = IUniswapV2Pair(pair).token0();
+        uint256 resTok = t0 == _token ? uint256(r0) : uint256(r1);
+        uint256 resETH = t0 == _token ? uint256(r1) : uint256(r0);
+        if (resTok == 0 || resETH == 0) revert PriceUnavailable();
+
         if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtIn)) revert USDTTransferFailed();
-        IERC20(WETH).approve(UNISWAP_ROUTER, _usdtIn);
-        address[] memory path = new address[](2);
-        path[0] = WETH;
-        path[1] = _token;
-        uint256[] memory amounts = IUniswapV2Router02(UNISWAP_ROUTER)
-            .swapExactTokensForTokens(
-                _usdtIn, _minTokensOut, path, msg.sender, block.timestamp + 300
+
+        uint256 invBal = IERC20(_token).balanceOf(address(this));
+        (uint256 poolUsdt, uint256 poolTokensOut, uint256 invTokensOut, uint256 usdtSpent) =
+            LiquidityMath.calcHybridBuy(resTok, resETH, _usdtIn, invBal, SWAP_SLIPPAGE_BPS);
+
+        uint256 totalOut = poolTokensOut + invTokensOut;
+        if (totalOut < _minTokensOut) revert InsufficientTokenBalance();
+
+        // 1) Pool leg — swapped through Uniswap straight to the buyer.
+        if (poolUsdt > 0) {
+            IERC20(WETH).approve(UNISWAP_ROUTER, poolUsdt);
+            address[] memory path = new address[](2);
+            path[0] = WETH;
+            path[1] = _token;
+            IUniswapV2Router02(UNISWAP_ROUTER).swapExactTokensForTokens(
+                poolUsdt, poolTokensOut, path, msg.sender, block.timestamp + 300
             );
-        IERC20(WETH).approve(UNISWAP_ROUTER, 0);
+            IERC20(WETH).approve(UNISWAP_ROUTER, 0);
+        }
+
+        // 2) Inventory leg — contract sells its own tokens at the post-pool spot price.
+        if (invTokensOut > 0) {
+            if (!IERC20(_token).transfer(msg.sender, invTokensOut)) revert TokenTransferFailed();
+        }
+
+        // 3) Refund USDT that could not be filled because inventory ran out.
+        uint256 refund = _usdtIn - usdtSpent;
+        if (refund > 0) {
+            if (!IERC20(WETH).transfer(msg.sender, refund)) revert USDTTransferFailed();
+        }
+
         _tradeHistory[_token].push(TradeSnap({
             ts:     uint64(block.timestamp),
             isBuy:  true,
-            ethAmt: uint128(_usdtIn),
-            tokAmt: uint128(amounts[1])
+            ethAmt: uint128(usdtSpent),
+            tokAmt: uint128(totalOut)
         }));
     }
 

@@ -29,6 +29,7 @@ contract LiquidityViewFacet is LiquidityStorage {
 
     uint256 private constant LP_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
     uint256 private constant USDT_PER_ETH     = 1;
+    uint256 private constant SWAP_SLIPPAGE_BPS = 200; // hybrid buy pool leg cap — mirrors Liquidity.swapBuy
 
     constructor(address _factory, address _weth, address _platform) {
         UNISWAP_FACTORY = _factory;
@@ -65,6 +66,27 @@ contract LiquidityViewFacet is LiquidityStorage {
     }
     function getContractTokenBalance(address _token) external view returns (uint256) {
         return IERC20V(_token).balanceOf(address(this));
+    }
+
+    // Quote for swapBuy: how many tokens a given USDT amount buys under the hybrid pool+inventory
+    // split, and how much USDT is actually spent (usdtIn - usdtSpent is refunded). Mirrors the
+    // exact math swapBuy executes, so "tokens to receive" reflects true pool state.
+    function quoteSwapBuy(address _token, uint256 _usdtIn) external view returns (
+        uint256 tokensOut, uint256 usdtSpent, uint256 poolUsdt, uint256 invTokensOut
+    ) {
+        if (_usdtIn == 0) return (0, 0, 0, 0);
+        address pair = IUniV2FactoryMin(UNISWAP_FACTORY).getPair(_token, WETH);
+        if (pair == address(0)) return (0, 0, 0, 0);
+        (uint112 r0, uint112 r1,) = IUniV2PairMin(pair).getReserves();
+        address t0     = IUniV2PairMin(pair).token0();
+        uint256 resTok = t0 == _token ? uint256(r0) : uint256(r1);
+        uint256 resETH = t0 == _token ? uint256(r1) : uint256(r0);
+        if (resTok == 0 || resETH == 0) return (0, 0, 0, 0);
+        uint256 invBal = IERC20V(_token).balanceOf(address(this));
+        uint256 poolTokensOut;
+        (poolUsdt, poolTokensOut, invTokensOut, usdtSpent) =
+            LiquidityMath.calcHybridBuy(resTok, resETH, _usdtIn, invBal, SWAP_SLIPPAGE_BPS);
+        tokensOut = poolTokensOut + invTokensOut;
     }
     function getStakingReward(address _user) external view returns (
         uint256 totalAccumulated, uint256 previewNewTokens, uint256 lifetimeClaimed

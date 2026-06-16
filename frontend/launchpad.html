@@ -752,6 +752,9 @@
   <!-- REWARDS PANEL -->
   <div id="panel-rewards" class="panel">
 
+    <!-- AVAILABLE CAP — unified 5× cap shared by referrals + ROI (rendered by loadRwROI) -->
+    <div id="rwAvailableCapTop"></div>
+
     <!-- REFERRAL COMMISSIONS -->
     <div class="card" id="rwRefCard">
       <div class="card-title">REFERRAL COMMISSIONS</div>
@@ -1209,7 +1212,7 @@
 
 <script>
   function startLaunchCountdown() {
-    const launchDate = new Date('2026-06-24T10:00:00').getTime();
+    const launchDate = new Date('2026-06-25T09:00:00').getTime();
     
     function updateTimer() {
       const now = new Date().getTime();

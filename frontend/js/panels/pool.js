@@ -467,23 +467,54 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
   }
 
   try {
-    const tokenAddr = window._poolSelectedToken;
-    if (!tokenAddr) return;
+    if (!pairAddr || pairAddr === ethers.constants.AddressZero) return;
 
-    // All trades now flow through contract.swapBuy / contract.swapSell,
-    // so getTradeHistory is the single reliable source — no event log fetching needed.
+    // Read the actual Uniswap V2 Swap events for this pair — reflects every on-chain trade for the
+    // token (platform-routed pool swaps AND direct DEX trades), not just contract-recorded ones.
+    // The main read RPC (Alchemy free tier) caps eth_getLogs at 10 blocks, so log queries go through
+    // a dedicated public node (getLogsProvider) that allows ~10k-block ranges. Walk backward in
+    // chunks, stop once we have enough recent trades; per-chunk errors just skip that chunk.
+    const logsP = (typeof getLogsProvider === 'function' && getLogsProvider()) || provider;
+    const latest     = await logsP.getBlockNumber();
+    const CHUNK      = 9000;   // stay within the public node's 10k-block getLogs limit
+    const MAX_CHUNKS = 5;      // scan back at most ~45k blocks per refresh
+
     const buys = [], sells = [];
-    const onChain = await contract.getTradeHistory(tokenAddr);
-    for (let i = onChain.length - 1; i >= 0; i--) {
-      const t = onChain[i];
-      const tokF = parseFloat(ethers.utils.formatUnits(t.tokAmt, dec));
-      const ethF = parseFloat(ethers.utils.formatEther(t.ethAmt));
-      if (tokF <= 0) continue;
-      const usdtAmt = ethToUSDT(ethF);
-      const entry = { tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF };
-      if (t.isBuy) buys.push(entry); else sells.push(entry);
+    let end = latest, scanned = 0;
+    while (end > 0 && scanned < MAX_CHUNKS && (buys.length < 5 || sells.length < 5)) {
+      const start = Math.max(0, end - CHUNK + 1);
+      const batch = await logsP.getLogs({
+        address: pairAddr, topics: [SWAP_TOPIC], fromBlock: start, toBlock: end
+      }).catch(() => null);
+      if (batch && batch.length) {
+        for (let i = batch.length - 1; i >= 0; i--) {   // newest-first within the chunk
+          const [a0In, a1In, a0Out, a1Out] = ethers.utils.defaultAbiCoder.decode(
+            ['uint256', 'uint256', 'uint256', 'uint256'], batch[i].data
+          );
+          const tokOut = isToken0 ? a0Out : a1Out;
+          const tokIn  = isToken0 ? a0In  : a1In;
+          const ethIn  = isToken0 ? a1In  : a0In;
+          const ethOut = isToken0 ? a1Out : a0Out;
+          if (tokOut.gt(0)) {                       // token left the pool → BUY
+            if (buys.length >= 5) continue;
+            const tokF = parseFloat(ethers.utils.formatUnits(tokOut, dec));
+            if (tokF <= 0) continue;
+            const usdtAmt = ethToUSDT(parseFloat(ethers.utils.formatEther(ethIn)));
+            buys.push({ tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF });
+          } else if (tokIn.gt(0)) {                 // token entered the pool → SELL
+            if (sells.length >= 5) continue;
+            const tokF = parseFloat(ethers.utils.formatUnits(tokIn, dec));
+            if (tokF <= 0) continue;
+            const usdtAmt = ethToUSDT(parseFloat(ethers.utils.formatEther(ethOut)));
+            sells.push({ tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF });
+          }
+          if (buys.length >= 5 && sells.length >= 5) break;
+        }
+      }
+      end = start - 1;
+      scanned++;
     }
-    console.log('[trades] buys:', buys.length, 'sells:', sells.length);
+    console.log('[trades] uniswap swaps — buys:', buys.length, 'sells:', sells.length);
 
     window._poolTradeBuys  = buys.slice(0, 5);
     window._poolTradeSells = sells.slice(0, 5);
@@ -518,6 +549,8 @@ function switchPoolMode(mode) {
   }
 }
 
+// Forward quote (USDT → tokens). Uses the on-chain hybrid quote so "tokens to receive" matches
+// exactly what swapBuy will deliver: pool leg (≤2% slippage) + treasury-inventory leg at spot.
 async function onBuyUsdtInput() {
   const usdt = parseFloat(document.getElementById('poolBuyUSDT').value);
   const hintEl = document.getElementById('poolBuyHint');
@@ -527,16 +560,29 @@ async function onBuyUsdtInput() {
     return;
   }
   try {
-    const router  = getRouter();
-    const amounts = await router.getAmountsOut(
-      ethers.utils.parseEther((usdt / USDT_PER_ETH).toString()),
-      [DEX_WETH, window._poolSelectedToken]
-    );
-    const out = parseFloat(ethers.utils.formatUnits(amounts[1], window._poolTokenDecimals));
+    const ethIn = ethers.utils.parseEther((usdt / USDT_PER_ETH).toString());
+    const q     = await contract.quoteSwapBuy(window._poolSelectedToken, ethIn);
+    const out   = parseFloat(ethers.utils.formatUnits(q.tokensOut, window._poolTokenDecimals));
     document.getElementById('poolBuyToken').value = parseFloat(out.toFixed(5)).toString();
+    _renderBuyHint(q, ethIn);
   } catch(_) { document.getElementById('poolBuyToken').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
+// Only surface the refund notice when treasury inventory runs out — no other hint text.
+function _renderBuyHint(q, ethIn) {
+  const hintEl = document.getElementById('poolBuyHint');
+  if (!hintEl) return;
+  const spent  = parseFloat(ethers.utils.formatEther(q.usdtSpent)) * USDT_PER_ETH;
+  const usdtIn = parseFloat(ethers.utils.formatEther(ethIn))      * USDT_PER_ETH;
+  const refund = usdtIn - spent;
+  hintEl.innerHTML = refund > 0.01
+    ? `<span style="color:#f4b740;">⚠ ${fmtNum(refund)} USDT refunded — treasury inventory limit reached</span>`
+    : '';
+}
+
+// Reverse quote (tokens → USDT). Mirrors calcHybridBuy: fill the pool up to the 2% cap, then price
+// the remainder at the post-pool spot (the treasury price). Inventory limits are not enforced here —
+// any shortfall is refunded on-chain at execution time.
 async function onBuyTokenInput() {
   const tokVal = parseFloat(document.getElementById('poolBuyToken').value);
   const hintEl = document.getElementById('poolBuyHint');
@@ -546,13 +592,27 @@ async function onBuyTokenInput() {
     return;
   }
   try {
-    const router  = getRouter();
-    const amounts = await router.getAmountsIn(
-      ethers.utils.parseUnits(tokVal.toString(), window._poolTokenDecimals),
-      [DEX_WETH, window._poolSelectedToken]
-    );
-    const usdtNeeded = parseFloat(ethers.utils.formatEther(amounts[0])) * USDT_PER_ETH;
-    document.getElementById('poolBuyUSDT').value = parseFloat(usdtNeeded.toFixed(2)).toString();
+    const dec     = window._poolTokenDecimals;
+    const resTokF = parseFloat(ethers.utils.formatUnits(window._poolReserveToken, dec));
+    const resETHF = parseFloat(ethers.utils.formatEther(window._poolReserveETH));
+    if (resTokF <= 0 || resETHF <= 0) { document.getElementById('poolBuyUSDT').value = ''; return; }
+    const bps          = 200;
+    const maxPoolUsdt  = resETHF * (997 * bps - 30000) / 9970000;       // 2% cap (incl. 0.3% fee)
+    const poolTokAtMax = (maxPoolUsdt * 997 * resTokF) / (resETHF * 1000 + maxPoolUsdt * 997);
+    let usdtIn;
+    if (tokVal <= poolTokAtMax && tokVal < resTokF) {
+      // Within the slippage cap — invert Uniswap getAmountOut.
+      usdtIn = (resETHF * 1000 * tokVal) / ((resTokF - tokVal) * 997);
+    } else {
+      // Pool maxed at 2%; remainder priced at the post-pool spot (treasury).
+      const newResETH = resETHF + maxPoolUsdt;
+      const newResTok = resTokF - poolTokAtMax;
+      const extra     = tokVal - poolTokAtMax;
+      usdtIn = maxPoolUsdt + (extra * newResETH / newResTok);
+    }
+    const usdtDisplay = usdtIn * USDT_PER_ETH;
+    document.getElementById('poolBuyUSDT').value = parseFloat(usdtDisplay.toFixed(2)).toString();
+    if (hintEl) hintEl.textContent = '';
   } catch(_) { document.getElementById('poolBuyUSDT').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
@@ -613,13 +673,14 @@ async function poolBuyTokens() {
   if (!window._poolSelectedToken) { toast('Select a token first', 'warn'); return; }
   _txBegin();
   try {
-    const router    = getRouter();
     const usdtAddr  = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
     const usdtAbi   = ['function approve(address,uint256) returns (bool)'];
     const usdtCt    = new ethers.Contract(usdtAddr, usdtAbi, signer);
     const ethIn     = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
-    const amounts   = await router.getAmountsOut(ethIn, [DEX_WETH, window._poolSelectedToken]);
-    const minOut    = amounts[1].mul(990).div(1000); // 1% slippage
+    // Authoritative hybrid quote (pool + treasury) drives the minimum tokens out.
+    const q         = await contract.quoteSwapBuy(window._poolSelectedToken, ethIn);
+    if (q.tokensOut.isZero()) { _txDone(); toast('No liquidity available for this token', 'error'); return; }
+    const minOut    = q.tokensOut.mul(990).div(1000); // 1% slippage
     toast('Step 1/2 — Approve USDT in MetaMask…', 'info');
     await (await usdtCt.approve(CONTRACT_ADDRESS, ethIn, _GAS)).wait();
     toast('Step 2/2 — Confirm buy in MetaMask…', 'info');

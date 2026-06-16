@@ -1,14 +1,14 @@
 {
   "network": "polygonAmoy",
-  "deployedAt": "2026-06-15T01:48:59.488Z",
-  "deployBlock": 40171032,
+  "deployedAt": "2026-06-16T11:07:41.041Z",
+  "deployBlock": 40250980,
   "usdtAddress": "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9",
   "tokenAddress": "0x39544CBb2aB89E64aD74c731Ee690D2923bB209f",
-  "routerAddress": "0x9a782988A0Ae461c8Ee32b9FCbd58B342242FA9d",
-  "factoryAddress": "0xb004816C96FFbC0E1AC41bC930Bf4bA9Eb1dcCFd",
-  "liquidityAddress": "0x06209d4F7ce25706b19D22F53A210d98dA2B65F7",
-  "facetAddress": "0x34062ADA56E5cf09E4e858FaDE224f03FCA22a3F",
-  "roiFacetAddress": "0x9282a4A8F219B4E4b1d9a92f347e52584dFC81bD",
-  "libAddress": "0xA25b999A184F9964BfABFBb7fe969Dbd728a30eD",
-  "libViewAddress": "0xC81Cd420C2a1b3388F58DaE85596654c5A0eeC7b"
+  "routerAddress": "0x93FB07aD500ee84cA25a22A32E3480a9f3E6b520",
+  "factoryAddress": "0x00284A28FF612412FE6fDD4d5986C7935E765f35",
+  "liquidityAddress": "0x75AA5BD7Dd395eF70AA4D8440FD719efa3d15c2E",
+  "facetAddress": "0xcc913E67Df462e6Fc7F96BA4ff2c0090Ac823D00",
+  "roiFacetAddress": "0x341548D73CD3aFfaBc541Ef45f2C42149dA7D50f",
+  "libAddress": "0xa9d0aa0f9f68F45A13E90C2f98C54Cb5F6cEaEF0",
+  "libViewAddress": "0x14DEd8832cc6D401a1839684EE8245C5C77D6A2E"
 }
