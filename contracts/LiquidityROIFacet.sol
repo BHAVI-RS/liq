@@ -52,6 +52,11 @@ contract LiquidityROIFacet is LiquidityStorage {
         uint256 capRemaining    // max ETH this settlement may add to pending (0 = record all as missed)
     ) internal returns (uint256 settled) {
         if (stream.recipient != address(0)) {
+            // Lazily reconcile any pending natural-expiry resume for this stream first: banks the
+            // pre-expiry earned ROI as held-carry (drained into pending just below) and forfeits the
+            // no-stake gap. After this, recipientSince is at the resume time so _calcAccruedRaw is
+            // clean live accrual — identical to the old eager-resume result, just deferred.
+            _absorbResume(stream, investor, lockIndex, level);
             // Settle carried-over held first (over-cap preserved from a prior natural-expiry restake).
             settled = _settleHeldCarry(stream, capRemaining);
             capRemaining -= settled;
@@ -131,6 +136,8 @@ contract LiquidityROIFacet is LiquidityStorage {
         uint256 endBound
     ) internal returns (uint256 settled) {
         if (stream.recipient != address(0)) {
+            // Reconcile any pending natural-expiry resume first (see _settleStream for rationale).
+            _absorbResume(stream, investor, lockIndex, level);
             // Settle carried-over held first (over-cap preserved from a prior natural-expiry restake).
             settled = _settleHeldCarry(stream, capRemaining);
             capRemaining -= settled;
@@ -173,6 +180,16 @@ contract LiquidityROIFacet is LiquidityStorage {
         // Recompute this lock's skip-log from scratch for the new period (bounded: it only ever
         // holds the current period's overflow levels).
         delete _skippedROIStreams[investor][lockIndex];
+
+        // Skip recipient assignment entirely for locks that earn no staking reward (package < $100,
+        // so rewardRatePPM == 0). ROI accrual is rewardRatePPM-proportional (_calcAccrued), so these
+        // streams can never pay out — assigning them would only park dead, zero-yield entries in each
+        // upline's _activeROIStreams, consuming MAX_ACTIVE_ROI_STREAMS slots and settlement-loop gas
+        // for nothing. The streams stay inert (recipient = address(0)); _calcAccrued returns 0 anyway,
+        // and a later restake into a >=$100 amount is impossible (ethInvested never changes), so this
+        // never withholds a stream that could have earned. Everything else (LP lock, staking, referral
+        // cash commissions, cap) proceeds normally.
+        if (userLPLocks[investor][lockIndex].rewardRatePPM == 0) return;
 
         // Walk exactly 10 levels up the referral chain; assign whoever is there.
         address cur = users[investor].referrer;

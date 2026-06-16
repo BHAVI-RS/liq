@@ -62,13 +62,20 @@ abstract contract LiquidityStorage {
     // pushed here. A recipient's lifetime earnings are already 5×-capped, so this only limits how
     // many downline locks accrue *concurrently*; restaking re-runs assignment, so a skipped level
     // can become live later once active slots free up.
-    // Sizing (Method 2): commission distribution now charges COMMITTED cap (O(locks)) and never
-    // iterates ancestors' stream arrays, so investing under a popular upline is O(locks) regardless
-    // of how many streams they hold. The cap now only bounds a recipient's OWN paths — the
-    // natural-expiry resume loop and a single-tx claimAllROI (~M × ~6k gas). M=2000 keeps those
-    // ~12M gas (safe under Polygon's 30M block limit) while being effectively unlimited for any real
-    // account (and claims beyond one tx can always be chunked via settleROIStreams/claimPendingROI).
-    uint256 internal constant MAX_ACTIVE_ROI_STREAMS = 2000;
+    // Sizing: with Method 2 (commission distribution charges COMMITTED cap, O(locks)) and the lazy
+    // natural-expiry resume (invest/restake record an O(1) checkpoint instead of looping streams —
+    // see _handleNaturalExpiryResume / _absorbResume), none of the COMMON paths scale with a
+    // recipient's stream count: invest/restake is O(locks), a single resume is O(1), and claimAllROI
+    // is O(M) but fully chunkable (settleROIStreams + claimPendingROI). The ONLY residual O(M) is the
+    // rare _drainPendingResume — it fires solely when a recipient resumes a SECOND time before any
+    // claim/settle/downline-activity has absorbed the first checkpoint, costing ~69k gas/stream
+    // (measured in test/resume-characterization.test.js). At M=5000 a full drain exceeds one block,
+    // but that corner is escapable with ZERO fund risk: settle (chunked) to absorb the streams, then
+    // re-invest is O(1) again. 5000 is high enough that a realistic upline never has its high-value
+    // streams blocked, while single-tx claims/views stay manageable (chunk for the largest accounts).
+    // For an absolutely revert-proof bound (no settle-first ever needed) keep M <= ~400; raising it
+    // higher than 5000 safely would require bounding the drain itself.
+    uint256 internal constant MAX_ACTIVE_ROI_STREAMS = 5000;
 
     // Helper shared by Liquidity.sol and facets
     function _qualifies(address _user) internal view returns (bool) {
@@ -124,7 +131,7 @@ abstract contract LiquidityStorage {
             ? stream.recipientSince
             : lock.lockedAt;
         if (endTs <= startTs) return 0;
-        uint256 elapsed = endTs - startTs;
+        uint256 elapsed = _resumeAdjustedElapsed(stream.recipient, stream.recipientSince, startTs, endTs);
         uint256 rate    = roiCommissionRates[level];
         accrued = lock.ethInvested * lock.rewardRatePPM * elapsed * rate / (_ROI_DENOM * lockDur);
     }
@@ -177,6 +184,90 @@ abstract contract LiquidityStorage {
     // Appended at the end of storage so existing slots are unchanged (both default to 0).
     mapping(address => uint256) internal _roiRetainedCap;
     mapping(address => uint64)  internal _roiRetainedAt;
+
+    // ── Lazy natural-expiry resume (O(1) invest/restake) ───────────────────────
+    // _handleNaturalExpiryResume used to loop ALL of a recipient's active ROI streams inside
+    // invest()/restakeLP() (~70k gas/stream → block-limit DoS for big uplines). Instead we now
+    // record an O(1) per-user checkpoint of the most recent natural-expiry resume and reconcile
+    // each stream LAZILY the next time it is individually touched (settle/claim/end) via
+    // _absorbResume. Until a stream is absorbed, the accrual helpers exclude the forfeited
+    // no-stake gap (boundary, resumeAt) so views/cap match the eventual post-absorption result.
+    //   _roiResumeBoundary = E: the recipient's last natural-expiry timestamp (0 = no pending resume)
+    //   _roiResumeAt       = T: the re-entry (re-invest/restake) timestamp; gap (E,T) is forfeited
+    //   _roiUnabsorbed     = streams that have not yet absorbed the current checkpoint
+    // A new resume drains any still-unabsorbed prior checkpoint first (rare) so each stream ever
+    // carries AT MOST ONE forfeited gap — preventing multi-gap over-credit. Appended at the end
+    // of storage so existing slots are unchanged (all default to 0).
+    mapping(address => uint256) internal _roiResumeBoundary;
+    mapping(address => uint256) internal _roiResumeAt;
+    mapping(address => uint256) internal _roiUnabsorbed;
+
+    // Adjusts an accrual window [startTs, endTs] by subtracting the forfeited natural-expiry gap
+    // (boundary, resumeAt) when the stream's recipient has a pending resume the stream has not yet
+    // absorbed (recipientSince < resumeAt). Caller guarantees endTs > startTs. Returns the eligible
+    // elapsed seconds (= full span minus the overlap with the forfeited gap).
+    function _resumeAdjustedElapsed(
+        address recipient, uint256 recipientSince, uint256 startTs, uint256 endTs
+    ) private view returns (uint256 elapsed) {
+        elapsed = endTs - startTs;
+        uint256 T = _roiResumeAt[recipient];
+        if (T == 0 || recipientSince >= T) return elapsed;   // no pending resume, or already absorbed
+        uint256 E  = _roiResumeBoundary[recipient];
+        uint256 lo = startTs > E ? startTs : E;              // max(startTs, E)
+        uint256 hi = endTs   < T ? endTs   : T;              // min(endTs, T)
+        if (hi > lo) elapsed -= (hi - lo);                   // subtract overlap with the forfeited gap
+    }
+
+    // Lazily reconciles ONE stream against its recipient's pending resume the first time it is
+    // touched after the resume: banks the pre-expiry earned ROI as held-carry (the surrounding
+    // settle then converts it to pending up to cap — matching the old eager behaviour), forfeits
+    // the no-stake gap (E,T) into historicalMissedETH, and advances recipientSince to the resume
+    // time so future accrual is clean. Idempotent (recipientSince >= T ⇒ no-op).
+    function _absorbResume(ROIStream storage stream, address investor, uint256 lockIndex, uint8 level) internal {
+        address recip = stream.recipient;
+        if (recip == address(0)) return;
+        uint256 T = _roiResumeAt[recip];
+        if (T == 0 || stream.recipientSince >= T) return;
+        uint256 E = _roiResumeBoundary[recip];
+
+        LPLock storage lock = userLPLocks[investor][lockIndex];
+        uint256 lockDur = lock.unlockTime > lock.lockedAt ? lock.unlockTime - lock.lockedAt : _ROI_LOCK_DURATION;
+        uint256 startTs = stream.recipientSince > lock.lockedAt ? stream.recipientSince : lock.lockedAt;
+        uint256 lockEnd = lock.unlockTime;
+        uint256 rate    = roiCommissionRates[level];
+
+        // Pre-expiry earned ROI = accrual over [startTs, min(E, lockEnd)] → held (settled to pending
+        // up to cap by the _settleHeldCarry that runs right after this in the settle flow).
+        uint256 preEnd = E < lockEnd ? E : lockEnd;
+        if (preEnd > startTs) {
+            uint256 pe = lock.ethInvested * lock.rewardRatePPM * (preEnd - startTs) * rate / (_ROI_DENOM * lockDur);
+            if (pe > 0) stream.heldCarryETH += uint128(pe);
+        }
+        // Forfeited no-stake gap = accrual over [max(E, startTs), min(T, lockEnd)] → missed.
+        uint256 gLo = startTs > E ? startTs : E;
+        uint256 gHi = T < lockEnd ? T : lockEnd;
+        if (gHi > gLo) {
+            uint256 gp = lock.ethInvested * lock.rewardRatePPM * (gHi - gLo) * rate / (_ROI_DENOM * lockDur);
+            if (gp > 0) stream.historicalMissedETH += uint128(gp);
+        }
+
+        stream.recipientSince = uint64(T);
+        if (_roiUnabsorbed[recip] > 0) _roiUnabsorbed[recip]--;
+    }
+
+    // Eagerly absorbs every still-unabsorbed active stream of a recipient against the CURRENT
+    // checkpoint. Only invoked by _handleNaturalExpiryResume when a prior resume hasn't fully
+    // drained before a new one arrives (rare) — bounds each stream to a single forfeited gap.
+    function _drainPendingResume(address _user) internal {
+        StreamRef[] storage sRefs = _activeROIStreams[_user];
+        uint256 sLen = sRefs.length;
+        for (uint256 k = 0; k < sLen; ) {
+            StreamRef storage s = sRefs[k];
+            ROIStream storage st = _roiStreams[s.investor][s.lockIndex][s.level];
+            if (!st.ended) _absorbResume(st, s.investor, s.lockIndex, s.level);
+            unchecked { k++; }
+        }
+    }
 
     // ── Unified cap helpers (shared by LiquidityFacet and Liquidity.sol) ────────
     // Single overall cap per LP lock = ethInvested × 5.
@@ -267,7 +358,7 @@ abstract contract LiquidityStorage {
             ? stream.recipientSince
             : lock.lockedAt;
         if (endTs <= startTs) return 0;
-        uint256 elapsed = endTs - startTs;
+        uint256 elapsed = _resumeAdjustedElapsed(stream.recipient, stream.recipientSince, startTs, endTs);
         uint256 rate    = roiCommissionRates[level];
         accrued = lock.ethInvested * lock.rewardRatePPM * elapsed * rate / (_ROI_DENOM * lockDur);
     }
@@ -292,7 +383,7 @@ abstract contract LiquidityStorage {
             ? stream.recipientSince
             : lock.lockedAt;
         if (endTs <= startTs) return 0;
-        uint256 elapsed = endTs - startTs;
+        uint256 elapsed = _resumeAdjustedElapsed(stream.recipient, stream.recipientSince, startTs, endTs);
         uint256 rate    = roiCommissionRates[level];
         accrued = lock.ethInvested * lock.rewardRatePPM * elapsed * rate / (_ROI_DENOM * lockDur);
     }
@@ -392,62 +483,26 @@ abstract contract LiquidityStorage {
         }
     }
 
-    // Called when an investor re-enters (invest/restake) after _getRawAvailableCap was 0
-    // without _capPausedAt being explicitly set.  Two sub-cases:
-    //   lastExpiry > 0 — locks existed and expired naturally.  Settle pre-expiry ROI, then
-    //                    record gap (lastExpiry → now) as missed.
-    //   lastExpiry = 0 — user had no locks at all (first investment as referrer, etc.).
-    //                    No pre-expiry settlement; the entire accrual window is the gap.
-    // In both cases recipientSince is reset so future accrual starts clean from now.
+    // Called when an investor re-enters (invest/restake) after _getRawAvailableCap was 0 without
+    // _capPausedAt being explicitly set. lastExpiry > 0 means a lock expired naturally: the ROI
+    // earned up to lastExpiry stays claimable while the no-stake gap (lastExpiry → now) is forfeited
+    // (rule 2 — skin-in-the-game). lastExpiry == 0 (cap-exhausted-while-staked, or no prior lock)
+    // forfeits nothing — over-cap ROI is HELD and settles lazily once cap regains.
+    //
+    // O(1): instead of looping every active stream here (the old version cost ~70k gas/stream and
+    // could exceed the block gas limit for big uplines), record a per-user resume checkpoint. Each
+    // stream reconciles itself lazily on its next settle/claim/end via _absorbResume, and the
+    // accrual helpers exclude the forfeited gap (boundary, resumeAt) until then — so views, cap, and
+    // claims see the same result the old eager loop produced (pre-expiry preserved, gap forfeited,
+    // no double-pay), only deferred. A still-unabsorbed prior checkpoint is drained first (rare) so
+    // no stream ever carries two gaps.
     function _handleNaturalExpiryResume(address _user, uint256 lastExpiry) internal {
-        // Cap-exhausted-while-staked (lastExpiry == 0): ROI is HELD, not forfeited — there is no
-        // no-stake gap to exclude, so nothing to do. The over-cap remainder stays claimable and is
-        // settled lazily at claim time once the recipient's cap regains headroom. Only a genuine
-        // natural expiry (lastExpiry > 0, a lock actually past its unlock time) settles pre-expiry
-        // ROI and forfeits the post-expiry no-stake gap (rule 2 — skin-in-the-game).
         if (lastExpiry == 0) return;
-        // Only pre-expiry settlement needs a cap; gap recording never does.
-        uint256 capRem = 0;
-        if (lastExpiry > 0) {
-            uint256 rawCap      = _getRawAvailableCapInclExpired(_user);
-            uint256 alreadyPend = _roiPendingETH[_user];
-            capRem = rawCap > alreadyPend ? rawCap - alreadyPend : 0;
+        if (_roiResumeAt[_user] != 0 && _roiUnabsorbed[_user] > 0) {
+            _drainPendingResume(_user);
         }
-
-        StreamRef[] storage sRefs = _activeROIStreams[_user];
-        uint256 sLen = sRefs.length;
-        for (uint256 k = 0; k < sLen; ) {
-            StreamRef storage sRef = sRefs[k];
-            ROIStream storage s = _roiStreams[sRef.investor][sRef.lockIndex][sRef.level];
-            if (!s.ended) {
-                uint256 preExpiry = 0;
-                if (lastExpiry > 0) {
-                    // Pre-expiry: settle ROI accrued from recipientSince up to lastExpiry.
-                    preExpiry = _calcAccruedRawAt(s, sRef.investor, sRef.lockIndex, sRef.level, lastExpiry);
-                    if (preExpiry > 0) {
-                        uint256 toSettle = preExpiry < capRem ? preExpiry : capRem;
-                        if (toSettle > 0) {
-                            s.roiPaidETH          += uint128(toSettle);
-                            _roiPendingETH[_user] += toSettle;
-                            capRem -= toSettle;
-                        }
-                        // Pre-expiry held that exceeds the fresh cap was EARNED while staked — it is
-                        // HELD, not forfeited. Preserve it as carry so it settles once cap regains
-                        // (e.g. the recipient invests more). Only the post-expiry gap below is missed.
-                        if (preExpiry > toSettle) s.heldCarryETH += uint128(preExpiry - toSettle);
-                    }
-                }
-                // Gap: ROI from lastExpiry (or stream start when lastExpiry=0) to now.
-                uint256 fullRaw = _calcAccruedRaw(s, sRef.investor, sRef.lockIndex, sRef.level);
-                uint256 gapROI  = fullRaw > preExpiry ? fullRaw - preExpiry : 0;
-                if (gapROI > 0) {
-                    // ROI gap is tracked per-stream in historicalMissedETH only.
-                    // totalMissedCommissions / _missedRecords track referral commission misses only.
-                    s.historicalMissedETH += uint128(gapROI);
-                }
-                s.recipientSince = uint64(block.timestamp);
-            }
-            unchecked { k++; }
-        }
+        _roiResumeBoundary[_user] = lastExpiry;
+        _roiResumeAt[_user]       = block.timestamp;
+        _roiUnabsorbed[_user]     = _activeROIStreams[_user].length;
     }
 }
