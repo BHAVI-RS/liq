@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./LiquidityStorage.sol";
-import "./LiquidityMath.sol";
-import "./LiquidityViewLib.sol";
+import "./HordexStorage.sol";
+import "./HordexMath.sol";
+import "./HordexViewLib.sol";
 
 interface IERC20V {
     function balanceOf(address account) external view returns (uint256);
 }
 
-// Read-only DELEGATECALL facet. Liquidity.sol forwards every unknown selector here through
-// its fallback(), so these functions execute in Liquidity.sol's storage context via eth_call.
+// Read-only DELEGATECALL facet. Hordex.sol forwards every unknown selector here through
+// its fallback(), so these functions execute in Hordex.sol's storage context via eth_call.
 //
 // Two jobs:
-//   1. Hold all the heavy ABI-encoding view getters that used to live in Liquidity.sol —
-//      moving them here keeps the core Liquidity contract under the 24 KB mainnet limit.
+//   1. Hold all the heavy ABI-encoding view getters that used to live in Hordex.sol —
+//      moving them here keeps the core Hordex contract under the 24 KB mainnet limit.
 //   2. Provide batch/aggregation views (getDownline, *Batch) that traverse the referral tree
 //      and read many users' state in a SINGLE on-chain pass, so the frontend replaces its
 //      per-user RPC loops (one call per member) with one round trip.
 //
 // Immutables are baked into this facet's own bytecode at deploy time (same addresses passed
-// to LiquidityFacet) and are read correctly under delegatecall.
-contract LiquidityViewFacet is LiquidityStorage {
+// to HordexFacet) and are read correctly under delegatecall.
+contract HordexViewFacet is HordexStorage {
 
     address private immutable UNISWAP_FACTORY;
     address private immutable WETH;
@@ -29,7 +29,7 @@ contract LiquidityViewFacet is LiquidityStorage {
 
     uint256 private constant LP_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
     uint256 private constant USDT_PER_ETH     = 1;
-    uint256 private constant SWAP_SLIPPAGE_BPS = 200; // hybrid buy pool leg cap — mirrors Liquidity.swapBuy
+    uint256 private constant SWAP_SLIPPAGE_BPS = 200; // hybrid buy pool leg cap — mirrors Hordex.swapBuy
 
     constructor(address _factory, address _weth, address _platform) {
         UNISWAP_FACTORY = _factory;
@@ -37,7 +37,7 @@ contract LiquidityViewFacet is LiquidityStorage {
         platformToken   = _platform;
     }
 
-    // ── Simple getters (moved verbatim from Liquidity.sol) ─────────────────────
+    // ── Simple getters (moved verbatim from Hordex.sol) ─────────────────────
     function getActiveDirectReferralCount(address _user) external view returns (uint256) {
         return activeReferralCount[_user];
     }
@@ -85,19 +85,19 @@ contract LiquidityViewFacet is LiquidityStorage {
         uint256 invBal = IERC20V(_token).balanceOf(address(this));
         uint256 poolTokensOut;
         (poolUsdt, poolTokensOut, invTokensOut, usdtSpent) =
-            LiquidityMath.calcHybridBuy(resTok, resETH, _usdtIn, invBal, SWAP_SLIPPAGE_BPS);
+            HordexMath.calcHybridBuy(resTok, resETH, _usdtIn, invBal, SWAP_SLIPPAGE_BPS);
         tokensOut = poolTokensOut + invTokensOut;
     }
     function getStakingReward(address _user) external view returns (
         uint256 totalAccumulated, uint256 previewNewTokens, uint256 lifetimeClaimed
     ) {
-        uint256 price = LiquidityMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH);
-        return LiquidityViewLib.computeStakingReward(userLPLocks[_user], price);
+        uint256 price = HordexMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH);
+        return HordexViewLib.computeStakingReward(userLPLocks[_user], price);
     }
     function getUserCommissionStats(address _user) external view returns (
         uint256 earned, uint256, uint256 totalCap, uint256 remainingCap, uint256 active
     ) {
-        return LiquidityViewLib.computeCommissionStats(
+        return HordexViewLib.computeCommissionStats(
             userLPLocks[_user], userCommissionsEarned[_user], userTotalInvested[_user], block.timestamp
         );
     }
@@ -110,7 +110,7 @@ contract LiquidityViewFacet is LiquidityStorage {
             result[i].addr           = ref;
             result[i].totalInvested  = userTotalInvested[ref];
             result[i].directRefCount = users[ref].referrals.length;
-            (,, uint256 tc, uint256 rc,) = LiquidityViewLib.computeCommissionStats(
+            (,, uint256 tc, uint256 rc,) = HordexViewLib.computeCommissionStats(
                 userLPLocks[ref], userCommissionsEarned[ref], userTotalInvested[ref], block.timestamp
             );
             result[i].remainingCap = rc;
@@ -119,9 +119,9 @@ contract LiquidityViewFacet is LiquidityStorage {
         }
     }
     function getWealthParams(address _user) public view returns (WealthParams memory) {
-        return LiquidityViewLib.computeWealthParams(
+        return HordexViewLib.computeWealthParams(
             userLPLocks[_user], userCommissionsEarned[_user],
-            LiquidityMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH),
+            HordexMath.tokenPriceInETH(UNISWAP_FACTORY, platformToken, WETH),
             LP_LOCK_DURATION, UNISWAP_FACTORY, WETH
         );
     }
@@ -130,7 +130,7 @@ contract LiquidityViewFacet is LiquidityStorage {
     ) {
         uint256 investUSDT = ethInvestedWei * USDT_PER_ETH / 1e18;
         bool hasReward = investUSDT >= 100;
-        uint256 tierIdx = hasReward ? LiquidityMath.getTierIndex(investmentTiers, ethInvestedWei) : 0;
+        uint256 tierIdx = hasReward ? HordexMath.getTierIndex(investmentTiers, ethInvestedWei) : 0;
         for (uint256 i = 0; i < 6; ) {
             durSecs[i]  = stakingDurations[i];
             ratesPPM[i] = hasReward ? stakingRates[i][tierIdx][0] : 0;
@@ -245,6 +245,29 @@ contract LiquidityViewFacet is LiquidityStorage {
     {
         ROIStream storage stream = _roiStreams[investor][lockIndex][level];
         return _calcAccrued(stream, investor, lockIndex, level);
+    }
+
+    // ── Level-eligibility views (self-stake + team-business gates) ──────────────
+    // The per-level USDT thresholds. selfGates[i]/bizGates[i] gate paid level N = i+1.
+    function getEligibilityGates()
+        external view returns (uint32[10] memory selfGates, uint32[10] memory bizGates)
+    {
+        return (selfStakeGate, businessGate);
+    }
+
+    // A user's live eligibility: active self-stake (USDT), cumulative team business (USDT, the value
+    // that actually gates — rolled up 10 levels, sticky), and how many levels (1..10) they currently
+    // unlock (gates are monotonic, so this is the highest contiguous level qualified for).
+    function getUserEligibility(address user)
+        external view returns (uint256 selfStakeUSDT, uint256 teamBusinessUSDT, uint8 unlockedLevels)
+    {
+        selfStakeUSDT    = _activeSelfStakeUSDT(user);
+        teamBusinessUSDT = _teamBusinessUSDT[user];
+        for (uint8 i = 0; i < 10; ) {
+            if (!_eligibleForLevel(user, i)) break;
+            unlockedLevels++;
+            unchecked { i++; }
+        }
     }
 
     // ── Batch / aggregation views ─────────────────────────────────────────────

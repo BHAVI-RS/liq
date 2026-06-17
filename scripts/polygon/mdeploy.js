@@ -1,4 +1,4 @@
-// Deploy the Hordex Liquidity contracts to Polygon mainnet, then write the deployed
+// Deploy the Hordex Hordex contracts to Polygon mainnet, then write the deployed
 // addresses into contract-config.js (root + frontend). Deploy-only — it does NOT seed
 // the pool, register the token, warm up TWAP, fund wallets, or invest. Those are
 // separate, owner-driven steps you run afterwards.
@@ -9,12 +9,12 @@
 //   • Uniswap V2      : official Polygon factory + router02 (see below)
 //
 // What it deploys:
-//   1. LiquidityMath          (library)
-//   2. LiquidityViewLib       (library, linked to LiquidityMath)
-//   3. LiquidityFacet         (linked to LiquidityMath)
-//   4. LiquidityROIFacet
-//   5. Liquidity              (main contract, linked to LiquidityMath)
-//   6. LiquidityViewFacet     (linked + wired via setViewFacet)
+//   1. HordexMath          (library)
+//   2. HordexViewLib       (library, linked to HordexMath)
+//   3. HordexFacet         (linked to HordexMath)
+//   4. HordexROIFacet
+//   5. Hordex              (main contract, linked to HordexMath)
+//   6. HordexViewFacet     (linked + wired via setViewFacet)
 //   …then rewrites contract-config.js (root + frontend) and bumps the HTML cache-bust.
 //
 // USAGE:
@@ -98,7 +98,7 @@ async function main() {
   const network  = hre.network.name;
 
   console.log(sep("═"));
-  console.log("  MDEPLOY — Polygon mainnet · deploy Liquidity contracts");
+  console.log("  MDEPLOY — Polygon mainnet · deploy Hordex contracts");
   console.log(sep("═"));
   console.log(`  Network  : ${network} (chainId 137)`);
   console.log(`  Deployer : ${deployer.address}`);
@@ -116,40 +116,40 @@ async function main() {
   // ── PHASE 1: Deploy contracts ──────────────────────────────────────────────
   console.log("\n" + sep()); console.log("  PHASE 1 — DEPLOY CONTRACTS"); console.log(sep());
 
-  const LiquidityMath = await hre.ethers.getContractFactory("LiquidityMath", deployer);
-  const liquidityMath = await LiquidityMath.deploy(DEPLOY_OVERRIDES);
+  const HordexMath = await hre.ethers.getContractFactory("HordexMath", deployer);
+  const liquidityMath = await HordexMath.deploy(DEPLOY_OVERRIDES);
   await liquidityMath.waitForDeployment();
   const libAddress = await liquidityMath.getAddress();
-  console.log(`  LiquidityMath     : ${libAddress}`);
+  console.log(`  HordexMath     : ${libAddress}`);
 
-  const LiquidityViewLib = await hre.ethers.getContractFactory("LiquidityViewLib", {
-    signer: deployer, libraries: { LiquidityMath: libAddress },
+  const HordexViewLib = await hre.ethers.getContractFactory("HordexViewLib", {
+    signer: deployer, libraries: { HordexMath: libAddress },
   });
-  const liquidityViewLib = await LiquidityViewLib.deploy(DEPLOY_OVERRIDES);
+  const liquidityViewLib = await HordexViewLib.deploy(DEPLOY_OVERRIDES);
   await liquidityViewLib.waitForDeployment();
   const libViewAddress = await liquidityViewLib.getAddress();
-  console.log(`  LiquidityViewLib  : ${libViewAddress}`);
+  console.log(`  HordexViewLib  : ${libViewAddress}`);
 
-  const LiquidityFacet = await hre.ethers.getContractFactory("LiquidityFacet", {
-    signer: deployer, libraries: { LiquidityMath: libAddress },
+  const HordexFacet = await hre.ethers.getContractFactory("HordexFacet", {
+    signer: deployer, libraries: { HordexMath: libAddress },
   });
-  const liquidityFacet = await LiquidityFacet.deploy(
+  const liquidityFacet = await HordexFacet.deploy(
     UNI_ROUTER, UNI_FACTORY, USDT, PLATFORM_TOKEN, DEPLOY_OVERRIDES
   );
   await liquidityFacet.waitForDeployment();
   const facetAddress = await liquidityFacet.getAddress();
-  console.log(`  LiquidityFacet    : ${facetAddress}`);
+  console.log(`  HordexFacet    : ${facetAddress}`);
 
-  const LiquidityROIFacet = await hre.ethers.getContractFactory("LiquidityROIFacet", deployer);
-  const liquidityROIFacet = await LiquidityROIFacet.deploy(DEPLOY_OVERRIDES);
+  const HordexROIFacet = await hre.ethers.getContractFactory("HordexROIFacet", deployer);
+  const liquidityROIFacet = await HordexROIFacet.deploy(DEPLOY_OVERRIDES);
   await liquidityROIFacet.waitForDeployment();
   const roiFacetAddress = await liquidityROIFacet.getAddress();
-  console.log(`  LiquidityROIFacet : ${roiFacetAddress}`);
+  console.log(`  HordexROIFacet : ${roiFacetAddress}`);
 
-  const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
-    signer: deployer, libraries: { LiquidityMath: libAddress },
+  const Hordex = await hre.ethers.getContractFactory("Hordex", {
+    signer: deployer, libraries: { HordexMath: libAddress },
   });
-  const liquidity = await Liquidity.deploy(
+  const liquidity = await Hordex.deploy(
     UNI_ROUTER, UNI_FACTORY, USDT, PLATFORM_TOKEN,
     facetAddress, roiFacetAddress, DEPLOY_OVERRIDES
   );
@@ -157,9 +157,9 @@ async function main() {
   const liquidityAddress = await liquidity.getAddress();
   const deployReceipt    = await liquidity.deploymentTransaction().wait();
   const deployBlock      = deployReceipt.blockNumber;
-  console.log(`  Liquidity         : ${liquidityAddress}  (block ${deployBlock})`);
+  console.log(`  Hordex         : ${liquidityAddress}  (block ${deployBlock})`);
 
-  const artifact = hre.artifacts.readArtifactSync("Liquidity");
+  const artifact = hre.artifacts.readArtifactSync("Hordex");
   const liq      = new hre.ethers.Contract(liquidityAddress, artifact.abi, deployer);
 
   // View facet (moved getters + batch views; reached via fallback)
@@ -167,7 +167,7 @@ async function main() {
     deployer, liquidity: liq, factory: UNI_FACTORY, weth: USDT, token: PLATFORM_TOKEN,
     mathAddr: libAddress, viewLibAddr: libViewAddress, overrides: DEPLOY_OVERRIDES, mine,
   });
-  console.log(`  LiquidityViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
+  console.log(`  HordexViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
   const mergedAbi = mergedLiquidityAbi(hre);
 
   // ── PHASE 2: Write contract-config.js ──────────────────────────────────────
@@ -214,10 +214,10 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   console.log("\n" + sep("═"));
   console.log("  DONE — contracts deployed & config updated");
   console.log(sep("═"));
-  console.log(`  Liquidity         : ${liquidityAddress}`);
-  console.log(`  LiquidityFacet    : ${facetAddress}`);
-  console.log(`  LiquidityROIFacet : ${roiFacetAddress}`);
-  console.log(`  LiquidityViewFacet: ${viewFacetAddress}`);
+  console.log(`  Hordex         : ${liquidityAddress}`);
+  console.log(`  HordexFacet    : ${facetAddress}`);
+  console.log(`  HordexROIFacet : ${roiFacetAddress}`);
+  console.log(`  HordexViewFacet: ${viewFacetAddress}`);
   console.log(`  Deploy block      : ${deployBlock}`);
   console.log("\n  NOTE: deploy-only. Next (owner) steps, when ready: fund the contract with");
   console.log("        platform tokens, addToken(), seedPool(), then warm up TWAP (2× updateTWAP).");

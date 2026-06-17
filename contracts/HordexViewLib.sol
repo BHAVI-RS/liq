@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./LiquidityTypes.sol";
-import "./LiquidityMath.sol";
+import "./HordexTypes.sol";
+import "./HordexMath.sol";
 
 interface IUniV2PairView {
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
@@ -14,10 +14,10 @@ interface IUniV2FactoryView {
     function getPair(address tokenA, address tokenB) external view returns (address pair);
 }
 
-library LiquidityViewLib {
+library HordexViewLib {
 
     // Computes per-user staking reward summary from a memory snapshot of their locks.
-    // Called by Liquidity.getStakingReward after copying storage → memory.
+    // Called by Hordex.getStakingReward after copying storage → memory.
     function computeStakingReward(
         LPLock[] memory locks,
         uint256 price
@@ -31,7 +31,7 @@ library LiquidityViewLib {
             totalAccumulated += locks[i].tokensAccumulated;
             lifetimeClaimed  += locks[i].totalTokensClaimed;
             if (price > 0) {
-                uint256 pendingETH = LiquidityMath.calcPendingRewardETH(
+                uint256 pendingETH = HordexMath.calcPendingRewardETH(
                     locks[i].rewardRatePPM, locks[i].ethInvested, locks[i].lockedAt,
                     locks[i].unlockTime, locks[i].rewardClaimedETH
                 );
@@ -77,7 +77,7 @@ library LiquidityViewLib {
     }
 
     // Assembles the WealthParams struct from a memory snapshot of locks + on-chain price/pool data.
-    // Called by Liquidity.getWealthParams after copying storage → memory.
+    // Called by Hordex.getWealthParams after copying storage → memory.
     function computeWealthParams(
         LPLock[] memory locks,
         uint256 refEarnings,

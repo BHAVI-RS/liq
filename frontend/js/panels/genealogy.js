@@ -262,13 +262,23 @@ async function loadGenealogy() {
   listEl.innerHTML = '<div class="empty-state">Loading genealogy<span class="ld"><span></span><span></span><span></span></span></div>';
   treeEl.innerHTML = '';
   try {
-    const [treeData, activeCountRaw, minInvRaw] = await Promise.all([
+    const [treeData, eligRaw, gatesRaw, minInvRaw] = await Promise.all([
       fetchGeneTree(walletAddress, 1),
-      contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
+      contract.getUserEligibility(walletAddress).catch(() => null),
+      contract.getEligibilityGates().catch(() => null),
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0))
     ]);
     _geneTree = treeData;
-    const activeCount = Number(activeCountRaw);
+    // New eligibility model: to earn level N you need active self-stake >= selfGate[N-1] AND
+    // cumulative team business >= bizGate[N-1] (both USDT). Self-stake is ACTIVE (drops when locks
+    // expire); team business is sticky/lifetime. unlockedLevels = highest contiguous level qualified.
+    const selfStakeUSDT  = eligRaw ? Number(eligRaw.selfStakeUSDT    ?? eligRaw[0]) : 0;
+    const teamBizUSDT    = eligRaw ? Number(eligRaw.teamBusinessUSDT ?? eligRaw[1]) : 0;
+    const unlockedLevels = eligRaw ? Number(eligRaw.unlockedLevels   ?? eligRaw[2]) : 0;
+    const selfGates = gatesRaw ? Array.from(gatesRaw.selfGates ?? gatesRaw[0]).map(Number) : [];
+    const bizGates  = gatesRaw ? Array.from(gatesRaw.bizGates  ?? gatesRaw[1]).map(Number) : [];
+    const _gateReq = (lvl) => ({ self: selfGates[lvl - 1] ?? 0, biz: bizGates[lvl - 1] ?? 0 });
+    const _isElig  = (lvl) => { const g = _gateReq(lvl); return selfStakeUSDT >= g.self && teamBizUSDT >= g.biz; };
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
 
     // Investment amounts now arrive with the downline (node._inv) — no per-node RPC calls.
@@ -303,15 +313,52 @@ async function loadGenealogy() {
 
     const totalReferrals = levels.reduce((s, l) => s + l.length, 0);
 
-    // ── Eligibility (used for per-level eligible styling below) ────────────
-    const maxEligibleLevel = Math.min(activeCount, 10);
-
     // ── List view ───────────────────────────────────────────────────────────
-    if (totalReferrals === 0) {
-      listEl.innerHTML = '<div class="empty-state">No referrals yet. Share your referral link to grow your network.</div>';
-    } else {
-      listEl.innerHTML = '';
+    listEl.innerHTML = '';
 
+    // Eligibility summary card (always shown) — your self-stake, team business, levels unlocked,
+    // and what's still needed to unlock the next level.
+    {
+      let nextHtml;
+      if (unlockedLevels >= 10) {
+        nextHtml = '<span style="color:#4ade80;">All 10 levels unlocked ✓</span>';
+      } else {
+        const g = _gateReq(unlockedLevels + 1);
+        const sNeed = Math.max(0, g.self - selfStakeUSDT);
+        const bNeed = Math.max(0, g.biz - teamBizUSDT);
+        const bits = [];
+        if (sNeed > 0) bits.push(`+$${fmtNum(sNeed)} self-stake`);
+        if (bNeed > 0) bits.push(`+$${fmtNum(bNeed)} team business`);
+        nextHtml = `To unlock <strong style="color:var(--gold);">Level ${unlockedLevels + 1}</strong>: ${bits.length ? bits.join(' &nbsp;+&nbsp; ') : 'requirements met — invest to apply'}`;
+      }
+      const summary = document.createElement('div');
+      summary.className = 'gene-level-block';
+      summary.style.cssText = 'padding:14px 16px;margin-bottom:10px;';
+      summary.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">COMMISSION &amp; ROI LEVELS UNLOCKED</div>
+            <div style="font-family:var(--font-display);font-size:20px;color:var(--gold);">${unlockedLevels} <span style="font-size:12px;color:var(--muted);">/ 10</span></div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">ACTIVE SELF-STAKE</div>
+            <div style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">$${fmtNum(selfStakeUSDT)}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">TEAM BUSINESS</div>
+            <div style="font-family:var(--font-mono);font-size:13px;color:#4ade80;">$${fmtNum(teamBizUSDT)}</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);font-family:var(--font-mono);">${nextHtml}</div>`;
+      listEl.appendChild(summary);
+    }
+
+    if (totalReferrals === 0) {
+      const _empty = document.createElement('div');
+      _empty.className = 'empty-state';
+      _empty.textContent = 'No referrals yet. Share your referral link to grow your network.';
+      listEl.appendChild(_empty);
+    } else {
       levels.forEach((addrs, idx) => {
         if (!addrs || addrs.length === 0) return;
         const level    = idx + 1;
@@ -319,11 +366,20 @@ async function loadGenealogy() {
         const blockId  = `glvl${level}`;
         const rate     = COMMISSION_RATES[idx] !== undefined ? fmtNum(COMMISSION_RATES[idx], 2) + '%' : '—';
         const levelTotal = addrs.reduce((s, a) => s + (_geneInvestedMap.get(a) || 0), 0);
-        const eligible = activeCount >= level;
+        const eligible = _isElig(level);
         const eligStyle = eligible
           ? 'color:#4ade80;font-size:10px;font-family:var(--font-mono);margin-left:8px;'
           : 'color:#f87171;font-size:10px;font-family:var(--font-mono);margin-left:8px;';
-        const eligLabel = eligible ? '✓ ELIGIBLE' : `✗ NEED ${level} ACTIVE REFERRAL${level !== 1 ? 'S' : ''}`;
+        let eligLabel;
+        if (eligible) {
+          eligLabel = '✓ ELIGIBLE';
+        } else {
+          const g = _gateReq(level);
+          const parts = [];
+          if (selfStakeUSDT < g.self) parts.push(`$${fmtNum(g.self)} self`);
+          if (teamBizUSDT   < g.biz)  parts.push(`$${fmtNum(g.biz)} biz`);
+          eligLabel = '✗ NEED ' + parts.join(' + ');
+        }
 
         const memberRows = addrs.map(a => {
           const inv      = _geneInvestedMap.get(a) || 0;

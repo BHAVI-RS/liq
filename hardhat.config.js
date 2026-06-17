@@ -1,4 +1,5 @@
 require("@nomicfoundation/hardhat-ethers");
+require("@nomicfoundation/hardhat-verify");
 require("dotenv").config();
 
 const MAINNET_RPC = process.env.MAINNET_RPC_URL
@@ -72,5 +73,12 @@ module.exports = {
       accounts: normalizeKey(process.env.PRIVATE_KEY),
     },
   },
+  // Source-code verification on block explorers (Amoy / Polygon PolygonScan).
+  // PolygonScan runs on the Etherscan V2 unified API, so a single key from
+  // etherscan.io/myapikey covers both Amoy (80002) and Polygon mainnet (137).
+  etherscan: {
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
+  },
+  sourcify: { enabled: false },
   defaultNetwork: "hardhat",
 };

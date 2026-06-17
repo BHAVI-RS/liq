@@ -26,10 +26,10 @@ async function deploy() {
   const signers = await ethers.getSigners();
   const [owner, u1] = signers;
 
-  const Math = await (await ethers.getContractFactory("LiquidityMath")).deploy();
+  const Math = await (await ethers.getContractFactory("HordexMath")).deploy();
   await Math.waitForDeployment();
   const mathAddr = await Math.getAddress();
-  const ViewLib = await (await ethers.getContractFactory("LiquidityViewLib", { libraries: { LiquidityMath: mathAddr } })).deploy();
+  const ViewLib = await (await ethers.getContractFactory("HordexViewLib", { libraries: { HordexMath: mathAddr } })).deploy();
   await ViewLib.waitForDeployment();
   const viewLibAddr = await ViewLib.getAddress();
 
@@ -47,17 +47,17 @@ async function deploy() {
   await hordex.waitForDeployment();
   const hordexAddr = await hordex.getAddress();
 
-  const facet = await (await ethers.getContractFactory("LiquidityFacet", { libraries: { LiquidityMath: mathAddr } }))
+  const facet = await (await ethers.getContractFactory("HordexFacet", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr);
   await facet.waitForDeployment();
-  const roiFacet = await (await ethers.getContractFactory("LiquidityROIFacet")).deploy();
+  const roiFacet = await (await ethers.getContractFactory("HordexROIFacet")).deploy();
   await roiFacet.waitForDeployment();
-  const core = await (await ethers.getContractFactory("Liquidity", { libraries: { LiquidityMath: mathAddr } }))
+  const core = await (await ethers.getContractFactory("Hordex", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr, await facet.getAddress(), await roiFacet.getAddress());
   await core.waitForDeployment();
   const coreAddr = await core.getAddress();
-  const viewFacet = await (await ethers.getContractFactory("LiquidityViewFacet", {
-    libraries: { LiquidityMath: mathAddr, LiquidityViewLib: viewLibAddr },
+  const viewFacet = await (await ethers.getContractFactory("HordexViewFacet", {
+    libraries: { HordexMath: mathAddr, HordexViewLib: viewLibAddr },
   })).deploy(factoryAddr, usdtAddr, hordexAddr);
   await viewFacet.waitForDeployment();
   await (await core.setViewFacet(await viewFacet.getAddress())).wait();

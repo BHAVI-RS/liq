@@ -272,41 +272,41 @@ async function main() {
   // ── PHASE 2: Contracts ───────────────────────────────────────────────────────
   console.log("\n" + sep()); console.log("  PHASE 2 — CONTRACTS"); console.log(sep());
 
-  const LiquidityMath = await hre.ethers.getContractFactory("LiquidityMath", deployer);
-  const liquidityMath = await LiquidityMath.deploy(DEPLOY_OVERRIDES);
+  const HordexMath = await hre.ethers.getContractFactory("HordexMath", deployer);
+  const liquidityMath = await HordexMath.deploy(DEPLOY_OVERRIDES);
   await liquidityMath.waitForDeployment();
   const libAddress = await liquidityMath.getAddress();
-  console.log(`  LiquidityMath    : ${libAddress}`);
+  console.log(`  HordexMath    : ${libAddress}`);
 
-  const LiquidityViewLib = await hre.ethers.getContractFactory("LiquidityViewLib", {
-    signer: deployer, libraries: { LiquidityMath: libAddress },
+  const HordexViewLib = await hre.ethers.getContractFactory("HordexViewLib", {
+    signer: deployer, libraries: { HordexMath: libAddress },
   });
-  const liquidityViewLib = await LiquidityViewLib.deploy(DEPLOY_OVERRIDES);
+  const liquidityViewLib = await HordexViewLib.deploy(DEPLOY_OVERRIDES);
   await liquidityViewLib.waitForDeployment();
   const libViewAddress = await liquidityViewLib.getAddress();
-  console.log(`  LiquidityViewLib : ${libViewAddress}`);
+  console.log(`  HordexViewLib : ${libViewAddress}`);
 
-  const LiquidityFacet = await hre.ethers.getContractFactory("LiquidityFacet", {
-    signer: deployer, libraries: { LiquidityMath: libAddress },
+  const HordexFacet = await hre.ethers.getContractFactory("HordexFacet", {
+    signer: deployer, libraries: { HordexMath: libAddress },
   });
-  const liquidityFacet = await LiquidityFacet.deploy(
+  const liquidityFacet = await HordexFacet.deploy(
     UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress, DEPLOY_OVERRIDES
   );
   await liquidityFacet.waitForDeployment();
   const facetAddress = await liquidityFacet.getAddress();
-  console.log(`  LiquidityFacet   : ${facetAddress}`);
+  console.log(`  HordexFacet   : ${facetAddress}`);
 
-  const LiquidityROIFacet = await hre.ethers.getContractFactory("LiquidityROIFacet", deployer);
-  const liquidityROIFacet = await LiquidityROIFacet.deploy(DEPLOY_OVERRIDES);
+  const HordexROIFacet = await hre.ethers.getContractFactory("HordexROIFacet", deployer);
+  const liquidityROIFacet = await HordexROIFacet.deploy(DEPLOY_OVERRIDES);
   await liquidityROIFacet.waitForDeployment();
   const roiFacetAddress = await liquidityROIFacet.getAddress();
-  console.log(`  LiquidityROIFacet: ${roiFacetAddress}`);
+  console.log(`  HordexROIFacet: ${roiFacetAddress}`);
 
-  const Liquidity = await hre.ethers.getContractFactory("Liquidity", {
+  const Hordex = await hre.ethers.getContractFactory("Hordex", {
     signer: deployer,
-    libraries: { LiquidityMath: libAddress },
+    libraries: { HordexMath: libAddress },
   });
-  const liquidity = await Liquidity.deploy(
+  const liquidity = await Hordex.deploy(
     UNI_ROUTER, UNI_FACTORY, DEPLOYED_USDT, tokenAddress,
     facetAddress, roiFacetAddress, DEPLOY_OVERRIDES
   );
@@ -314,9 +314,9 @@ async function main() {
   const liquidityAddress = await liquidity.getAddress();
   const deployReceipt = await liquidity.deploymentTransaction().wait();
   const deployBlock   = deployReceipt.blockNumber;
-  console.log(`  Liquidity        : ${liquidityAddress}  (block ${deployBlock})`);
+  console.log(`  Hordex        : ${liquidityAddress}  (block ${deployBlock})`);
 
-  const artifact = hre.artifacts.readArtifactSync("Liquidity");
+  const artifact = hre.artifacts.readArtifactSync("Hordex");
   const liq      = new hre.ethers.Contract(liquidityAddress, artifact.abi, deployer);
 
   // ── View facet (holds the moved getters + batch views; reached via fallback) ──
@@ -324,7 +324,7 @@ async function main() {
     deployer, liquidity, factory: UNI_FACTORY, weth: DEPLOYED_USDT, token: tokenAddress,
     mathAddr: libAddress, viewLibAddr: libViewAddress, overrides: DEPLOY_OVERRIDES, mine,
   });
-  console.log(`  LiquidityViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
+  console.log(`  HordexViewFacet: ${viewFacetAddress}  (wired via setViewFacet)`);
   const mergedAbi = mergedLiquidityAbi(hre);
 
   // ── Write contract-config.js immediately after deployment ────────────────────
@@ -371,11 +371,11 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   console.log("\n" + sep()); console.log("  PHASE 3 — TOKEN SETUP"); console.log(sep());
   const supply = await token.totalSupply();
   await (await token.transfer(liquidityAddress, supply, TX_OVERRIDES)).wait();
-  console.log(`  ${hre.ethers.formatEther(supply)} HORDEX → Liquidity ✓`);
+  console.log(`  ${hre.ethers.formatEther(supply)} HORDEX → Hordex ✓`);
   await (await liq.addToken(tokenAddress, "Hordex", "HDX", TX_OVERRIDES)).wait();
   console.log(`  Token registered ✓`);
   await (await usdtCt.transfer(liquidityAddress, SEED_USDT, TX_OVERRIDES)).wait();
-  console.log(`  ${hre.ethers.formatEther(SEED_USDT)} USDT → Liquidity ✓`);
+  console.log(`  ${hre.ethers.formatEther(SEED_USDT)} USDT → Hordex ✓`);
   await (await liq.seedPool(tokenAddress, SEED_TOKENS, SEED_USDT, TX_OVERRIDES)).wait();
   console.log(`  Pool seeded: ${hre.ethers.formatEther(SEED_USDT)} USDT + ${hre.ethers.formatEther(SEED_TOKENS)} HORDEX ✓`);
 
@@ -473,7 +473,7 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   console.log(`  Accounts invested  : ${globalOk.toLocaleString().padStart(8)} / ${totalAccts.toLocaleString()}`);
   console.log(`  Failed / skipped   : ${globalFailed.toLocaleString().padStart(8)}`);
   console.log(sep());
-  console.log(`  Liquidity  : ${liquidityAddress}`);
+  console.log(`  Hordex  : ${liquidityAddress}`);
   console.log(`  Token      : ${tokenAddress}`);
   console.log(`  Deploy blk : ${deployBlock}`);
   console.log(sep("═") + "\n");

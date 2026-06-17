@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./LiquidityStorage.sol";
-import "./LiquidityMath.sol";
+import "./HordexStorage.sol";
+import "./HordexMath.sol";
 
 interface IERC20F {
     function balanceOf(address) external view returns (uint256);
@@ -24,10 +24,10 @@ interface IPairF {
     function totalSupply() external view returns (uint256);
 }
 
-// DELEGATECALL facet — executes in Liquidity.sol's storage context.
+// DELEGATECALL facet — executes in Hordex.sol's storage context.
 // Immutables embedded here are accessible via delegatecall (they live in this contract's bytecode).
-// All events emitted here appear from Liquidity.sol's address (delegatecall context).
-contract LiquidityFacet is LiquidityStorage {
+// All events emitted here appear from Hordex.sol's address (delegatecall context).
+contract HordexFacet is HordexStorage {
 
     address private immutable UNISWAP_ROUTER;
     address private immutable UNISWAP_FACTORY;
@@ -44,7 +44,7 @@ contract LiquidityFacet is LiquidityStorage {
     uint256 private constant MAX_SLIPPAGE_BPS  = 200;
     uint256 private constant TWAP_GUARD_BPS    = 500;
 
-    // Errors (must match Liquidity.sol exactly so revert data is correct)
+    // Errors (must match Hordex.sol exactly so revert data is correct)
     error NotDelegatecall();
     error NotDirectCall();
     error NoETHToWithdraw();
@@ -101,7 +101,7 @@ contract LiquidityFacet is LiquidityStorage {
         _deployer       = msg.sender;
     }
 
-    // In delegatecall context address(this) == Liquidity.sol != _self → passes.
+    // In delegatecall context address(this) == Hordex.sol != _self → passes.
     // In a direct call address(this) == this facet == _self → reverts.
     modifier onlyDelegatecall() {
         if (address(this) == _self) revert NotDelegatecall();
@@ -127,7 +127,7 @@ contract LiquidityFacet is LiquidityStorage {
         address pair = IFactoryF(UNISWAP_FACTORY).getPair(_token, WETH);
         if (pair == address(0)) return;
 
-        (uint256 cumulative, uint32 ts) = LiquidityMath.pairCumulative(pair, _token);
+        (uint256 cumulative, uint32 ts) = HordexMath.pairCumulative(pair, _token);
 
         if (_tokenTwapLastUpdated[_token] == 0) {
             _tokenTwapObs0[_token] = TwapObs({ priceCumulative: cumulative, timestamp: ts });
@@ -224,7 +224,7 @@ contract LiquidityFacet is LiquidityStorage {
                 while (search != address(0) && users[search].isRegistered) {
                     if (hops >= MAX_REFERRAL_HOPS) { search = address(0); break; }
                     unchecked { hops++; }
-                    if (activeReferralCount[search] <= i) { search = users[search].referrer; continue; }
+                    if (!_eligibleForLevel(search, uint8(i))) { search = users[search].referrer; continue; }
                     if (search == owner) break;
                     cachedCap = _getCommissionCap(search); // committed cap (O(locks)) — never iterates streams
                     if (cachedCap > 0) break;
@@ -255,9 +255,9 @@ contract LiquidityFacet is LiquidityStorage {
                 uint256 missedAmt = originalToDistribute - naturalReceivedHere;
                 totalMissedCommissions[naturalRecipient] += missedAmt;
                 uint8 reason;
-                if (naturalReceivedHere > 0)                          reason = 2;
-                else if (activeReferralCount[naturalRecipient] <= i)  reason = 0;
-                else                                                   reason = 1;
+                if (naturalReceivedHere > 0)                            reason = 2;
+                else if (!_eligibleForLevel(naturalRecipient, uint8(i))) reason = 0;
+                else                                                     reason = 1;
                 emit CommissionMissed(naturalRecipient, _from, missedAmt, i + 1, reason);
                 _missedRecords[naturalRecipient].push(MissedRecord({
                     from:   _from,
@@ -288,7 +288,7 @@ contract LiquidityFacet is LiquidityStorage {
         // tokens. Updating here removes the common (stale-price) cause of that forfeiture.
         _updateTokenTWAP(platformToken);
 
-        uint256 pendingETH = LiquidityMath.calcPendingRewardETH(
+        uint256 pendingETH = HordexMath.calcPendingRewardETH(
             lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
         );
         uint256 carry = lock.tokensAccumulated;
@@ -316,7 +316,7 @@ contract LiquidityFacet is LiquidityStorage {
     function _computeLockReward(LPLock storage lock, uint256 price)
         internal returns (uint256 lockTokens, uint256 pendingETH)
     {
-        pendingETH = LiquidityMath.calcPendingRewardETH(
+        pendingETH = HordexMath.calcPendingRewardETH(
             lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
         );
         uint256 carry = lock.tokensAccumulated;
@@ -394,7 +394,7 @@ contract LiquidityFacet is LiquidityStorage {
             uint256 resUSDT  = t0 == _token ? uint256(r1) : uint256(r0);
             if (resUSDT == 0) revert PriceUnavailable();
 
-            uint256 maxFeasible = LiquidityMath.calcMaxPoolBuy(
+            uint256 maxFeasible = HordexMath.calcMaxPoolBuy(
                 resToken, resUSDT, _tokenTwapPrice[_token], TWAP_GUARD_BPS
             );
             A60actual = A60max < maxFeasible ? A60max : maxFeasible;
@@ -501,8 +501,8 @@ contract LiquidityFacet is LiquidityStorage {
         if (ethInvestedWei * USDT_PER_ETH / 1e18 < 100) return 0;
         uint256 sIdx = streakLevel > 3 ? 3 : streakLevel;
         return stakingRates
-            [LiquidityMath.getDurationIndex(stakingDurations, durationDays)]
-            [LiquidityMath.getTierIndex(investmentTiers, ethInvestedWei)]
+            [HordexMath.getDurationIndex(stakingDurations, durationDays)]
+            [HordexMath.getTierIndex(investmentTiers, ethInvestedWei)]
             [sIdx];
     }
 
@@ -570,7 +570,7 @@ contract LiquidityFacet is LiquidityStorage {
             uint256 resTok = t0 == lock.token ? uint256(r0) : uint256(r1);
             uint256 resETH = t0 == lock.token ? uint256(r1) : uint256(r0);
             uint256 supply = p.totalSupply();
-            (minTokenOut, minETHOut) = LiquidityMath.calcRemoveLPAmounts(resTok, resETH, supply, lpAmount, MAX_SLIPPAGE_BPS);
+            (minTokenOut, minETHOut) = HordexMath.calcRemoveLPAmounts(resTok, resETH, supply, lpAmount, MAX_SLIPPAGE_BPS);
         }
 
         (uint256 tokensReturned, uint256 usdtReturned) = IRouterF(UNISWAP_ROUTER)
@@ -614,12 +614,12 @@ contract LiquidityFacet is LiquidityStorage {
         if (block.timestamp - _tokenTwapLastUpdated[platformToken] > TWAP_MAX_STALE) revert TWAPStale();
 
         uint256 price = _twapPrice();
-        uint256 pendingETH = LiquidityMath.calcPendingRewardETH(
+        uint256 pendingETH = HordexMath.calcPendingRewardETH(
             lock.rewardRatePPM, lock.ethInvested, lock.lockedAt, lock.unlockTime, lock.rewardClaimedETH
         );
         if (pendingETH > 0) lock.tokensAccumulated += (pendingETH * 1e18) / price;
 
-        uint256 dIdx = LiquidityMath.getDurationIndex(stakingDurations, _durationDays);
+        uint256 dIdx = HordexMath.getDurationIndex(stakingDurations, _durationDays);
 
         if (lock.streakBaseEth != 0 && lock.ethInvested != lock.streakBaseEth) {
             for (uint256 i = 0; i < 6; ) {
@@ -630,7 +630,7 @@ contract LiquidityFacet is LiquidityStorage {
         }
 
         uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / 2 : 90;
-        uint256 prevDIdx    = LiquidityMath.getDurationIndex(stakingDurations, prevDurDays);
+        uint256 prevDIdx    = HordexMath.getDurationIndex(stakingDurations, prevDurDays);
         uint256 sIdx;
         if (dIdx == prevDIdx) {
             lock.restakeCounts[dIdx] += 1;
@@ -654,7 +654,7 @@ contract LiquidityFacet is LiquidityStorage {
         emit LPRestaked(msg.sender, lock.token, lock.lpAmount, lock.unlockTime, _durationDays);
     }
 
-    // ── Helpers for Liquidity.sol ─────────────────────────────────────────────
+    // ── Helpers for Hordex.sol ─────────────────────────────────────────────
 
     function getAvailableCapExt(address _user) external view returns (uint256) {
         return _getAvailableCap(_user);

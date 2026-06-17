@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./LiquidityStorage.sol";
+import "./HordexStorage.sol";
 
 interface IERC20ROI {
     function balanceOf(address) external view returns (uint256);
     function transfer(address, uint256) external returns (bool);
 }
 
-// DELEGATECALL facet — executes in Liquidity.sol's storage context.
-// _calcAccrued is inherited from LiquidityStorage.
+// DELEGATECALL facet — executes in Hordex.sol's storage context.
+// _calcAccrued is inherited from HordexStorage.
 //
 // Fixed 10-level assignment: level i always goes to the (i+1)-th ancestor in the
 // referral chain above the investor (direct referrer = level 0).  Every position is
 // filled regardless of eligibility — ineligible recipients simply don't accumulate
 // (enforced by _calcAccrued).  No dynamic re-routing, no deferred queues.
-contract LiquidityROIFacet is LiquidityStorage {
+contract HordexROIFacet is HordexStorage {
 
     address private immutable _self;
     address private immutable _deployer;
@@ -68,12 +68,12 @@ contract LiquidityROIFacet is LiquidityStorage {
                     _roiPendingETH[stream.recipient] += live;
                     settled += live;
                 }
-                // Held-ROI: advance only by the settled-equivalent time; the over-cap remainder
-                // (accrued − live) stays claimable once the recipient regains cap. No forfeiture.
-                _advanceRecipientSince(stream, investor, lockIndex, accrued, live, block.timestamp);
-            } else {
-                stream.recipientSince = uint64(block.timestamp);
+                // Over-cap ROI (accrued − live) accruing while the lock is still locked is FORFEITED
+                // as MISSED — NOT held. Record it and advance recipientSince fully so it can never be
+                // re-accrued or claimed later (not even after re-investing to regain cap).
+                if (accrued > live) stream.historicalMissedETH += uint128(accrued - live);
             }
+            stream.recipientSince = uint64(block.timestamp);
         } else {
             stream.recipientSince = uint64(block.timestamp);
         }
@@ -149,12 +149,11 @@ contract LiquidityROIFacet is LiquidityStorage {
                     _roiPendingETH[stream.recipient] += live;
                     settled += live;
                 }
-                // Held-ROI: advance only by the settled-equivalent time (bounded at endBound); the
-                // over-cap remainder stays claimable once cap regains. No forfeiture.
-                _advanceRecipientSince(stream, investor, lockIndex, accrued, live, endBound);
-            } else {
-                stream.recipientSince = uint64(endBound);
+                // Over-cap ROI is FORFEITED as MISSED (not held) — same rule as _settleStream,
+                // bounded at endBound. recipientSince advances fully so it never re-accrues.
+                if (accrued > live) stream.historicalMissedETH += uint128(accrued - live);
             }
+            stream.recipientSince = uint64(endBound);
         } else {
             stream.recipientSince = uint64(endBound);
         }
@@ -201,7 +200,11 @@ contract LiquidityROIFacet is LiquidityStorage {
             // skipped and left INERT — recipient stays address(0): no accrual (_calcAccrued* returns
             // 0), not enumerated, not claimable. A restake re-runs this assignment, so a skipped
             // level can become live later once the recipient's active slots free up.
-            if (_activeROIStreams[cur].length < MAX_ACTIVE_ROI_STREAMS) {
+            // Eligibility gate: assign this level's stream only to an ancestor who currently meets
+            // the level's self-stake + team-business gates. An ineligible ancestor is recorded as
+            // skipped (inert) — a later restake re-runs assignment, so the level can become live once
+            // the ancestor qualifies. (Slot overflow is handled by the same skipped path.)
+            if (_activeROIStreams[cur].length < MAX_ACTIVE_ROI_STREAMS && _eligibleForLevel(cur, i)) {
                 ROIStream storage stream = _roiStreams[investor][lockIndex][i];
                 stream.recipient      = cur;
                 stream.recipientSince = uint64(block.timestamp);

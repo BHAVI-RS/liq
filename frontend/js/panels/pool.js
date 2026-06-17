@@ -568,16 +568,11 @@ async function onBuyUsdtInput() {
   } catch(_) { document.getElementById('poolBuyToken').value = ''; if (hintEl) hintEl.textContent = ''; }
 }
 
-// Only surface the refund notice when treasury inventory runs out — no other hint text.
+// Buy section shows no hint text below the price (refund notice intentionally suppressed).
 function _renderBuyHint(q, ethIn) {
   const hintEl = document.getElementById('poolBuyHint');
   if (!hintEl) return;
-  const spent  = parseFloat(ethers.utils.formatEther(q.usdtSpent)) * USDT_PER_ETH;
-  const usdtIn = parseFloat(ethers.utils.formatEther(ethIn))      * USDT_PER_ETH;
-  const refund = usdtIn - spent;
-  hintEl.innerHTML = refund > 0.01
-    ? `<span style="color:#f4b740;">⚠ ${fmtNum(refund)} USDT refunded — treasury inventory limit reached</span>`
-    : '';
+  hintEl.innerHTML = '';
 }
 
 // Reverse quote (tokens → USDT). Mirrors calcHybridBuy: fill the pool up to the 2% cap, then price

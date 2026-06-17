@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./LiquidityStorage.sol";
-import "./LiquidityMath.sol";
-import "./LiquidityFacet.sol";
-import "./LiquidityROIFacet.sol";
+import "./HordexStorage.sol";
+import "./HordexMath.sol";
+import "./HordexFacet.sol";
+import "./HordexROIFacet.sol";
 
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
@@ -25,7 +25,7 @@ interface IUniswapV2Pair {
     function transferFrom(address, address, uint256) external returns (bool);
 }
 
-contract Liquidity is LiquidityStorage {
+contract Hordex is HordexStorage {
 
     // ── Immutables (NOT storage slots) ───────────────────────────────────────
     address public  immutable platformToken;
@@ -36,7 +36,7 @@ contract Liquidity is LiquidityStorage {
     address private immutable _roiFacet;
 
     // Read-only view/getter facet. All getX()/batch views were moved out of this contract
-    // (to keep it under the 24 KB mainnet limit) into LiquidityViewFacet; unknown selectors
+    // (to keep it under the 24 KB mainnet limit) into HordexViewFacet; unknown selectors
     // are forwarded there via fallback(). Stored (not a constructor immutable) so the existing
     // deploy flow / constructor signature is unchanged — owner wires it once with setViewFacet().
     address private _viewFacet;
@@ -154,6 +154,10 @@ contract Liquidity is LiquidityStorage {
         _roiFacet       = roiFacet_;
         referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
         roiCommissionRates      = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
+        // Level-eligibility gates (USDT), per 0-indexed level. To earn level i a recipient needs
+        // active self-stake >= selfStakeGate[i] AND cumulative team business >= businessGate[i].
+        selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 1000, 1000, 1000, 1000];
+        businessGate  = [uint32(0),  0,  500, 2500, 5000, 10000, 10000, 10000, 10000, 10000];
         _initStakingRates();
         _initPackages();
     }
@@ -205,8 +209,8 @@ contract Liquidity is LiquidityStorage {
         if (ethInvestedWei * USDT_PER_ETH / 1e18 < 100) return 0;
         uint256 sIdx = streakLevel > 3 ? 3 : streakLevel;
         return stakingRates
-            [LiquidityMath.getDurationIndex(stakingDurations, durationDays)]
-            [LiquidityMath.getTierIndex(investmentTiers, ethInvestedWei)]
+            [HordexMath.getDurationIndex(stakingDurations, durationDays)]
+            [HordexMath.getTierIndex(investmentTiers, ethInvestedWei)]
             [sIdx];
     }
 
@@ -309,8 +313,8 @@ contract Liquidity is LiquidityStorage {
 
         if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
 
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTokenTWAPExt, (_token)));
+        _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
+        _callFacet(abi.encodeCall(HordexFacet.updateTokenTWAPExt, (_token)));
         if (!_tokenTwapReady[_token]) revert PriceUnavailable();
         if (block.timestamp - _tokenTwapLastUpdated[_token] > TWAP_MAX_STALE) revert TokenTWAPStale();
 
@@ -335,10 +339,25 @@ contract Liquidity is LiquidityStorage {
                 _lastExpiry = _roiRetainedAt[msg.sender];
         }
 
-        _callFacet(abi.encodeCall(LiquidityFacet.investExt, (_token, rewardPPM, T)));
+        _callFacet(abi.encodeCall(HordexFacet.investExt, (_token, rewardPPM, T)));
 
         userTotalInvested[msg.sender] += T;
         totalEthInvested              += T;
+
+        // Roll this package up to 10 ancestors as cumulative team business (USDT, sticky/lifetime).
+        // Bounded at 10 hops — the levels you can ever earn from — so invest stays O(1) in chain
+        // depth and a long referral chain can never push it past the block gas limit.
+        {
+            uint256 _bizUSDT = T * USDT_PER_ETH / 1e18;
+            if (_bizUSDT > 0) {
+                address _up = users[msg.sender].referrer;
+                for (uint256 _d = 0; _d < 10 && _up != address(0); ) {
+                    _teamBusinessUSDT[_up] += _bizUSDT;
+                    _up = users[_up].referrer;
+                    unchecked { _d++; }
+                }
+            }
+        }
 
         // Reconcile the referrer's active count BEFORE distributing commissions so the
         // eligibility check in _distributeReferralCommissions sees the correct count.
@@ -347,16 +366,16 @@ contract Liquidity is LiquidityStorage {
 
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
 
-        // Restore ROI accrual now that this new lock supplies fresh cap. Cap-exhausted-while-staked
-        // ROI is HELD — it stays claimable against the new cap, settled lazily at claim time — so
-        // there is NO per-stream loop here (O(locks), unbounded-stream safe) and nothing is forfeited.
-        // Only a genuine natural expiry (a lock actually past its unlock time) settles pre-expiry ROI
-        // and forfeits the post-expiry no-stake gap (rule 2), via _handleNaturalExpiryResume.
+        // Restore ROI accrual now that this new lock supplies fresh cap. ROI that accrued during a
+        // NO-AVAILABLE-CAP period is FORFEITED (missed) and is NOT recovered by re-investing: when the
+        // cap was exhausted while staked (_capPausedAt set), the gap (_capPausedAt → now) is forfeited
+        // exactly like the post-natural-expiry no-stake gap. Pre-gap earned ROI is preserved; accrual
+        // resumes against the fresh cap from now. O(1) checkpoint (see _handleNaturalExpiryResume) —
+        // no per-stream loop, unbounded-stream safe.
         if (_capPausedAt[msg.sender] > 0) {
+            uint256 _resumeFrom = _capPausedAt[msg.sender] > _lastExpiry ? _capPausedAt[msg.sender] : _lastExpiry;
             _capPausedAt[msg.sender] = 0;
-            if (hadNoActiveCap && _lastExpiry > 0) {
-                _handleNaturalExpiryResume(msg.sender, _lastExpiry);
-            }
+            _handleNaturalExpiryResume(msg.sender, _resumeFrom);
         } else if (hadNoActiveCap) {
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
@@ -368,11 +387,11 @@ contract Liquidity is LiquidityStorage {
             _roiRetainedAt[msg.sender]  = 0;
         }
 
-        _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, lockIndex)));
+        _callROI(abi.encodeCall(HordexROIFacet.initROIStreamsExt, (msg.sender, lockIndex)));
 
         uint256 A   = T / 2;
         uint256 A40 = A - (A * 60 / 100);
-        _callFacet(abi.encodeCall(LiquidityFacet.distributeCommissionsExt, (msg.sender, A40)));
+        _callFacet(abi.encodeCall(HordexFacet.distributeCommissionsExt, (msg.sender, A40)));
     }
 
     // ── Claim LP ──────────────────────────────────────────────────────────────
@@ -398,8 +417,8 @@ contract Liquidity is LiquidityStorage {
 
     // ── Remove LP ─────────────────────────────────────────────────────────────
     function _removeLPCore(uint256 _lockIndex, bool direct) internal {
-        _callFacet(abi.encodeCall(LiquidityFacet.removeLPCoreExt, (_lockIndex, direct)));
-        _callROI(abi.encodeCall(LiquidityROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
+        _callFacet(abi.encodeCall(HordexFacet.removeLPCoreExt, (_lockIndex, direct)));
+        _callROI(abi.encodeCall(HordexROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
     }
 
     function removeLP(uint256 _lockIndex) external nonReentrant {
@@ -433,39 +452,39 @@ contract Liquidity is LiquidityStorage {
         }
 
         // End old ROI streams before restakeLPExt updates the lock
-        _callROI(abi.encodeCall(LiquidityROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
+        _callROI(abi.encodeCall(HordexROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
 
-        _callFacet(abi.encodeCall(LiquidityFacet.restakeLPExt, (_lockIndex, _durationDays)));
+        _callFacet(abi.encodeCall(HordexFacet.restakeLPExt, (_lockIndex, _durationDays)));
 
         // Resume ROI accrual if re-locking this lock reactivated dormant unused cap.
         // NOTE: commissionsCapUsed is deliberately NOT reset — restaking carries cap forward
         // unchanged (consumed stays consumed, unused stays usable); only invest() grants new cap.
-        // Cap-exhausted ROI is HELD (claimable against carried-forward cap, settled at claim) — no
-        // per-stream loop, nothing forfeited. Only a genuine natural expiry settles & bounds (rule 2).
+        // ROI that accrued during a NO-AVAILABLE-CAP period is FORFEITED (missed): when cap was
+        // exhausted while staked (_capPausedAt set), the gap (_capPausedAt → now) is forfeited like
+        // the post-natural-expiry no-stake gap. Pre-gap earned ROI preserved. O(1), no per-stream loop.
         if (_capPausedAt[msg.sender] > 0) {
+            uint256 _resumeFrom = _capPausedAt[msg.sender] > _lastExpiry ? _capPausedAt[msg.sender] : _lastExpiry;
             _capPausedAt[msg.sender] = 0;
-            if (hadNoActiveCap && _lastExpiry > 0) {
-                _handleNaturalExpiryResume(msg.sender, _lastExpiry);
-            }
+            _handleNaturalExpiryResume(msg.sender, _resumeFrom);
         } else if (hadNoActiveCap) {
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 
         // Init new ROI streams with updated lock (new rewardRatePPM written by restakeLPExt)
-        _callROI(abi.encodeCall(LiquidityROIFacet.initROIStreamsExt, (msg.sender, _lockIndex)));
+        _callROI(abi.encodeCall(HordexROIFacet.initROIStreamsExt, (msg.sender, _lockIndex)));
     }
 
     // ── Staking reward claims ─────────────────────────────────────────────────
     function claimStakingReward() external nonReentrant onlyRegistered {
-        _callFacet(abi.encodeCall(LiquidityFacet.claimStakingRewardExt, ()));
+        _callFacet(abi.encodeCall(HordexFacet.claimStakingRewardExt, ()));
     }
     function claimStakingRewardForLock(uint256 _lockIndex) external nonReentrant onlyRegistered {
-        _callFacet(abi.encodeCall(LiquidityFacet.claimStakingRewardForLockExt, (_lockIndex)));
+        _callFacet(abi.encodeCall(HordexFacet.claimStakingRewardForLockExt, (_lockIndex)));
     }
 
     // ── ROI claims ────────────────────────────────────────────────────────────
     function claimAllROI() external nonReentrant onlyRegistered {
-        _callROI(abi.encodeCall(LiquidityROIFacet.settleAllStreamsExt, (msg.sender)));
+        _callROI(abi.encodeCall(HordexROIFacet.settleAllStreamsExt, (msg.sender)));
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
         uint256 rawCap = _getRawAvailableCap(msg.sender);
@@ -490,7 +509,7 @@ contract Liquidity is LiquidityStorage {
             }
         }
         _roiPendingETH[msg.sender] = 0;
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
+        _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
         uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
@@ -507,7 +526,7 @@ contract Liquidity is LiquidityStorage {
         external nonReentrant onlyRegistered
     {
         uint256 pendingBefore = _roiPendingETH[msg.sender];
-        _callROI(abi.encodeCall(LiquidityROIFacet.settleStreamExt, (investor, lockIndex, level)));
+        _callROI(abi.encodeCall(HordexROIFacet.settleStreamExt, (investor, lockIndex, level)));
         uint256 streamEth = _roiPendingETH[msg.sender] - pendingBefore;
         if (streamEth == 0) revert NothingToClaim();
         uint256 rawCap = _getRawAvailableCap(msg.sender);
@@ -522,7 +541,7 @@ contract Liquidity is LiquidityStorage {
         }
         // This stream's over-cap excess is discarded; other streams' settled pending is preserved.
         _roiPendingETH[msg.sender] = pendingBefore;
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
+        _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
         uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
@@ -540,7 +559,7 @@ contract Liquidity is LiquidityStorage {
     // to fit in one block: call this repeatedly until all streams are covered, then
     // call claimPendingROI() once to receive the accumulated tokens.
     function settleROIStreams(uint256 fromIndex, uint256 count) external nonReentrant onlyRegistered {
-        _callROI(abi.encodeCall(LiquidityROIFacet.settleStreamsRangeExt, (msg.sender, fromIndex, count)));
+        _callROI(abi.encodeCall(HordexROIFacet.settleStreamsRangeExt, (msg.sender, fromIndex, count)));
     }
 
     // Claims whatever has accumulated in _roiPendingETH[msg.sender] without settling
@@ -564,7 +583,7 @@ contract Liquidity is LiquidityStorage {
             }
         }
         _roiPendingETH[msg.sender] = 0;
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
+        _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
         uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
@@ -579,10 +598,10 @@ contract Liquidity is LiquidityStorage {
 
     // ── TWAP ─────────────────────────────────────────────────────────────────
     function updateTWAP() public {
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTWAPExt, ()));
+        _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
     }
     function updateTokenTWAP(address _token) public {
-        _callFacet(abi.encodeCall(LiquidityFacet.updateTokenTWAPExt, (_token)));
+        _callFacet(abi.encodeCall(HordexFacet.updateTokenTWAPExt, (_token)));
     }
     function getTWAPPrice() public view returns (uint256) {
         if (!_tokenTwapReady[platformToken]) revert PriceUnavailable();
@@ -593,6 +612,14 @@ contract Liquidity is LiquidityStorage {
     // ── Admin ─────────────────────────────────────────────────────────────────
     function setROICommissionRates(uint16[10] calldata rates) external onlyOwner {
         roiCommissionRates = rates;
+    }
+    // Level-eligibility gates (USDT), 0-indexed by level. Earning level i requires active
+    // self-stake >= selfStakeGate[i] AND cumulative team business >= businessGate[i].
+    function setSelfStakeGates(uint32[10] calldata gates) external onlyOwner {
+        selfStakeGate = gates;
+    }
+    function setBusinessGates(uint32[10] calldata gates) external onlyOwner {
+        businessGate = gates;
     }
     function setValidPackage(uint256 ethWei, bool valid) external onlyOwner {
         validPackageAmounts[ethWei] = valid;
@@ -624,7 +651,7 @@ contract Liquidity is LiquidityStorage {
     }
 
     // ── View functions ────────────────────────────────────────────────────────
-    // All read-only getters and batch/aggregation views live in LiquidityViewFacet and are
+    // All read-only getters and batch/aggregation views live in HordexViewFacet and are
     // reached through fallback() below. getTWAPPrice() stays here because it is called
     // internally by the ROI claim functions.
 
@@ -655,7 +682,7 @@ contract Liquidity is LiquidityStorage {
 
         uint256 invBal = IERC20(_token).balanceOf(address(this));
         (uint256 poolUsdt, uint256 poolTokensOut, uint256 invTokensOut, uint256 usdtSpent) =
-            LiquidityMath.calcHybridBuy(resTok, resETH, _usdtIn, invBal, SWAP_SLIPPAGE_BPS);
+            HordexMath.calcHybridBuy(resTok, resETH, _usdtIn, invBal, SWAP_SLIPPAGE_BPS);
 
         uint256 totalOut = poolTokensOut + invTokensOut;
         if (totalOut < _minTokensOut) revert InsufficientTokenBalance();

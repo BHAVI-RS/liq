@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./LiquidityTypes.sol";
+import "./HordexTypes.sol";
 
-// Shared storage layout for Liquidity.sol and its DELEGATECALL facets.
+// Shared storage layout for Hordex.sol and its DELEGATECALL facets.
 // Variable names and order must never change — storage slots are position-sensitive.
-abstract contract LiquidityStorage {
+abstract contract HordexStorage {
 
-    // Public (auto-getters generated in concrete Liquidity.sol)
+    // Public (auto-getters generated in concrete Hordex.sol)
     mapping(address => User)    public users;
     mapping(address => uint256) public userTotalInvested;
     address public featuredToken;
     address public owner;
-    // platformToken is immutable in Liquidity.sol / LiquidityFacet — not a storage slot.
+    // platformToken is immutable in Hordex.sol / HordexFacet — not a storage slot.
     uint16[10] public referralCommissionRates;
     uint256    public minDirectReferralInvestment;
 
@@ -44,7 +44,7 @@ abstract contract LiquidityStorage {
     mapping(address => ClaimRecord[])      internal _claimRecords;
     mapping(address => LPEventRecord[])    internal _lpEventRecords;
 
-    // ROI commission state (used by LiquidityROIFacet via DELEGATECALL)
+    // ROI commission state (used by HordexROIFacet via DELEGATECALL)
     mapping(address => mapping(uint256 => ROIStream[10])) internal _roiStreams;
     mapping(address => StreamRef[])                        internal _activeROIStreams;
     mapping(address => mapping(uint256 => StreamRef[]))   internal _skippedROIStreams;
@@ -77,7 +77,7 @@ abstract contract LiquidityStorage {
     // higher than 5000 safely would require bounding the drain itself.
     uint256 internal constant MAX_ACTIVE_ROI_STREAMS = 5000;
 
-    // Helper shared by Liquidity.sol and facets
+    // Helper shared by Hordex.sol and facets
     function _qualifies(address _user) internal view returns (bool) {
         uint256 total = userTotalInvested[_user];
         return total > 0 && (minDirectReferralInvestment == 0 || total >= minDirectReferralInvestment);
@@ -105,7 +105,7 @@ abstract contract LiquidityStorage {
         }
     }
 
-    // ROI accrual constants and helper — shared with Liquidity.sol view functions so that
+    // ROI accrual constants and helper — shared with Hordex.sol view functions so that
     // getROIAccrued/getROIPending can read directly from inherited storage instead of calling
     // the ROI facet as a regular CALL (which would read the facet's own empty storage).
     uint256 internal constant _ROI_DENOM         = 50_000_000_000;
@@ -202,6 +202,47 @@ abstract contract LiquidityStorage {
     mapping(address => uint256) internal _roiResumeAt;
     mapping(address => uint256) internal _roiUnabsorbed;
 
+    // ── Level-eligibility gates (referral commissions AND ROI), per 0-indexed level ─────────
+    // To EARN level i (1-indexed N = i+1) a recipient must meet BOTH gates:
+    //   active self-stake (USDT, sum of non-removed non-expired locks) >= selfStakeGate[i]
+    //   cumulative team business (USDT, downline within 10 levels)      >= businessGate[i]
+    // Self gate is ACTIVE — it falls when locks expire, so a recipient's eligible depth drops:
+    //   • referral (one-shot at invest) — rolls the commission up to the next eligible ancestor;
+    //   • ROI (assignment-time) — an ineligible upline is skipped (no stream created for it). For a
+    //     stream already live, the existing cap/natural-expiry machinery stops accrual when stake
+    //     fully expires (cap → 0) and forfeits the no-stake gap, while pre-expiry earned ROI stays
+    //     claimable. (Fine-grained per-level forfeiture on a still-partially-staked multi-lock
+    //     recipient is deferred — see notes; it never over-pays beyond the 5× cap.)
+    // Business gate is sticky (lifetime, never decremented). Both owner-settable; defaults seeded
+    // in the Hordex constructor. Appended at end of storage so existing slots are unchanged.
+    uint32[10] internal selfStakeGate;
+    uint32[10] internal businessGate;
+    mapping(address => uint256) internal _teamBusinessUSDT;
+
+    uint256 private constant _USDT_PER_ETH = 1;
+
+    // Active self-stake (USDT) = sum of ethInvested across the user's non-removed, non-expired locks.
+    function _activeSelfStakeUSDT(address _user) internal view returns (uint256) {
+        LPLock[] storage locks = userLPLocks[_user];
+        uint256 len = locks.length;
+        uint256 sumWei;
+        for (uint256 j = 0; j < len; ) {
+            LPLock storage l = locks[j];
+            if (!l.removed && block.timestamp < l.unlockTime) sumWei += l.ethInvested;
+            unchecked { j++; }
+        }
+        return sumWei * _USDT_PER_ETH / 1e18;
+    }
+
+    // Whether `_user` currently qualifies to RECEIVE commission/ROI at 0-indexed `level`.
+    // Owner is the catch-all sink and always qualifies. Both gates must pass.
+    function _eligibleForLevel(address _user, uint8 level) internal view returns (bool) {
+        if (_user == owner) return true;
+        if (_activeSelfStakeUSDT(_user) < selfStakeGate[level]) return false;
+        if (_teamBusinessUSDT[_user]   < businessGate[level])  return false;
+        return true;
+    }
+
     // Adjusts an accrual window [startTs, endTs] by subtracting the forfeited natural-expiry gap
     // (boundary, resumeAt) when the stream's recipient has a pending resume the stream has not yet
     // absorbed (recipientSince < resumeAt). Caller guarantees endTs > startTs. Returns the eligible
@@ -269,7 +310,7 @@ abstract contract LiquidityStorage {
         }
     }
 
-    // ── Unified cap helpers (shared by LiquidityFacet and Liquidity.sol) ────────
+    // ── Unified cap helpers (shared by HordexFacet and Hordex.sol) ────────
     // Single overall cap per LP lock = ethInvested × 5.
     // commissionsCapUsed is consumed by BOTH regular referral commissions and ROI claims.
     // Only active (non-expired, non-removed) locks contribute available cap.
@@ -388,23 +429,6 @@ abstract contract LiquidityStorage {
         accrued = lock.ethInvested * lock.rewardRatePPM * elapsed * rate / (_ROI_DENOM * lockDur);
     }
 
-    // Held-ROI: advance a stream's recipientSince by ONLY the time-equivalent of `settled` (accrual
-    // is linear in time), so any over-cap remainder (accrued − settled) stays claimable later once
-    // the recipient regains cap. `bound` is the upper end of the accrual window: block.timestamp for
-    // a live settle, or a custom end-bound for natural-expiry/retention settles. Nothing is forfeited.
-    function _advanceRecipientSince(
-        ROIStream storage stream, address investor, uint256 lockIndex,
-        uint256 accrued, uint256 settled, uint256 bound
-    ) internal {
-        LPLock storage lock = userLPLocks[investor][lockIndex];
-        uint256 endTs   = bound < lock.unlockTime ? bound : lock.unlockTime;
-        uint256 startTs = stream.recipientSince > lock.lockedAt ? stream.recipientSince : lock.lockedAt;
-        if (endTs <= startTs) { stream.recipientSince = uint64(bound); return; }
-        stream.recipientSince = settled >= accrued
-            ? uint64(endTs)
-            : uint64(startTs + (endTs - startTs) * settled / accrued);
-    }
-
     // Real-time available cap = raw cap − pending ROI − live ROI accruing across all streams.
     // ROI is counted as earned the moment it accrues, so it reduces available cap immediately
     // whether or not the user has claimed it.  _calcAccrued uses this as its gate so that
@@ -457,10 +481,10 @@ abstract contract LiquidityStorage {
     }
 
     function _chargeCap(address _user, uint256 _amount) internal {
-        // Method 2: no per-stream pre-settle. Over-cap ROI is HELD (settled lazily at claim time,
-        // bounded by remaining cap) rather than frozen here — so this stays O(locks) and never
-        // iterates the recipient's stream array. _capPausedAt is set only when the raw cap across
-        // ALL active locks is genuinely exhausted (remaining > 0 after the FIFO loop below).
+        // Method 2: no per-stream pre-settle (O(locks), never iterates the stream array). _capPausedAt
+        // records WHEN the recipient's raw cap reached 0 — whether this charge overflowed it
+        // (remaining > 0) OR exactly filled it. That timestamp is the boundary a later invest/restake
+        // uses to FORFEIT the no-available-cap gap: ROI accruing while raw cap is 0 is missed, not held.
         LPLock[] storage locks = userLPLocks[_user];
         uint256 len = locks.length;
         uint256 remaining = _amount;
@@ -479,6 +503,10 @@ abstract contract LiquidityStorage {
         }
 
         if (remaining > 0) {
+            _capPausedAt[_user] = uint64(block.timestamp);
+        } else if (_capPausedAt[_user] == 0 && _getRawAvailableCap(_user) == 0) {
+            // Charge fit exactly and left zero raw cap — still mark the exhaustion time so the
+            // no-available-cap gap until the next invest/restake is forfeited (not recoverable).
             _capPausedAt[_user] = uint64(block.timestamp);
         }
     }

@@ -12,7 +12,7 @@ interface IUniV2FactoryMin {
     function getPair(address tokenA, address tokenB) external view returns (address pair);
 }
 
-library LiquidityMath {
+library HordexMath {
     uint256 private constant USDT_PER_ETH    = 1;
     uint256 private constant LP_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
 
@@ -118,7 +118,7 @@ library LiquidityMath {
     }
 
     // Pure AMM math for the invest() swap+liquidity calculation.
-    // Extracted from Liquidity.invest() so this bytecode lives in the library.
+    // Extracted from Hordex.invest() so this bytecode lives in the library.
     function calcInvestAmounts(
         uint256 A60,
         uint256 A40,
@@ -134,7 +134,7 @@ library LiquidityMath {
 
     // Hybrid buy split: route up to a slippage-capped amount through the AMM pool, then fill the
     // remainder from the platform's own token inventory at the post-pool spot price. Used by both
-    // Liquidity.swapBuy (execution) and LiquidityViewFacet.quoteSwapBuy (display) so the quoted
+    // Hordex.swapBuy (execution) and HordexViewFacet.quoteSwapBuy (display) so the quoted
     // "tokens to receive" matches the trade exactly.
     //   slippageBps — max effective price slippage (price impact + 0.3% pool fee) on the pool leg
     //                 (e.g. 200 = 2%). The pool leg never moves the price more than this.
@@ -184,7 +184,7 @@ library LiquidityMath {
     }
 
     // Pure AMM math for the removeLiquidity slippage guards.
-    // Extracted from Liquidity._removeLPCore() so this bytecode lives in the library.
+    // Extracted from Hordex._removeLPCore() so this bytecode lives in the library.
     function calcRemoveLPAmounts(
         uint256 resTok,
         uint256 resETH,

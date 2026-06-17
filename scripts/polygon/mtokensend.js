@@ -1,7 +1,7 @@
-// Send HDX (platform token) to the deployed Liquidity contract on Polygon mainnet.
+// Send HDX (platform token) to the deployed Hordex contract on Polygon mainnet.
 //
 // Transfers AMOUNT_TOKENS *whole* HDX from the deployer wallet (PRIVATE_KEY in .env) to the
-// Liquidity contract, whose address is read from contract-config.js (the latest mdeploy.js run).
+// Hordex contract, whose address is read from contract-config.js (the latest mdeploy.js run).
 // The contract needs an HDX reserve to pay ROI / staking rewards and to seed pools.
 //
 // USAGE:
@@ -36,7 +36,7 @@ const TX_OVERRIDES = {};
 if (process.env.POLYGON_MAX_FEE_GWEI)  TX_OVERRIDES.maxFeePerGas         = GWEI(process.env.POLYGON_MAX_FEE_GWEI);
 if (process.env.POLYGON_PRIORITY_GWEI) TX_OVERRIDES.maxPriorityFeePerGas = GWEI(process.env.POLYGON_PRIORITY_GWEI);
 
-// Read the deployed Liquidity contract address straight from contract-config.js so this
+// Read the deployed Hordex contract address straight from contract-config.js so this
 // always targets the latest deploy (no hardcoded address to keep in sync).
 function readDeployedContract() {
   const cfgPath = path.join(__dirname, "..", "..", "contract-config.js");
@@ -73,7 +73,7 @@ async function main() {
 
   const sep = "─".repeat(64);
   console.log(sep);
-  console.log("  MTOKENSEND — send HDX → Liquidity contract (Polygon mainnet)");
+  console.log("  MTOKENSEND — send HDX → Hordex contract (Polygon mainnet)");
   console.log(sep);
   console.log(`  Sender   : ${sender.address}`);
   console.log(`  Token    : ${TOKEN_ADDRESS}  (${sym}, ${dec} decimals)`);

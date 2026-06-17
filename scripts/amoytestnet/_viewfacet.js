@@ -1,10 +1,10 @@
-// Shared helper for the LiquidityViewFacet split.
+// Shared helper for the HordexViewFacet split.
 //
-// Liquidity.sol no longer contains the read-only getters/batch views — they live in
-// LiquidityViewFacet and are reached through Liquidity's fallback(). So every deploy script
-// must (1) deploy LiquidityViewFacet with the same router/factory/weth/token immutables,
+// Hordex.sol no longer contains the read-only getters/batch views — they live in
+// HordexViewFacet and are reached through Hordex's fallback(). So every deploy script
+// must (1) deploy HordexViewFacet with the same router/factory/weth/token immutables,
 // (2) call liquidity.setViewFacet(addr), and (3) write a CONTRACT_ABI that is the union of
-// Liquidity's ABI and the view facet's ABI so the frontend can call the moved functions.
+// Hordex's ABI and the view facet's ABI so the frontend can call the moved functions.
 //
 // Usage in a deploy script (hre, deployer, liquidity contract, addresses, overrides):
 //   const { deployAndWireViewFacet, mergedLiquidityAbi } = require("./_viewfacet");
@@ -20,9 +20,9 @@ async function deployAndWireViewFacet(hre, opts) {
     mathAddr, viewLibAddr, overrides = {}, mine,
   } = opts;
 
-  const ViewFacet = await hre.ethers.getContractFactory("LiquidityViewFacet", {
+  const ViewFacet = await hre.ethers.getContractFactory("HordexViewFacet", {
     signer: deployer,
-    libraries: { LiquidityMath: mathAddr, LiquidityViewLib: viewLibAddr },
+    libraries: { HordexMath: mathAddr, HordexViewLib: viewLibAddr },
   });
   const viewFacet = await ViewFacet.deploy(factory, weth, token, overrides);
   await viewFacet.waitForDeployment();
@@ -39,13 +39,13 @@ async function deployAndWireViewFacet(hre, opts) {
   return viewFacetAddress;
 }
 
-// Union of Liquidity's ABI and LiquidityViewFacet's ABI, de-duplicated by function/event/error
+// Union of Hordex's ABI and HordexViewFacet's ABI, de-duplicated by function/event/error
 // signature. The frontend builds its ethers.Contract from this so the moved getters and the
 // new batch views (getDownline, *Batch) resolve through the fallback.
 function mergedLiquidityAbi(hre) {
-  const liq  = hre.artifacts.readArtifactSync("Liquidity").abi;
-  const view = hre.artifacts.readArtifactSync("LiquidityViewFacet").abi;
-  // Keep Liquidity's full ABI (incl. its constructor/fallback/receive); from the view facet
+  const liq  = hre.artifacts.readArtifactSync("Hordex").abi;
+  const view = hre.artifacts.readArtifactSync("HordexViewFacet").abi;
+  // Keep Hordex's full ABI (incl. its constructor/fallback/receive); from the view facet
   // only pull functions/events/errors so we don't end up with a second constructor.
   const viewMergeable = view.filter(e =>
     e.type === "function" || e.type === "event" || e.type === "error");

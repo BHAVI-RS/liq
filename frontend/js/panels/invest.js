@@ -15,7 +15,7 @@ let _activePkgCat     = 'basic';
 let _selectedPkgUSD   = null;
 let _selectedInvestAddr = null;
 
-// Mirror of LiquidityMath.calcMaxPoolBuy — returns the max ETH (as BigNumber wei) that can
+// Mirror of HordexMath.calcMaxPoolBuy — returns the max ETH (as BigNumber wei) that can
 // be swapped into the pool while keeping the resulting spot within TWAP_GUARD_BPS of TWAP.
 // Uses spot price as TWAP approximation (valid for a recently-warmed stable pool).
 function calcMaxPoolBuyWei(resToken, resETH, twapPrice, twapGuardBps = 500) {

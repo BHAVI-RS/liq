@@ -7,8 +7,8 @@
 //
 // The harness deploys a full local stack: local Uniswap V2 (the repo's own Factory/Router,
 // whose hard-coded pair init-code-hash matches the locally compiled Pair), WETH9 used as the
-// USDT base token, the Hordex platform token, the LiquidityMath / LiquidityViewLib libraries,
-// the three facets, and the Liquidity core wired to its view facet.
+// USDT base token, the Hordex platform token, the HordexMath / HordexViewLib libraries,
+// the three facets, and the Hordex core wired to its view facet.
 //
 //   Referral chain for these tests:  owner → A → B
 //   B's invest creates ROI streams up the chain; A is the level-0 recipient of B's stream.
@@ -47,10 +47,10 @@ async function deploy() {
   const [owner, A, B] = await ethers.getSigners();
 
   // ── Libraries (ViewLib links Math) ──
-  const Math = await (await ethers.getContractFactory("LiquidityMath")).deploy();
+  const Math = await (await ethers.getContractFactory("HordexMath")).deploy();
   await Math.waitForDeployment();
   const mathAddr = await Math.getAddress();
-  const ViewLib = await (await ethers.getContractFactory("LiquidityViewLib", { libraries: { LiquidityMath: mathAddr } })).deploy();
+  const ViewLib = await (await ethers.getContractFactory("HordexViewLib", { libraries: { HordexMath: mathAddr } })).deploy();
   await ViewLib.waitForDeployment();
   const viewLibAddr = await ViewLib.getAddress();
 
@@ -73,19 +73,19 @@ async function deploy() {
   const hordexAddr = await hordex.getAddress();
 
   // ── Facets + core ──
-  const facet = await (await ethers.getContractFactory("LiquidityFacet", { libraries: { LiquidityMath: mathAddr } }))
+  const facet = await (await ethers.getContractFactory("HordexFacet", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr);
   await facet.waitForDeployment();
-  const roiFacet = await (await ethers.getContractFactory("LiquidityROIFacet")).deploy();
+  const roiFacet = await (await ethers.getContractFactory("HordexROIFacet")).deploy();
   await roiFacet.waitForDeployment();
 
-  const core = await (await ethers.getContractFactory("Liquidity", { libraries: { LiquidityMath: mathAddr } }))
+  const core = await (await ethers.getContractFactory("Hordex", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr, await facet.getAddress(), await roiFacet.getAddress());
   await core.waitForDeployment();
   const coreAddr = await core.getAddress();
 
-  const viewFacet = await (await ethers.getContractFactory("LiquidityViewFacet", {
-    libraries: { LiquidityMath: mathAddr, LiquidityViewLib: viewLibAddr },
+  const viewFacet = await (await ethers.getContractFactory("HordexViewFacet", {
+    libraries: { HordexMath: mathAddr, HordexViewLib: viewLibAddr },
   })).deploy(factoryAddr, usdtAddr, hordexAddr);
   await viewFacet.waitForDeployment();
   await (await core.setViewFacet(await viewFacet.getAddress())).wait();

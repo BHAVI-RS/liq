@@ -4,10 +4,8 @@
 //   - Commission distribution up the referral chain  (MUST be preserved)
 //   - The 5x per-investment earnings cap             (MUST be preserved — solvency)
 //   - Retention of earned ROI across removeLP        (MUST be preserved)
-//   - Cap-exhaustion forfeiture                      (WILL CHANGE → "held", claimable on cap regain)
-//
-// The last group is tagged [CHANGES] — after the rework those assertions flip from
-// "over-cap ROI is forfeited" to "over-cap ROI is held and becomes claimable once cap regains".
+//   - Cap-exhaustion forfeiture: over-cap ROI accruing while the lock is still active is FORFEITED
+//     (MISSED) and is NOT recoverable by re-investing — [MISSED] test below pins this.
 //
 // Run:  npx hardhat test test/method2-characterization.test.js
 
@@ -39,10 +37,10 @@ async function deploy() {
   const signers = await ethers.getSigners();
   const [owner, u1, u2, u3, u4, u5] = signers;
 
-  const Math = await (await ethers.getContractFactory("LiquidityMath")).deploy();
+  const Math = await (await ethers.getContractFactory("HordexMath")).deploy();
   await Math.waitForDeployment();
   const mathAddr = await Math.getAddress();
-  const ViewLib = await (await ethers.getContractFactory("LiquidityViewLib", { libraries: { LiquidityMath: mathAddr } })).deploy();
+  const ViewLib = await (await ethers.getContractFactory("HordexViewLib", { libraries: { HordexMath: mathAddr } })).deploy();
   await ViewLib.waitForDeployment();
   const viewLibAddr = await ViewLib.getAddress();
 
@@ -60,17 +58,17 @@ async function deploy() {
   await hordex.waitForDeployment();
   const hordexAddr = await hordex.getAddress();
 
-  const facet = await (await ethers.getContractFactory("LiquidityFacet", { libraries: { LiquidityMath: mathAddr } }))
+  const facet = await (await ethers.getContractFactory("HordexFacet", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr);
   await facet.waitForDeployment();
-  const roiFacet = await (await ethers.getContractFactory("LiquidityROIFacet")).deploy();
+  const roiFacet = await (await ethers.getContractFactory("HordexROIFacet")).deploy();
   await roiFacet.waitForDeployment();
-  const core = await (await ethers.getContractFactory("Liquidity", { libraries: { LiquidityMath: mathAddr } }))
+  const core = await (await ethers.getContractFactory("Hordex", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr, await facet.getAddress(), await roiFacet.getAddress());
   await core.waitForDeployment();
   const coreAddr = await core.getAddress();
-  const viewFacet = await (await ethers.getContractFactory("LiquidityViewFacet", {
-    libraries: { LiquidityMath: mathAddr, LiquidityViewLib: viewLibAddr },
+  const viewFacet = await (await ethers.getContractFactory("HordexViewFacet", {
+    libraries: { HordexMath: mathAddr, HordexViewLib: viewLibAddr },
   })).deploy(factoryAddr, usdtAddr, hordexAddr);
   await viewFacet.waitForDeployment();
   await (await core.setViewFacet(await viewFacet.getAddress())).wait();
@@ -176,9 +174,9 @@ describe("Method-2 characterization", function () {
     const firstClaim = (await hordex.balanceOf(u1.address)) - b0;
     console.log("      first claim:", ethers.formatEther(firstClaim), "HORDEX (firstOk=" + firstOk + ")");
 
-    // TODAY: with cap exhausted, the over-cap ROI is recorded missed and a second claim yields
-    // nothing even though streams kept accruing. After Method 2 this becomes claimable once u1
-    // regains cap (invests again). We pin TODAY's behaviour here.
+    // With cap exhausted, the over-cap ROI is forfeited (missed) and a second claim yields nothing
+    // even though streams kept accruing. This forfeiture is PERMANENT — re-investing does not make
+    // it claimable (see the [MISSED] test). We pin the no-re-invest behaviour here.
     await increaseTime(50);
     await freshTwap(liq, hordexAddr);
     let secondClaim = 0n;
@@ -194,40 +192,138 @@ describe("Method-2 characterization", function () {
       "without re-investing, a capped recipient cannot claim more — cap headroom is needed");
   });
 
-  it("[HELD] over-cap ROI becomes claimable after re-investing to regain cap", async () => {
+  it("[MISSED] over-cap ROI while staked is FORFEITED forever — re-investing does NOT recover it", async () => {
     const ctx = await deploy();
     const { u1, u2, u3, liq, hordex, hordexAddr } = ctx;
-    await (await liq.connect(u1).invest(hordexAddr, PKG_SMALL)).wait(); // small cap → easily exhausted
-    await (await liq.connect(u2).invest(hordexAddr, PKG_BIG)).wait();
-    await (await liq.connect(u3).invest(hordexAddr, PKG_BIG)).wait();
-    await increaseTime(200);
+
+    // Sum historicalMissedETH across a recipient's inbound ROI streams.
+    async function missedOf(addr) {
+      const refs = await liq.getActiveROIStreams(addr);
+      let m = 0n;
+      for (const r of refs) {
+        const s = await liq.getROIStreamInfo(r.investor, r.lockIndex, r.level);
+        m += s.historicalMissedETH;
+      }
+      return m;
+    }
+
+    // u1 has a small cap ($25 → 5× = $125); a large direct downline's ROI alone far exceeds it.
+    // ROI then accrues well past u1's remaining headroom while u1's lock is STILL ACTIVE
+    // (the "cap-over but investment locked" case).
+    await (await liq.connect(u1).invest(hordexAddr, PKG_SMALL)).wait();
+    await (await liq.connect(u2).invest(hordexAddr, E(1000))).wait();
+    await increaseTime(530);                 // huge ROI accrues, far over u1's headroom (lock active)
     await freshTwap(liq, hordexAddr);
 
-    // First claim pays up to the small cap; the rest accrues over-cap (now HELD, not forfeited).
+    const missedBefore = await missedOf(u1.address);
+
+    // First claim pays up to the remaining cap; the over-cap accrual is recorded MISSED (forfeited).
     let b = await hordex.balanceOf(u1.address);
     await (await liq.connect(u1).claimAllROI()).wait();
     const first = (await hordex.balanceOf(u1.address)) - b;
+    const missedAfterClaim = await missedOf(u1.address);
+    const forfeited = missedAfterClaim - missedBefore;
+
     assert(first > 0n, "first claim pays up to cap");
+    assert(forfeited > 0n, "over-cap ROI accruing while staked must be recorded as MISSED (not held)");
 
-    // Control: WITHOUT re-investing, a second claim yields ~nothing (no cap headroom).
-    const snap = await network.provider.send("evm_snapshot", []);
-    let b2 = await hordex.balanceOf(u1.address);
-    let noReinvest = 0n;
-    try { await (await liq.connect(u1).claimAllROI()).wait(); noReinvest = (await hordex.balanceOf(u1.address)) - b2; } catch (_) {}
-    await network.provider.send("evm_revert", [snap]);
-
-    // Re-invest to regain cap, then claim — the HELD over-cap ROI must now come through.
+    // Re-invest to regain cap, then claim immediately — the forfeited over-cap must NOT come back.
     await (await liq.connect(u1).invest(hordexAddr, PKG_SMALL)).wait();
     await freshTwap(liq, hordexAddr);
-    let b3 = await hordex.balanceOf(u1.address);
+    let b2 = await hordex.balanceOf(u1.address);
     await (await liq.connect(u1).claimAllROI()).wait();
-    const afterReinvest = (await hordex.balanceOf(u1.address)) - b3;
+    const afterReinvest = (await hordex.balanceOf(u1.address)) - b2;
+    const missedAfterReinvest = await missedOf(u1.address);
 
     console.log("      first:", ethers.formatEther(first),
-      " 2nd (no re-invest):", ethers.formatEther(noReinvest),
-      " 2nd (after re-invest):", ethers.formatEther(afterReinvest));
-    assert(afterReinvest > noReinvest, "re-investing must unlock more than the no-re-invest control");
-    assert(afterReinvest > 0n, "held over-cap ROI must be claimable once cap regains");
+      " forfeited(missed):", ethers.formatEther(forfeited),
+      " afterReinvest:", ethers.formatEther(afterReinvest));
+    // Missed never decreases (not un-missed), and the re-invest claim only yields tiny NEW accrual —
+    // far below the forfeited amount — proving the over-cap ROI is gone forever.
+    assert(missedAfterReinvest >= missedAfterClaim, "missed ROI must never be recovered / un-missed");
+    assert(afterReinvest < forfeited, "re-investing must NOT recover the forfeited over-cap ROI");
+  });
+
+  it("[NO-CAP GAP] ROI accruing while cap is exhausted is MISSED even when you re-invest AFTERWARD", async () => {
+    const ctx = await deploy();
+    const { u1, u2, liq, hordex, hordexAddr } = ctx;
+
+    async function missedOf(addr) {
+      const refs = await liq.getActiveROIStreams(addr);
+      let m = 0n;
+      for (const r of refs) {
+        const s = await liq.getROIStreamInfo(r.investor, r.lockIndex, r.level);
+        m += s.historicalMissedETH;
+      }
+      return m;
+    }
+
+    // u1 small cap ($125); u2 big → u1 gets a commission (consumes cap) + a big ROI stream.
+    await (await liq.connect(u1).invest(hordexAddr, PKG_SMALL)).wait();
+    await (await liq.connect(u2).invest(hordexAddr, E(1000))).wait();
+    await increaseTime(120);
+    await freshTwap(liq, hordexAddr);
+
+    // u1 claims → fills the remaining cap and sets _capPausedAt (cap now exhausted while still staked).
+    await (await liq.connect(u1).claimAllROI()).wait();
+    const missedAtExhaust = await missedOf(u1.address);
+
+    // NO-CAP GAP: lots of time passes with cap exhausted; ROI keeps accruing but is unclaimable.
+    await increaseTime(300);
+    await freshTwap(liq, hordexAddr);
+
+    // u1 re-invests AFTER exhaustion (without claiming first) — under the old "held" rule this would
+    // recover the gap against the fresh cap. Now the gap (exhaustion → re-invest) is FORFEITED.
+    await (await liq.connect(u1).invest(hordexAddr, PKG_SMALL)).wait();
+    await freshTwap(liq, hordexAddr);
+    let b = await hordex.balanceOf(u1.address);
+    await (await liq.connect(u1).claimAllROI()).wait();
+    const afterReinvest = (await hordex.balanceOf(u1.address)) - b;
+    const missedFinal = await missedOf(u1.address);
+    const gapForfeited = missedFinal - missedAtExhaust;
+
+    console.log("      no-cap gap forfeited:", ethers.formatEther(gapForfeited),
+      " claim after re-invest:", ethers.formatEther(afterReinvest));
+    assert(gapForfeited > 0n, "the no-cap-gap ROI must be recorded MISSED on re-invest");
+    assert(afterReinvest < gapForfeited, "re-investing AFTER exhaustion must NOT recover the no-cap-gap ROI");
+  });
+
+  it("[AUDIT] aggregate referral + ROI received never exceeds 5x of total invested", async () => {
+    const ctx = await deploy();
+    const { u1, u2, usdt, coreAddr, liq, hordex, hordexAddr } = ctx;
+
+    // Top u2 up so it can flood several $1000 invests.
+    await (await usdt.connect(u2).deposit({ value: E(5000) })).wait();
+
+    // u1 holds a single $100 lock → cap = 5 x $100 = $500. A big direct downline floods invests so
+    // u1's commission + ROI would FAR exceed the cap if anything leaked.
+    await (await liq.connect(u1).invest(hordexAddr, PKG)).wait();
+    for (let k = 0; k < 4; k++) {
+      await (await liq.connect(u2).invest(hordexAddr, E(1000))).wait();
+      await increaseTime(150);
+      await freshTwap(liq, hordexAddr);
+      try { await (await liq.connect(u1).claimAllROI()).wait(); } catch (_) {}
+    }
+    // One more long accrual + claim, then a re-invest + claim (exercises the no-cap-gap forfeit path).
+    await increaseTime(300); await freshTwap(liq, hordexAddr);
+    try { await (await liq.connect(u1).claimAllROI()).wait(); } catch (_) {}
+    await (await liq.connect(u1).invest(hordexAddr, PKG)).wait();   // 2nd $100 lock → cap now $1000 total
+    await increaseTime(150); await freshTwap(liq, hordexAddr);
+    try { await (await liq.connect(u1).claimAllROI()).wait(); } catch (_) {}
+
+    // Sum everything u1 actually received: referral commission (WETH, post 5% deployer cut) + ROI (ETH-equiv).
+    let commTotal = 0n;
+    for (const e of await liq.queryFilter(liq.filters.CommissionPaid(u1.address))) commTotal += e.args.amount;
+    let roiTotal = 0n;
+    for (const e of await liq.queryFilter(liq.filters.ROIClaimed(u1.address))) roiTotal += e.args.ethEquivalent;
+
+    const received = commTotal + roiTotal;
+    const cap = E(200) * 5n;   // u1 invested $200 total (two $100 locks) → 5x = $1000
+    console.log("      u1 commission:", ethers.formatEther(commTotal),
+      " ROI(eth):", ethers.formatEther(roiTotal),
+      " total received:", ethers.formatEther(received), " 5x cap:", ethers.formatEther(cap));
+    assert(received <= cap + E("0.01"), `aggregate received ${ethers.formatEther(received)} must not exceed 5x ${ethers.formatEther(cap)}`);
+    assert(received > cap / 3n, "sanity: u1 should have earned a meaningful fraction of the cap");
   });
 
   it("[UNLIMITED] commission-path gas does NOT scale with the recipient's stream count", async () => {

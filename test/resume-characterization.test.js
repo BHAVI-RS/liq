@@ -44,10 +44,10 @@ async function deploy() {
   const signers = await ethers.getSigners();
   const [owner, A] = signers;
 
-  const Math = await (await ethers.getContractFactory("LiquidityMath")).deploy();
+  const Math = await (await ethers.getContractFactory("HordexMath")).deploy();
   await Math.waitForDeployment();
   const mathAddr = await Math.getAddress();
-  const ViewLib = await (await ethers.getContractFactory("LiquidityViewLib", { libraries: { LiquidityMath: mathAddr } })).deploy();
+  const ViewLib = await (await ethers.getContractFactory("HordexViewLib", { libraries: { HordexMath: mathAddr } })).deploy();
   await ViewLib.waitForDeployment();
   const viewLibAddr = await ViewLib.getAddress();
 
@@ -65,17 +65,17 @@ async function deploy() {
   await hordex.waitForDeployment();
   const hordexAddr = await hordex.getAddress();
 
-  const facet = await (await ethers.getContractFactory("LiquidityFacet", { libraries: { LiquidityMath: mathAddr } }))
+  const facet = await (await ethers.getContractFactory("HordexFacet", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr);
   await facet.waitForDeployment();
-  const roiFacet = await (await ethers.getContractFactory("LiquidityROIFacet")).deploy();
+  const roiFacet = await (await ethers.getContractFactory("HordexROIFacet")).deploy();
   await roiFacet.waitForDeployment();
-  const core = await (await ethers.getContractFactory("Liquidity", { libraries: { LiquidityMath: mathAddr } }))
+  const core = await (await ethers.getContractFactory("Hordex", { libraries: { HordexMath: mathAddr } }))
     .deploy(routerAddr, factoryAddr, usdtAddr, hordexAddr, await facet.getAddress(), await roiFacet.getAddress());
   await core.waitForDeployment();
   const coreAddr = await core.getAddress();
-  const viewFacet = await (await ethers.getContractFactory("LiquidityViewFacet", {
-    libraries: { LiquidityMath: mathAddr, LiquidityViewLib: viewLibAddr },
+  const viewFacet = await (await ethers.getContractFactory("HordexViewFacet", {
+    libraries: { HordexMath: mathAddr, HordexViewLib: viewLibAddr },
   })).deploy(factoryAddr, usdtAddr, hordexAddr);
   await viewFacet.waitForDeployment();
   await (await core.setViewFacet(await viewFacet.getAddress())).wait();
@@ -223,20 +223,24 @@ describe("Natural-expiry RESUME characterization", function () {
   it("multi-gap: a second resume before claiming does NOT over-credit the first gap (PRESERVE)", async () => {
     const ctx = await deploy();
     const { A, signers, liq, hordex, hordexAddr } = ctx;
-    const B = signers[2];
+    const C = signers[2];
 
-    // A invests; B invests under A. Let both initial 540s locks expire, then B restakes LONG so B
-    // keeps accruing to A across A's subsequent SHORT re-lock cycles (creating the two gaps).
-    await (await liq.connect(A).invest(hordexAddr, PKG)).wait();
-    await downlineInvest(ctx, B);
-    await increaseTime(560);
+    // A invests, then a downline C invests LATER so C's 540s lock outlives A's short resume cycles
+    // and keeps accruing to A WITHOUT C ever restaking. (Under the new level-eligibility gate a
+    // downline restake re-runs assignment, so a restake during A's expiry would correctly drop A's
+    // stream — the old "restake B long" trick is no longer usable. A staggered, non-restaking
+    // downline keeps the double-resume drain on A's inbound stream testable.) A then expires/resumes
+    // TWICE with no claim between, so cp1 is still unabsorbed when cp2 forms and _drainPendingResume
+    // must reconcile it — without over-crediting the first (already-forfeited) gap.
+    await (await liq.connect(A).invest(hordexAddr, PKG)).wait();   // A.unlock ≈ t0+540
+    await increaseTime(300);
     await freshTwap(liq, hordexAddr);
-    await (await liq.connect(B).restakeLP(0, 360)).wait();   // B active ~2160s from here
+    await downlineInvest(ctx, C);                                  // C.unlock ≈ t0+841, accrues to A
 
-    await increaseTime(50);                                   // gap-1 window (A expired, B accruing)
+    await increaseTime(245);                                       // ≈ t0+546: A expired, C still active
     await freshTwap(liq, hordexAddr);
-    await (await liq.connect(A).restakeLP(0, 7)).wait();      // resume #1 (checkpoint cp1)
-    await increaseTime(60);                                   // A's 42s lock expires again → gap-2 forms
+    await (await liq.connect(A).restakeLP(0, 7)).wait();           // resume #1 (cp1); A active ~[546,588]
+    await increaseTime(60);                                        // ≈ t0+608: A's 42s lock expired → gap-2
     await freshTwap(liq, hordexAddr);
 
     // Decision point: resume #2 is imminent with NO intervening claim → _drainPendingResume must fire.

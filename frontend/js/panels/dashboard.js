@@ -1957,7 +1957,8 @@ function showIneligiblePopup(event) {
   _showDashEligPopup(`<div style="padding:20px 24px;font-family:var(--font-mono);">
     <div style="font-size:13px;color:#f87171;letter-spacing:1px;margin-bottom:6px;">NOT ELIGIBLE</div>
     <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Reason: <span style="color:#f87171;">${reason}</span></div>
-    <div style="font-size:11px;color:#94a3b8;margin-bottom:16px;">${detail}</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:10px;">${detail}</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:16px;">This is your overall cap status. Which commission/ROI <em>levels</em> you earn depends on your self-stake and team business — see the <strong>Network</strong> tab.</div>
     <div>
       <button onclick="closeDashEligPopup()" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.15);color:#94a3b8;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:7px 0;cursor:pointer;">CLOSE</button>
     </div>
