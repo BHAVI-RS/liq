@@ -269,9 +269,10 @@ function showROIStreamPopup(i) {
           <span style="font-size:12px;color:var(--gold);font-weight:700;">${levelRate}%</span>
           <span style="font-size:10px;color:var(--muted);">· $${fmtNum(d.ethInv * USDT_PER_ETH)} invested</span>
         </div>
-        ${_hasMissed ? `
-        <div style="font-size:10px;padding:7px 10px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.45);border-radius:5px;">
-          <span style="font-size:9px;letter-spacing:1px;color:var(--muted);">MISSED </span><span style="color:#ef4444;font-weight:700;">$${(_missedETH * USDT_PER_ETH).toFixed(5)}</span>
+        ${_showHeld ? `
+        <div style="font-size:10px;padding:7px 10px;background:rgba(251,191,36,0.10);border:1px solid rgba(251,191,36,0.45);border-radius:5px;">
+          <span style="font-size:9px;letter-spacing:1px;color:var(--muted);">HELD </span><span style="color:#fbbf24;font-weight:700;">$${_heldStr}</span>
+          <span style="font-size:8px;color:var(--muted);margin-left:6px;">carried over · invest more to claim</span>
         </div>` : ''}
         <div style="font-size:10px;padding:9px 12px;margin-top:8px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.3);border-radius:5px;display:flex;align-items:center;justify-content:space-between;">
           <span style="font-size:9px;letter-spacing:1px;color:var(--muted);">MAX POTENTIAL <span style="opacity:0.65;">· this period</span></span>
@@ -291,10 +292,9 @@ function showROIStreamPopup(i) {
           <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">CLAIMED</div>
           <div style="font-size:14px;color:#4ade80;font-family:var(--font-display);">$${(_trulyClaimedETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
-        <div style="background:rgba(251,191,36,0.07);border:1px solid rgba(251,191,36,0.22);border-radius:8px;padding:12px;">
-          <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">HELD</div>
-          <div style="font-size:14px;color:#fbbf24;font-family:var(--font-display);">$${_heldStr}</div>
-          ${_showHeld ? '<div style="font-size:8px;color:var(--muted);margin-top:3px;">carried over · invest more to claim</div>' : ''}
+        <div style="background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.22);border-radius:8px;padding:12px;">
+          <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">MISSED</div>
+          <div style="font-size:14px;color:#ef4444;font-family:var(--font-display);">$${(_missedETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
       </div>
     </div>`;
@@ -1385,7 +1385,7 @@ async function loadRwROI(silent = false) {
     const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords, capPausedAtRaw, commStats, ownLocks] = await Promise.all([
       contract.getROIData(walletAddress).catch(() => null),
       contract.getActiveROIStreams(walletAddress).catch(() => null),
-      contract.platformToken().catch(() => null),
+      cachedConstant('platformToken', () => contract.platformToken()).catch(() => null),
       provider.getBlock('latest').catch(() => null),
       contract.getROIClaimRecords(walletAddress).catch(() => []),
       Promise.resolve().then(() => contract.getCapPausedAt(walletAddress)).catch(() => 0),

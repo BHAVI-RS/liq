@@ -1021,7 +1021,7 @@ async function loadDashboard(silent = false) {
       contract.getUserLPLocks(walletAddress).catch(() => []),
       contract.getUserCommissionStats(walletAddress).catch(() => null),
       contract.getStakingReward(walletAddress).catch(() => null),
-      contract.platformToken().catch(() => null),
+      cachedConstant('platformToken', () => contract.platformToken()).catch(() => null),
       provider.getBlock('latest').catch(() => null),
       contract.getROIData(walletAddress).catch(() => null),
       contract.getCapPausedAt(walletAddress).catch(() => 0),
@@ -2015,11 +2015,14 @@ async function showDashROILevelPopup() {
       const uniq    = [...new Set(streams.map(r => r.investor.toLowerCase()))];
       const lockMap = new Map();
       const infoMap = new Map();
+      // Every distinct investor's locks in ONE batch call instead of one getUserLPLocks() each.
+      const _uniqAddrs = uniq.map(key => streams.find(r => r.investor.toLowerCase() === key).investor);
       await Promise.all([
-        ...uniq.map(async key => {
-          const addr = streams.find(r => r.investor.toLowerCase() === key).investor;
-          try { lockMap.set(key, await contract.getUserLPLocks(addr)); } catch(_) {}
-        }),
+        (async () => {
+          let _locksArr = [];
+          try { _locksArr = await contract.getUserLPLocksBatch(_uniqAddrs); } catch(_) {}
+          uniq.forEach((key, _ui) => { if (_locksArr[_ui]) lockMap.set(key, _locksArr[_ui]); });
+        })(),
         ...streams.map(async ref => {
           const k = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
           try { infoMap.set(k, await contract.getROIStreamInfo(ref.investor, ref.lockIndex, ref.level)); } catch(_) {}

@@ -9,7 +9,8 @@
     "node": "hardhat node",
     "serve": "npx http-server . -p 3000 -c-1 --cors -o liquidity-platform.html",
     "amoy:init": "hardhat run scripts/amoytestnet/inithdx.js --network polygonAmoy",
-    "amoy:simulateinit": "hardhat run scripts/amoytestnet/simulateinit.js --network polygonAmoy"
+    "amoy:simulateinit": "hardhat run scripts/amoytestnet/simulateinit.js --network polygonAmoy",
+    "amoy:jd": "hardhat run scripts/amoytestnet/justdeploy.js --network polygonAmoy"
   },
   "keywords": [],
   "author": "",

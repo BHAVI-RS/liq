@@ -246,12 +246,29 @@ const _tabLoaded = new Set();
 
 function invalidateTabs(...names) {
   names.forEach(n => _tabLoaded.delete(n));
-  _evLogCache.clear(); // event logs only change after a confirmed tx
+  _evLogCache.clear();  // event logs only change after a confirmed tx
+  _constCache.clear();  // rate tables can change via an owner setter — re-read after any tx
 }
 
 function _resetTabLoaded() {
   _tabLoaded.clear();
   _evLogCache.clear();
+  _constCache.clear();
+}
+
+// ── SESSION-CONSTANT CACHE ──
+// For on-chain reads that don't change during normal viewing (contract owner,
+// platform token, commission-rate tables). Stores the in-flight promise so
+// concurrent callers coalesce onto ONE RPC call and later callers reuse the
+// resolved value. Cleared on wallet/contract change (_resetTabLoaded) and after
+// any confirmed tx (invalidateTabs), so a stale value can never mask a write.
+const _constCache = new Map();
+
+function cachedConstant(name, fetchFn) {
+  if (_constCache.has(name)) return _constCache.get(name);
+  const p = Promise.resolve().then(fetchFn).catch(err => { _constCache.delete(name); throw err; });
+  _constCache.set(name, p);
+  return p;
 }
 
 // ── EVENT LOG CACHE ──

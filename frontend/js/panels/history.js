@@ -236,7 +236,7 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
 
     const PAID_TOPIC = ethers.utils.id('CommissionPaid(address,address,uint256,uint256)');
     let ownerAddr = '';
-    try { ownerAddr = (await contract.owner()).toLowerCase(); } catch(_) {}
+    try { ownerAddr = (await cachedConstant('owner', () => contract.owner())).toLowerCase(); } catch(_) {}
 
     for (const log of receipt.logs) {
       if (log.address.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) continue;
@@ -258,13 +258,20 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     if (investorAddr) {
       try {
         refEventsEstimated = true;
-        const ownerAddr = (await contract.owner()).toLowerCase();
+        // owner + the full rate table don't change while viewing — fetch each once
+        // (cached) instead of contract.owner() + 10 sequential referralCommissionRates() calls.
+        const [ownerAddr, rates] = await Promise.all([
+          cachedConstant('owner', () => contract.owner()).then(a => a.toLowerCase()),
+          cachedConstant('referralCommissionRates', () => Promise.all(
+            Array.from({ length: 10 }, (_, i) =>
+              contract.referralCommissionRates(i).catch(() => ethers.BigNumber.from(0))))),
+        ]);
         let cur = investorAddr;
         for (let lvl = 1; lvl <= 10; lvl++) {
           const ref = await contract.getReferrer(cur).catch(() => ethers.constants.AddressZero);
           if (!ref || ref === ethers.constants.AddressZero) break;
           // referralCommissionRates is 0-indexed: index 0 = L1, index 1 = L2, ...
-          const rateBN = await contract.referralCommissionRates(lvl - 1).catch(() => ethers.BigNumber.from(0));
+          const rateBN = rates[lvl - 1] || ethers.BigNumber.from(0);
           const amt = A40.mul(rateBN).div(10000);
           if (amt.isZero()) { cur = ref; continue; }
           refEvents.push({ recipient: ref, amount: amt, level: lvl, isPlatform: ref.toLowerCase() === ownerAddr });
