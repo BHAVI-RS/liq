@@ -1,21 +1,23 @@
-// Derives 60 wallets from PRIVATE_KEY and funds accounts [1..59] with 1 POL each.
+// Derives 515 wallets from PRIVATE_KEY and maintains balances across all sub-accounts.
 // Run this ONCE before simulateamoy.js.
 //
-// account[0]  = your actual wallet (must have ≥ 65 POL)
-// account[1..59] = deterministic wallets derived from your private key
+// account[0]    = your actual wallet (treasury / funder)
+// account[1..514] = deterministic wallets derived from your private key
+//
+// POL target  : 2 POL per sub-account; excess above target is returned to account[0]
+// USDT target : 500,000 USDT per sub-account
 //
 // USAGE:
 //   npx hardhat run scripts/amoytestnet/amoynode.js --network polygonAmoy
 
 const hre = require("hardhat");
 
-const TOTAL          = 60;
-const FUND_TARGET    = hre.ethers.parseEther("5");   // top-up target per sub-wallet
-const FUND_THRESHOLD = hre.ethers.parseEther("0.5"); // skip if already has this much
+const TOTAL        = 515;
+const POL_TARGET   = hre.ethers.parseEther("2"); // exact POL target per sub-wallet
 
 // ── USDT ──────────────────────────────────────────────────────────────────────
 const USDT_ADDRESS       = "0xcDC1119387AE7cE0cDb2A84CB8be2D6C8F0F5CB9";
-const USDT_PER_ACCOUNT   = hre.ethers.parseEther("2000000"); // exact target per sub-wallet (18 decimals)
+const USDT_PER_ACCOUNT   = hre.ethers.parseEther("500000"); // exact target per sub-wallet (18 decimals)
 const USDT_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function transfer(address to, uint256 amount) returns (bool)",
@@ -53,7 +55,7 @@ async function main() {
   const usdtContract = new hre.ethers.Contract(USDT_ADDRESS, USDT_ABI, deployer);
 
   console.log(sep("═"));
-  console.log("  AMOY NODE — 60 Derived Accounts");
+  console.log("  AMOY NODE — 515 Derived Accounts");
   console.log(sep("═"));
 
   const platformContract = new hre.ethers.Contract(PLATFORM_TOKEN_ADDRESS, USDT_ABI, deployer);
@@ -82,15 +84,21 @@ async function main() {
 
     if (i === 0) continue; // deployer is the funder — never refill
 
-    // ── MATIC top-up ──────────────────────────────────────────────────────
-    if (maticBal >= FUND_THRESHOLD) {
-      console.log(`  POL         : sufficient — skipped`);
+    // ── POL balance maintenance (target = 2 POL) ──────────────────────────
+    if (maticBal === POL_TARGET) {
+      console.log(`  POL         : exact — skipped`);
       maticSkipped++;
-    } else {
-      const toSend = FUND_TARGET - maticBal;
-      const tx = await deployer.sendTransaction({ to: wallet.address, value: toSend });
+    } else if (maticBal > POL_TARGET) {
+      const excess = maticBal - POL_TARGET;
+      const tx = await wallet.connect(provider).sendTransaction({ to: deployer.address, value: excess });
       await tx.wait();
-      console.log(`  POL         : sent ${hre.ethers.formatEther(toSend)} POL ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      console.log(`  POL         : returned ${hre.ethers.formatEther(excess)} POL to account[0] ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
+      maticFunded++;
+    } else {
+      const deficit = POL_TARGET - maticBal;
+      const tx = await deployer.sendTransaction({ to: wallet.address, value: deficit });
+      await tx.wait();
+      console.log(`  POL         : sent ${hre.ethers.formatEther(deficit)} POL ✓  (tx: ${tx.hash.slice(0, 18)}…)`);
       maticFunded++;
     }
 
@@ -141,7 +149,7 @@ async function main() {
   console.log(`  account[00] USDT remaining: ${hre.ethers.formatEther(finalUSDT)} USDT`);
   console.log(`  account[00] HDX  balance  : ${hre.ethers.formatEther(finalHDX)} HDX`);
   console.log(sep("═"));
-  console.log("  Done. Run simulateamoy.js next:");
+  console.log("  Done. Run simulateamoy.js next (515 accounts funded):");
   console.log("  npx hardhat run scripts/amoytestnet/simulateamoy.js --network polygonAmoy");
   console.log(sep("═") + "\n");
 }

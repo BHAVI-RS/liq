@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+// ── Time scaling: the SINGLE switch between testing and production ────────────
+// Seconds per "day" applied to every lock / staking / ROI duration in the protocol.
+//   TESTING    = 6      (1 day = 6 s — fast-forward for local & testnet runs)
+//   PRODUCTION = 86400  (real calendar days)
+// Change ONLY this one line to flip the whole system's timing. Every duration below
+// (and in the contracts that import this file) derives from it, so nothing else needs
+// touching. NOTE: keep the frontend's LP_DAY_SCALE in sync with this value.
+uint256 constant SECONDS_PER_DAY = 6;
+
+// Default LP / ROI lock window = 90 days, expressed in the scaled unit above.
+uint256 constant LP_LOCK_DURATION = 90 * SECONDS_PER_DAY;
+
 struct User {
     address userAddress;
     address referrer;
@@ -108,6 +120,15 @@ struct ClaimRecord {
     uint128 tokensAmount;   // slot 0: 128 bits
     uint128 ethEquivalent;  //         +128 = 256 bits
     uint64  ts;             // slot 1: 64 bits
+}
+
+// Per-lock period record (one for the initial lock, one per restake) for the
+// frontend Lock History modal. Packs into a single storage slot (64+64+128 bits).
+// claimed = platform-token staking reward claimed while this period was current.
+struct LockPeriod {
+    uint64  start;   // lockedAt when the period opened
+    uint64  end;     // unlockTime for the period
+    uint128 claimed; // staking-reward tokens claimed during this period
 }
 
 // On-chain LP event record (claim or remove) for frontend history tab.

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import "./HordexTypes.sol"; // for the shared SECONDS_PER_DAY / LP_LOCK_DURATION constants
+
 interface IUniV2PairMin {
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function token0() external view returns (address);
@@ -14,7 +16,7 @@ interface IUniV2FactoryMin {
 
 library HordexMath {
     uint256 private constant USDT_PER_ETH    = 1;
-    uint256 private constant LP_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
+    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
 
     function getTierIndex(uint32[12] memory tiers, uint256 ethInvestedWei)
         public pure returns (uint256 best)

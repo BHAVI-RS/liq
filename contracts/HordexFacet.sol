@@ -36,13 +36,18 @@ contract HordexFacet is HordexStorage {
     address private immutable _self;
     address private immutable _deployer;
 
-    uint256 private constant LP_LOCK_DURATION  = 540; // 90 days scaled: 1 day = 6 s (testing)
+    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
     uint256 private constant USDT_PER_ETH      = 1;
     uint256 private constant TWAP_PERIOD       = 30 seconds;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant MAX_REFERRAL_HOPS = 15;
     uint256 private constant MAX_SLIPPAGE_BPS  = 200;
     uint256 private constant TWAP_GUARD_BPS    = 500;
+    // Max distinct NON-OWNER recipients of referral commission per investment. Each such recipient
+    // is paid at most once (the highest level reaching it); the rest skip upward. Bounds both the
+    // paid-set memory array and the per-distribution gas. Beyond this (only reachable via pathological
+    // cap fragmentation) the remainder routes to owner.
+    uint256 private constant REF_PAID_MAX      = 30;
 
     // Errors (must match Hordex.sol exactly so revert data is correct)
     error NotDelegatecall();
@@ -194,6 +199,17 @@ contract HordexFacet is HordexStorage {
         emit CommissionPaid(recipient, from, toRecipient, level);
     }
 
+    // True if `who` has already been paid a referral commission earlier in this same investment.
+    function _refAlreadyPaid(address[REF_PAID_MAX] memory paid, uint256 count, address who)
+        private pure returns (bool)
+    {
+        for (uint256 k = 0; k < count; ) {
+            if (paid[k] == who) return true;
+            unchecked { k++; }
+        }
+        return false;
+    }
+
     function _distributeReferralCommissions(address _from, uint256 _amount) internal {
         // Pre-build the 10-hop ancestor chain so that level i always starts its
         // search at the fixed depth-(i+1) referrer, regardless of who received
@@ -209,6 +225,14 @@ contract HordexFacet is HordexStorage {
             }
         }
 
+        // One commission per NON-OWNER address per investment: levels are processed 0→9 (highest
+        // rate first), so the FIRST level that reaches an address is the highest one it qualifies
+        // for. Once paid, that address is skipped by every later level, whose commission then skips
+        // upward to the next eligible, not-yet-paid ancestor (ultimately the owner sink). Owner is
+        // exempt — it can absorb multiple levels.
+        address[REF_PAID_MAX] memory paid;
+        uint256 paidCount = 0;
+
         for (uint256 i = 0; i < 10; ) {
             uint256 toDistribute = (_amount * referralCommissionRates[i]) / 10000;
             if (toDistribute == 0) { unchecked { i++; } continue; }
@@ -219,12 +243,21 @@ contract HordexFacet is HordexStorage {
             address search = chain[i]; // fixed starting position for this level
 
             while (toDistribute > 0) {
+                // Paid-set saturated (pathological cap fragmentation): route the rest to owner.
+                if (paidCount >= REF_PAID_MAX) {
+                    _payCommission(owner, _from, toDistribute, i + 1);
+                    break;
+                }
                 uint256 cachedCap = 0;
                 uint256 hops = 0;
                 while (search != address(0) && users[search].isRegistered) {
                     if (hops >= MAX_REFERRAL_HOPS) { search = address(0); break; }
                     unchecked { hops++; }
-                    if (!_eligibleForLevel(search, uint8(i))) { search = users[search].referrer; continue; }
+                    if (!_eligibleForReferralLevel(search)) { search = users[search].referrer; continue; }
+                    // Skip anyone who already took a (higher) commission from this investment.
+                    if (search != owner && _refAlreadyPaid(paid, paidCount, search)) {
+                        search = users[search].referrer; continue;
+                    }
                     if (search == owner) break;
                     cachedCap = _getCommissionCap(search); // committed cap (O(locks)) — never iterates streams
                     if (cachedCap > 0) break;
@@ -246,18 +279,27 @@ contract HordexFacet is HordexStorage {
 
                 if (search == naturalRecipient) naturalReceivedHere += toPay;
                 _payCommission(search, _from, toPay, i + 1);
+
+                // Lock this non-owner out of any further level from this investment.
+                if (search != owner) { paid[paidCount] = search; unchecked { paidCount++; } }
+
                 toDistribute -= toPay;
                 search = users[search].referrer; // continue above for cap-split remainder
             }
 
+            // Missed accounting for the natural recipient. Skip it when the natural recipient took
+            // NOTHING at this level only because it had already been paid a higher commission earlier
+            // in this investment (it didn't "miss" — it got a better one). A partial cap-overflow at
+            // this level (naturalReceivedHere > 0) is still recorded as reason 2.
             if (naturalRecipient != address(0) && users[naturalRecipient].isRegistered &&
-                    naturalRecipient != owner && naturalReceivedHere < originalToDistribute) {
+                    naturalRecipient != owner && naturalReceivedHere < originalToDistribute &&
+                    !(naturalReceivedHere == 0 && _refAlreadyPaid(paid, paidCount, naturalRecipient))) {
                 uint256 missedAmt = originalToDistribute - naturalReceivedHere;
                 totalMissedCommissions[naturalRecipient] += missedAmt;
                 uint8 reason;
-                if (naturalReceivedHere > 0)                            reason = 2;
-                else if (!_eligibleForLevel(naturalRecipient, uint8(i))) reason = 0;
-                else                                                     reason = 1;
+                if (naturalReceivedHere > 0)                          reason = 2;
+                else if (!_eligibleForReferralLevel(naturalRecipient)) reason = 0;
+                else                                                   reason = 1;
                 emit CommissionMissed(naturalRecipient, _from, missedAmt, i + 1, reason);
                 _missedRecords[naturalRecipient].push(MissedRecord({
                     from:   _from,
@@ -273,6 +315,17 @@ contract HordexFacet is HordexStorage {
     }
 
     // ── Staking reward ────────────────────────────────────────────────────────
+
+    // Attribute claimed staking tokens to a lock's CURRENT (latest) period so the
+    // Lock History modal shows the exact per-period claimed amount. No-op if the lock
+    // predates period tracking (no records) or nothing was claimed.
+    function _recordPeriodClaim(address _user, uint256 _lockIndex, uint256 _tokens) internal {
+        if (_tokens == 0) return;
+        LockPeriod[] storage periods = _lockPeriods[_user][_lockIndex];
+        uint256 n = periods.length;
+        if (n == 0) return;
+        periods[n - 1].claimed += uint128(_tokens);
+    }
 
     function settleStakingRewardExt(address _user, uint256 _lockIndex) external payable onlyDelegatecall {
         _settleStakingReward(_user, _lockIndex);
@@ -309,6 +362,7 @@ contract HordexFacet is HordexStorage {
         if (newTokens > 0) lock.rewardClaimedETH += pendingETH;
         lock.tokensAccumulated = 0;
         lock.totalTokensClaimed += total;
+        _recordPeriodClaim(_user, _lockIndex, total);
         if (!IERC20F(platformToken).transfer(_user, total)) revert StakingRewardTransferFailed();
         emit StakingRewardClaimed(_user, total, pendingETH);
     }
@@ -340,6 +394,7 @@ contract HordexFacet is HordexStorage {
             (uint256 lt, uint256 pe) = _computeLockReward(locks[i], price);
             totalTokens     += lt;
             totalPendingETH += pe;
+            _recordPeriodClaim(msg.sender, i, lt);
             unchecked { i++; }
         }
         if (totalTokens == 0) revert NothingToClaim();
@@ -363,6 +418,7 @@ contract HordexFacet is HordexStorage {
         (uint256 tokensToSend, uint256 pendingETH) = _computeLockReward(lock, price);
         if (tokensToSend == 0) revert NothingToClaim();
         if (IERC20F(platformToken).balanceOf(address(this)) < tokensToSend) revert InsufficientTokenBalance();
+        _recordPeriodClaim(msg.sender, _lockIndex, tokensToSend);
         totalStakingRewardsPaidETH += pendingETH;
         if (!IERC20F(platformToken).transfer(msg.sender, tokensToSend)) revert TokenTransferFailed();
         _claimRecords[msg.sender].push(ClaimRecord({
@@ -484,6 +540,13 @@ contract HordexFacet is HordexStorage {
         }));
 
         _totalLockedLP[pair] += lpReceived;
+
+        // Open the initial lock period for the Lock History modal (one slot).
+        _lockPeriods[msg.sender][userLPLocks[msg.sender].length - 1].push(LockPeriod({
+            start:   uint64(block.timestamp),
+            end:     uint64(block.timestamp + LP_LOCK_DURATION),
+            claimed: 0
+        }));
 
         _investRecords[msg.sender].push(InvestRecord({
             token:         _token,
@@ -629,7 +692,12 @@ contract HordexFacet is HordexStorage {
             lock.streakBaseEth = lock.ethInvested;
         }
 
-        uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / 2 : 90;
+        // Recover the ENDING period's duration in days. Lock windows are scaled at SECONDS_PER_DAY
+        // (see the unlockTime assignment below), so divide the stored second-span by the same
+        // factor to get back to whole days — otherwise the recovered "days" land on the wrong
+        // duration bucket, dIdx never matches prevDIdx, and the streak resets to base on every
+        // same-duration restake.
+        uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / SECONDS_PER_DAY : 90;
         uint256 prevDIdx    = HordexMath.getDurationIndex(stakingDurations, prevDurDays);
         uint256 sIdx;
         if (dIdx == prevDIdx) {
@@ -647,9 +715,16 @@ contract HordexFacet is HordexStorage {
         // New cap is only ever gained via invest() (which appends a fresh lock).
 
         lock.lockedAt         = block.timestamp;
-        lock.unlockTime       = block.timestamp + _durationDays * 6; // 1 day = 6 s (testing)
+        lock.unlockTime       = block.timestamp + _durationDays * SECONDS_PER_DAY;
         lock.rewardClaimedETH = 0;
         lock.rewardRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationDays, sIdx);
+
+        // Open a new lock period for the Lock History modal (one slot per restake).
+        _lockPeriods[msg.sender][_lockIndex].push(LockPeriod({
+            start:   uint64(block.timestamp),
+            end:     uint64(lock.unlockTime),
+            claimed: 0
+        }));
 
         emit LPRestaked(msg.sender, lock.token, lock.lpAmount, lock.unlockTime, _durationDays);
     }

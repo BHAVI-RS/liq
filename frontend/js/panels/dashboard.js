@@ -357,11 +357,13 @@ function _dashStartROITicker() {
       el.innerHTML = '0';
     }
     // Tick effective referral cap down as ROI accrues at the same rate.
+    const capNow = _dashCapIsEligible
+      ? Math.max(0, _dashEffCapRefBase - elapsed * _dashROIRatePerSec)
+      : 0;
     if (_dashCapIsEligible) {
       const capEl   = document.getElementById('dashCapRem');
       const badgeEl = document.getElementById('dashCapBadge');
       if (capEl) {
-        const capNow = Math.max(0, _dashEffCapRefBase - elapsed * _dashROIRatePerSec);
         capEl.textContent = '$' + (capNow * USDT_PER_ETH).toFixed(2) + ' available cap';
         if (badgeEl && capNow <= 0) {
           badgeEl.textContent = 'EXHAUSTED';
@@ -369,6 +371,21 @@ function _dashStartROITicker() {
           badgeEl.style.background = 'rgba(239,68,68,0.12)';
           badgeEl.style.borderColor = 'rgba(239,68,68,0.3)';
         }
+      }
+    }
+    // Update ROI sub-label to reflect real cap state (not always "live").
+    const _roiSubEl = document.getElementById('dashROICommSub');
+    if (_roiSubEl) {
+      if (_dashCapPaused) {
+        _roiSubEl.innerHTML = '<span style="color:#ef4444;">paused</span>';
+      } else if (_dashCapLockExpired) {
+        _roiSubEl.innerHTML = '<span style="color:#f97316;">lock expired</span>';
+      } else if (_dashCapIsEligible && capNow <= 0) {
+        _roiSubEl.innerHTML = '<span style="color:#ef4444;">exhausted</span>';
+      } else if (!_dashCapIsEligible) {
+        _roiSubEl.innerHTML = 'no active cap';
+      } else {
+        _roiSubEl.innerHTML = 'live <span style="color:#a78bfa;font-size:9px;">&#9679;</span>';
       }
     }
   }, 1000);
@@ -1958,7 +1975,7 @@ function showIneligiblePopup(event) {
     <div style="font-size:13px;color:#f87171;letter-spacing:1px;margin-bottom:6px;">NOT ELIGIBLE</div>
     <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Reason: <span style="color:#f87171;">${reason}</span></div>
     <div style="font-size:11px;color:#94a3b8;margin-bottom:10px;">${detail}</div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:16px;">This is your overall cap status. Which commission/ROI <em>levels</em> you earn depends on your self-stake and team business — see the <strong>Network</strong> tab.</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:16px;">This is your overall cap status. Referral commissions unlock all 10 levels at $25 active self-stake; ROI <em>levels</em> unlock by active self-stake per level — see the <strong>Network</strong> tab.</div>
     <div>
       <button onclick="closeDashEligPopup()" style="width:100%;background:transparent;border:1px solid rgba(255,255,255,0.15);color:#94a3b8;border-radius:3px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;padding:7px 0;cursor:pointer;">CLOSE</button>
     </div>

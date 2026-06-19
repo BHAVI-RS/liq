@@ -1,12 +1,15 @@
-// Characterization for the LEVEL-ELIGIBILITY gates (self-stake + team-business) that replace the
-// old headcount gate ("N directs for level N") for BOTH referral commissions and ROI.
+// Characterization for the LEVEL-ELIGIBILITY model (active self-stake gate; team-business gate
+// REMOVED) for referral commissions and ROI.
 //
-// Rule (0-indexed level i, paid level N = i+1): a recipient earns level i only if
-//   active self-stake (USDT)        >= selfStakeGate[i]   ([25,50,100,250,500,1000,1000,1000,1000,1000])
-//   cumulative team business (USDT) >= businessGate[i]    ([0,0,500,2500,5000,10000,10000,10000,10000,10000])
-// Self-stake is ACTIVE (drops when locks expire); team business is sticky (lifetime), rolled up 10
-// levels on each downline invest. An ineligible ancestor is skipped: referral rolls up to the next
-// eligible ancestor; ROI assigns no stream for that level.
+// Referral commissions (0-indexed level i, paid level N = i+1):
+//   a recipient earns ALL 10 levels once active self-stake >= $25 (flat — no per-level escalation,
+//   no team-business requirement). Below $25 active self-stake the recipient is skipped and the
+//   commission rolls up to the next eligible ancestor.
+// ROI streams:
+//   a recipient earns level i only if active self-stake >= selfStakeGate[i]
+//   ([25,50,100,250,500,1000,2500,5000,10000,25000]). No team-business requirement. An ineligible
+//   ancestor is assigned no stream for that level (skipped); a later restake re-runs assignment.
+// Self-stake is ACTIVE (drops when locks expire/are removed).
 //
 // Run:  npx hardhat test test/eligibility.test.js
 
@@ -94,113 +97,126 @@ async function inv(ctx, who, amt) {
   await (await ctx.liq.connect(who).invest(ctx.hordexAddr, E(amt))).wait();
 }
 
-describe("Level-eligibility gates (self-stake + team business)", function () {
+describe("Level-eligibility (active self-stake gate; team-business gate removed)", function () {
   this.timeout(300000);
 
-  // ── SELF-STAKE gate (isolated at level 2, whose business-gate is $0) ─────────────────
-  it("referral: a level-2 recipient below the self-stake gate ($50) is skipped, then qualifies after topping up", async () => {
+  // ── REFERRAL: flat $25 self-stake unlocks every level (incl. a level the OLD model gated) ──
+  it("referral: a level-3 recipient with only $25 self-stake and low team business EARNS (flat $25 rule)", async () => {
     const ctx = await deploy();
-    const { owner, signers, liq, usdt, hordexAddr } = ctx;
-    const U2 = signers[2], U1 = signers[3], X = signers[4];
+    const { owner, signers, usdt } = ctx;
+    const A = signers[2], B = signers[3], C = signers[4], D = signers[5], X = signers[6];
 
-    // chain owner → U2 → U1 → X. U2 stakes only $25 → meets L1 ($25) but NOT L2 self-gate ($50).
-    await fund(ctx, U2); await fund(ctx, U1); await fund(ctx, X);
-    await reg(ctx, U2, owner); await inv(ctx, U2, 25);
-    await reg(ctx, U1, U2);    await inv(ctx, U1, 100);
-    await reg(ctx, X,  U1);    await inv(ctx, X, 100);
+    // chain owner → A → B → C → D → X. From X: D=L0, C=L1, B=L2, A=L3.
+    // A stakes only $25 (old model needed $100 self + $500 business for L3; new model: $25 ⇒ all levels).
+    await fund(ctx, A); await fund(ctx, B); await fund(ctx, C); await fund(ctx, D); await fund(ctx, X);
+    await reg(ctx, A, owner); await inv(ctx, A, 25);
+    await reg(ctx, B, A);     await inv(ctx, B, 100);
+    await reg(ctx, C, B);     await inv(ctx, C, 100);
+    await reg(ctx, D, C);     await inv(ctx, D, 100);
+    await reg(ctx, X, D);     await inv(ctx, X, 100);
 
-    // X invests → U2 is the natural level-2 recipient. $25 < $50 ⇒ rolled up, U2 gets nothing.
-    let b = await usdt.balanceOf(U2.address);
+    // X invests again → A is the fixed level-3 recipient. $25 active self-stake ⇒ eligible ⇒ earns.
+    const b = await usdt.balanceOf(A.address);
     await inv(ctx, X, 100);
-    const blocked = (await usdt.balanceOf(U2.address)) - b;
+    const got = (await usdt.balanceOf(A.address)) - b;
 
-    // U2 adds $25 (active self-stake now $50) ⇒ eligible for level 2.
-    await inv(ctx, U2, 25);
-    b = await usdt.balanceOf(U2.address);
-    await inv(ctx, X, 100);
-    const allowed = (await usdt.balanceOf(U2.address)) - b;
-
-    console.log("      L2 self-gate — blocked@ $25:", f(blocked), " allowed@ $50:", f(allowed));
-    assert(blocked === 0n, "below the L2 self-gate the recipient must receive nothing (rolled up)");
-    assert(allowed > 0n, "at/above the L2 self-gate the recipient must receive the level-2 commission");
+    console.log("      L3 recipient with $25 self-stake earned:", f(got));
+    assert(got > 0n, "a $25-self-stake recipient must earn even deep referral levels (no business gate)");
   });
 
-  // ── TEAM-BUSINESS gate (isolated at level 3: self-gate $100, business-gate $500) ──────
-  it("referral: a level-3 recipient below the business gate ($500) is skipped, then qualifies once business crosses it", async () => {
+  // ── REFERRAL: below $25 active self-stake ⇒ skipped & rolled up, then qualifies at $25 ──────
+  it("referral: a recipient below $25 active self-stake is skipped, then qualifies after staking $25", async () => {
     const ctx = await deploy();
-    const { owner, signers, liq, usdt, hordexAddr } = ctx;
-    const U3 = signers[2], V2 = signers[3], V1 = signers[4], W = signers[5], Y = signers[6];
+    const { owner, signers, usdt } = ctx;
+    const R = signers[2], M = signers[3], X = signers[4];
 
-    // chain owner → U3 → V2 → V1 → W. U3 stakes $100 (meets L3 self-gate $100); business builds up.
-    await fund(ctx, U3); await fund(ctx, V2); await fund(ctx, V1); await fund(ctx, W); await fund(ctx, Y);
-    await reg(ctx, U3, owner); await inv(ctx, U3, 100);
-    await reg(ctx, V2, U3);    await inv(ctx, V2, 100);   // U3 business 100
-    await reg(ctx, V1, V2);    await inv(ctx, V1, 100);   // U3 business 200
-    await reg(ctx, W,  V1);    await inv(ctx, W, 100);    // U3 business 300
+    // chain owner → R → M → X. From X: M=L0, R=L1. R registers but does NOT stake (self-stake $0).
+    await fund(ctx, R); await fund(ctx, M); await fund(ctx, X);
+    await reg(ctx, R, owner);                  // R has NO active self-stake
+    await reg(ctx, M, R);     await inv(ctx, M, 100);
+    await reg(ctx, X, M);     await inv(ctx, X, 100);
 
-    // W (level 3 of U3) invests → U3 business 400 (< 500) ⇒ U3 skipped at level 3.
-    let b = await usdt.balanceOf(U3.address);
-    await inv(ctx, W, 100);
-    const blocked = (await usdt.balanceOf(U3.address)) - b;
+    // X invests → R is the level-1 recipient but has $0 self-stake ⇒ skipped (rolled up to owner).
+    let b = await usdt.balanceOf(R.address);
+    await inv(ctx, X, 100);
+    const blocked = (await usdt.balanceOf(R.address)) - b;
 
-    // Add a deeper downline so U3's cumulative business crosses $500, then trigger level 3 again.
-    await reg(ctx, Y, W); await inv(ctx, Y, 250);          // U3 business 650
-    b = await usdt.balanceOf(U3.address);
-    await inv(ctx, W, 100);                                // U3 business 750 ⇒ eligible
-    const allowed = (await usdt.balanceOf(U3.address)) - b;
+    // R stakes $25 ⇒ now eligible for all referral levels.
+    await inv(ctx, R, 25);
+    b = await usdt.balanceOf(R.address);
+    await inv(ctx, X, 100);
+    const allowed = (await usdt.balanceOf(R.address)) - b;
 
-    console.log("      L3 business-gate — blocked@ $400:", f(blocked), " allowed@ $750:", f(allowed));
-    assert(blocked === 0n, "below the L3 business-gate the recipient must receive nothing (rolled up)");
-    assert(allowed > 0n, "once business >= $500 the recipient must receive the level-3 commission");
+    console.log("      referral — blocked@ $0 self:", f(blocked), " allowed@ $25 self:", f(allowed));
+    assert(blocked === 0n, "below $25 active self-stake the recipient receives nothing (rolled up)");
+    assert(allowed > 0n, "at/above $25 active self-stake the recipient receives the commission");
   });
 
-  // ── ROI uses the SAME gate at assignment ─────────────────────────────────────────────
-  it("ROI: an ancestor below a level's gates is assigned NO stream for that level (skipped), then gets it once eligible", async () => {
+  // ── ROI: per-level self-stake gate, NO business gate ────────────────────────────────────
+  it("ROI: a level-2 ancestor with $100 self-stake (low business) IS assigned the stream (no business gate)", async () => {
     const ctx = await deploy();
-    const { owner, signers, liq, hordexAddr } = ctx;
-    const U3 = signers[2], V2 = signers[3], V1 = signers[4], W = signers[5], Y = signers[6];
+    const { owner, signers, liq } = ctx;
+    const U3 = signers[2], V2 = signers[3], V1 = signers[4], W = signers[5];
     const ZERO = ethers.ZeroAddress;
 
-    // chain owner → U3 → V2 → V1 → W. W's lock-0 streams go up: V1=L0, V2=L1, U3=L2.
-    // U3 (self $100 ✓, business 300 < $500 ✗) fails the L2 business-gate → its L2 stream is skipped.
-    await fund(ctx, U3); await fund(ctx, V2); await fund(ctx, V1); await fund(ctx, W); await fund(ctx, Y);
+    // chain owner → U3 → V2 → V1 → W. W's lock-0 streams: V1=L0, V2=L1, U3=L2.
+    // U3 self $100 == L2 self-gate ($100); business is low (< old $500 gate) but business no longer gates.
+    await fund(ctx, U3); await fund(ctx, V2); await fund(ctx, V1); await fund(ctx, W);
     await reg(ctx, U3, owner); await inv(ctx, U3, 100);
     await reg(ctx, V2, U3);    await inv(ctx, V2, 100);
     await reg(ctx, V1, V2);    await inv(ctx, V1, 100);
-    await reg(ctx, W,  V1);    await inv(ctx, W, 100);     // U3 business 300 (< 500) at assignment
+    await reg(ctx, W,  V1);    await inv(ctx, W, 100);     // U3 business only 300
 
-    const l0 = (await liq.getROIStreamInfo(W.address, 0, 0)).recipient;  // direct referrer V1 (eligible)
-    const l2 = (await liq.getROIStreamInfo(W.address, 0, 2)).recipient;  // U3 (business-ineligible)
-    console.log("      ROI assign — W.L0:", l0, " W.L2(skipped?):", l2);
+    const l0 = (await liq.getROIStreamInfo(W.address, 0, 0)).recipient;
+    const l2 = (await liq.getROIStreamInfo(W.address, 0, 2)).recipient;
+    console.log("      ROI assign — W.L0:", l0, " W.L2:", l2);
     assert(l0.toLowerCase() === V1.address.toLowerCase(), "eligible direct referrer is assigned the L0 stream");
-    assert(l2 === ZERO, "business-ineligible L2 ancestor is skipped (recipient stays address(0))");
+    assert(l2.toLowerCase() === U3.address.toLowerCase(),
+      "a $100-self-stake L2 ancestor is assigned the stream regardless of (low) team business");
+  });
 
-    // Boost U3's cumulative business past $500, then W opens a NEW lock → U3 now qualifies for L2.
-    await reg(ctx, Y, W); await inv(ctx, Y, 250);          // U3 business → 550
-    await inv(ctx, W, 100);                                // W lock-1 assignment; U3 business → 650, eligible
+  it("ROI: a level-2 ancestor below the $100 self-stake gate is skipped, then assigned after topping up", async () => {
+    const ctx = await deploy();
+    const { owner, signers, liq } = ctx;
+    const U3 = signers[2], V2 = signers[3], V1 = signers[4], W = signers[5];
+    const ZERO = ethers.ZeroAddress;
+
+    // U3 self $50 (< L2 self-gate $100) ⇒ its L2 stream is skipped at assignment.
+    await fund(ctx, U3); await fund(ctx, V2); await fund(ctx, V1); await fund(ctx, W);
+    await reg(ctx, U3, owner); await inv(ctx, U3, 50);
+    await reg(ctx, V2, U3);    await inv(ctx, V2, 100);
+    await reg(ctx, V1, V2);    await inv(ctx, V1, 100);
+    await reg(ctx, W,  V1);    await inv(ctx, W, 100);
+
+    assert((await liq.getROIStreamInfo(W.address, 0, 2)).recipient === ZERO,
+      "self-stake-ineligible L2 ancestor is skipped (recipient stays address(0))");
+
+    // U3 tops up to $100 active self-stake, then W opens a NEW lock → U3 now qualifies for L2.
+    await inv(ctx, U3, 50);                                // U3 active self-stake → $100
+    await inv(ctx, W, 100);                                // W lock-1 assignment
     const l2b = (await liq.getROIStreamInfo(W.address, 1, 2)).recipient;
-    console.log("      ROI assign after eligible — W.lock1.L2:", l2b);
-    assert(l2b.toLowerCase() === U3.address.toLowerCase(), "once business >= $500 the L2 stream is assigned to U3");
-    // The earlier lock-0 L2 stream stays skipped (eligibility is evaluated per assignment, not retroactively).
-    assert((await liq.getROIStreamInfo(W.address, 0, 2)).recipient === ZERO, "lock-0's skipped L2 stream is not retroactively assigned");
+    console.log("      ROI re-assign after topping up — W.lock1.L2:", l2b);
+    assert(l2b.toLowerCase() === U3.address.toLowerCase(), "once self-stake >= $100 the L2 stream is assigned to U3");
+    assert((await liq.getROIStreamInfo(W.address, 0, 2)).recipient === ZERO,
+      "lock-0's skipped L2 stream is not retroactively assigned");
   });
 
   // ── View getters the frontend depends on ─────────────────────────────────────────────
-  it("views: getEligibilityGates + getUserEligibility expose the right values for the UI", async () => {
+  it("views: getEligibilityGates returns new self-stake gates + zeroed business gates; getUserEligibility = ROI depth", async () => {
     const ctx = await deploy();
     const { owner, signers, liq } = ctx;
     const P = signers[2], Q = signers[3];
 
     const [selfGates, bizGates] = await liq.getEligibilityGates();
     assert.equal(Number(selfGates[0]), 25);
-    assert.equal(Number(selfGates[5]), 1000);   // levels 6-10 share $1,000
-    assert.equal(Number(selfGates[9]), 1000);
-    assert.equal(Number(bizGates[2]), 500);
-    assert.equal(Number(bizGates[4]), 5000);    // level 5
-    assert.equal(Number(bizGates[9]), 10000);   // levels 6-10 share $10,000
+    assert.equal(Number(selfGates[5]), 1000);
+    assert.equal(Number(selfGates[6]), 2500);
+    assert.equal(Number(selfGates[9]), 25000);   // level 10 now $25,000
+    // Business gate is removed → all zeros.
+    for (let i = 0; i < 10; i++) assert.equal(Number(bizGates[i]), 0, "business gates must be zeroed");
 
-    // P stakes $100 (self 100) with one $250 downline (business 250):
-    // L1($25/$0)✓  L2($50/$0)✓  L3($100/$500)✗ ⇒ unlockedLevels = 2.
+    // P stakes $100 active self-stake → ROI levels: L1($25)✓ L2($50)✓ L3($100)✓ L4($250)✗ ⇒ 3.
+    // (Team business is irrelevant to the gate now.)
     await fund(ctx, P); await fund(ctx, Q);
     await reg(ctx, P, owner); await inv(ctx, P, 100);
     await reg(ctx, Q, P);     await inv(ctx, Q, 250);
@@ -208,7 +224,6 @@ describe("Level-eligibility gates (self-stake + team business)", function () {
     const e = await liq.getUserEligibility(P.address);
     console.log("      getUserEligibility(P):", Number(e.selfStakeUSDT ?? e[0]), Number(e.teamBusinessUSDT ?? e[1]), Number(e.unlockedLevels ?? e[2]));
     assert.equal(Number(e.selfStakeUSDT ?? e[0]), 100);
-    assert.equal(Number(e.teamBusinessUSDT ?? e[1]), 250);
-    assert.equal(Number(e.unlockedLevels ?? e[2]), 2);
+    assert.equal(Number(e.unlockedLevels ?? e[2]), 3, "ROI unlocked levels = highest level whose self-stake gate is met");
   });
 });

@@ -748,7 +748,9 @@ async function openStakeModal(lockIndex) {
   // Streak PPM increment per duration index — must match _setTieredRates() in contract
   const _streakIncrPPM = [0, 5_000, 26_000, 30_000, 50_000, 100_000];
 
-  // Per-duration restake counts and the current lock's own duration
+  // Per-duration restake counts and the current lock's own duration.
+  // LP_DAY_SCALE (global in utils.js) mirrors the contract's SECONDS_PER_DAY, so dividing the
+  // lock's second-span by it yields whole days for the isSameDur streak match below.
   let restakeCounts = [0,0,0,0,0,0];
   let lockDurDays   = 90; // default to 90 days if not stored
   try { if (card && card.dataset.restakeCounts) restakeCounts = JSON.parse(card.dataset.restakeCounts); } catch(_) {}
@@ -985,87 +987,38 @@ async function showLockHistory(lockIndex) {
   const body = document.getElementById('lhBody');
 
   try {
-    const _latestBN  = await provider.getBlockNumber();
-    const _fromBlock = getFromBlock(_latestBN);
-    const [investedEvs, restakedEvs, claimEvs] = await Promise.all([
-      queryFilterBatched(contract, contract.filters.Invested(walletAddress, lock.token), _fromBlock, 'latest'),
-      queryFilterBatched(contract, contract.filters.LPRestaked(walletAddress, lock.token), _fromBlock, 'latest'),
-      queryFilterBatched(contract, contract.filters.StakingRewardClaimed(walletAddress), _fromBlock, 'latest'),
-    ]);
+    // Authoritative per-lock period history straight from contract storage. Each record is
+    // one lock window (index 0 = initial lock, 1..N = each restake) with the exact staking
+    // reward claimed while it was current — no log reconstruction, no cross-lock attribution.
+    const periodsRaw = await contract.getLockPeriods(walletAddress, lockIndex);
 
-    investedEvs.sort((a, b) => a.blockNumber - b.blockNumber);
-    restakedEvs.sort((a, b) => a.blockNumber - b.blockNumber);
-    claimEvs.sort((a, b)    => a.blockNumber - b.blockNumber);
-
-    const allBlocks = [...new Set([
-      ...investedEvs.map(e => e.blockNumber),
-      ...restakedEvs.map(e => e.blockNumber),
-      ...claimEvs.map(e    => e.blockNumber),
-    ])];
-    const btsMap = new Map();
-    await Promise.all(allBlocks.map(async bn => {
-      const blk = await provider.getBlock(bn).catch(() => null);
-      if (blk) btsMap.set(bn, blk.timestamp);
-    }));
-
-    // Find the Invested event for this specific lock (Nth occurrence for this token).
-    let nthForToken = 0;
-    for (let j = 0; j < lockIndex; j++) {
-      if (_invLPLocks[j] && _invLPLocks[j].token.toLowerCase() === key) nthForToken++;
-    }
-    const initEvent = investedEvs[nthForToken] || investedEvs[0];
-    const initTs    = initEvent ? btsMap.get(initEvent.blockNumber) : null;
-
-    // Build restake periods directly from events sorted chronologically.
-    // Each LPRestaked event gives: newUnlockTime (period end) and durationDays (seconds).
-    // Period start = newUnlockTime - durationDays.
-    const restakePeriods = restakedEvs
-      .map(ev => ({
-        start:    Number(ev.args.newUnlockTime) - Number(ev.args.durationDays),
-        end:      Number(ev.args.newUnlockTime),
-        duration: Number(ev.args.durationDays),
-      }))
-      .sort((a, b) => a.start - b.start);
-
-    // Initial period: from investment timestamp to start of first restake
-    // (or to current unlockTime if no restakes).
-    const initStart = initTs || Number(lock.lockedAt) || Number(lock.unlockTime);
-    const initEnd   = restakePeriods.length > 0
-      ? restakePeriods[0].start
-      : Number(lock.unlockTime);
-
-    const periods = [{
-      label:     'Initial',
-      start:     initStart,
-      end:       initEnd,
-      duration:  initEnd - initStart,
-      isCurrent: restakePeriods.length === 0,
-    }];
-    restakePeriods.forEach((p, idx) => {
-      periods.push({
-        label:     `Restake ${idx + 1}`,
-        start:     p.start,
-        end:       p.end,
-        duration:  p.duration,
-        isCurrent: idx === restakePeriods.length - 1,
+    let periods;
+    if (periodsRaw && periodsRaw.length) {
+      periods = periodsRaw.map((p, idx) => {
+        const start = Number(p.start);
+        const end   = Number(p.end);
+        return {
+          label:     idx === 0 ? 'Initial' : `Restake ${idx}`,
+          start,
+          end,
+          duration:  Math.max(0, end - start),
+          claimed:   parseFloat(ethers.utils.formatEther(p.claimed || ethers.BigNumber.from(0))),
+          isCurrent: idx === periodsRaw.length - 1,
+        };
       });
-    });
-
-    // Attribute StakingRewardClaimed events to periods by block timestamp.
-    // Events aggregate all user locks in one tx, so scale amounts by this lock's
-    // fraction of total claimed (lock.totalTokensClaimed is per-lock accurate).
-    const claims = claimEvs.map(e => ({
-      ts:     btsMap.get(e.blockNumber) || 0,
-      tokens: parseFloat(ethers.utils.formatEther(e.args.tokensAmount || ethers.BigNumber.from(0))),
-    }));
-    const eventTotal = claims.reduce((s, c) => s + c.tokens, 0);
-    const scale = (eventTotal > 0 && totalClaimed > 0) ? totalClaimed / eventTotal : 1;
-    for (let pidx = 0; pidx < periods.length; pidx++) {
-      const p = periods[pidx];
-      const isLast = pidx === periods.length - 1;
-      p.claimed = claims
-        .filter(c => c.ts >= p.start && (isLast ? c.ts <= p.end : c.ts < p.end))
-        .reduce((s, c) => s + c.tokens * scale, 0);
+    } else {
+      // Lock predates on-chain period tracking — fall back to the single current window
+      // derived from the lock's own state (still per-lock accurate, just one row).
+      const start = Number(lock.lockedAt) || 0;
+      const end   = Number(lock.unlockTime) || 0;
+      periods = [{
+        label:     'Current',
+        start,
+        end,
+        duration:  Math.max(0, end - start),
+        claimed:   totalClaimed,
+        isCurrent: true,
+      }];
     }
 
     // Render table rows.

@@ -43,6 +43,9 @@ abstract contract HordexStorage {
     mapping(address => InvestRecord[])     internal _investRecords;
     mapping(address => ClaimRecord[])      internal _claimRecords;
     mapping(address => LPEventRecord[])    internal _lpEventRecords;
+    // Per-lock period history (initial + each restake) for the Lock History modal.
+    // Keyed by user then lock index; one LockPeriod appended per invest/restake.
+    mapping(address => mapping(uint256 => LockPeriod[])) internal _lockPeriods;
 
     // ROI commission state (used by HordexROIFacet via DELEGATECALL)
     mapping(address => mapping(uint256 => ROIStream[10])) internal _roiStreams;
@@ -109,7 +112,8 @@ abstract contract HordexStorage {
     // getROIAccrued/getROIPending can read directly from inherited storage instead of calling
     // the ROI facet as a regular CALL (which would read the facet's own empty storage).
     uint256 internal constant _ROI_DENOM         = 50_000_000_000;
-    uint256 internal constant _ROI_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
+    // 90-day ROI lock window, derived from the shared SECONDS_PER_DAY switch (HordexTypes.sol).
+    uint256 internal constant _ROI_LOCK_DURATION = 90 * SECONDS_PER_DAY;
 
     function _calcAccrued(
         ROIStream storage stream,
@@ -202,21 +206,22 @@ abstract contract HordexStorage {
     mapping(address => uint256) internal _roiResumeAt;
     mapping(address => uint256) internal _roiUnabsorbed;
 
-    // ── Level-eligibility gates (referral commissions AND ROI), per 0-indexed level ─────────
-    // To EARN level i (1-indexed N = i+1) a recipient must meet BOTH gates:
-    //   active self-stake (USDT, sum of non-removed non-expired locks) >= selfStakeGate[i]
-    //   cumulative team business (USDT, downline within 10 levels)      >= businessGate[i]
-    // Self gate is ACTIVE — it falls when locks expire, so a recipient's eligible depth drops:
-    //   • referral (one-shot at invest) — rolls the commission up to the next eligible ancestor;
-    //   • ROI (assignment-time) — an ineligible upline is skipped (no stream created for it). For a
-    //     stream already live, the existing cap/natural-expiry machinery stops accrual when stake
-    //     fully expires (cap → 0) and forfeits the no-stake gap, while pre-expiry earned ROI stays
-    //     claimable. (Fine-grained per-level forfeiture on a still-partially-staked multi-lock
-    //     recipient is deferred — see notes; it never over-pays beyond the 5× cap.)
-    // Business gate is sticky (lifetime, never decremented). Both owner-settable; defaults seeded
-    // in the Hordex constructor. Appended at end of storage so existing slots are unchanged.
+    // ── Level-eligibility: ACTIVE self-stake gate (per 0-indexed level for ROI) ──────────────
+    // Eligibility is gated purely by ACTIVE self-stake (USDT, sum of non-removed non-expired
+    // locks) — the team-business gate has been REMOVED from both referral and ROI.
+    //   • Referral commissions: a single FLAT threshold (_REFERRAL_SELF_STAKE_MIN = $25) unlocks
+    //     ALL 10 referral levels. An ineligible ancestor is skipped and the commission rolls up to
+    //     the next eligible ancestor (see _eligibleForReferralLevel).
+    //   • ROI streams: per-level gate active self-stake >= selfStakeGate[i] (see _eligibleForLevel).
+    //     An ineligible upline is skipped at assignment (no stream created); a live stream's accrual
+    //     stops via the cap/natural-expiry machinery once stake fully expires (cap → 0), forfeiting
+    //     the no-stake gap while pre-expiry earned ROI stays claimable.
+    // Self gate is ACTIVE — it falls when locks expire, so a recipient's eligible depth drops.
+    // selfStakeGate is owner-settable (defaults seeded in the Hordex constructor).
+    // businessGate is RETAINED for storage-layout/ABI stability but is NO LONGER consulted for
+    // eligibility (seeded to zero); _teamBusinessUSDT is still rolled up purely as a display stat.
     uint32[10] internal selfStakeGate;
-    uint32[10] internal businessGate;
+    uint32[10] internal businessGate;          // inert: no longer gates eligibility
     mapping(address => uint256) internal _teamBusinessUSDT;
 
     uint256 private constant _USDT_PER_ETH = 1;
@@ -234,13 +239,20 @@ abstract contract HordexStorage {
         return sumWei * _USDT_PER_ETH / 1e18;
     }
 
-    // Whether `_user` currently qualifies to RECEIVE commission/ROI at 0-indexed `level`.
-    // Owner is the catch-all sink and always qualifies. Both gates must pass.
+    // ROI eligibility: whether `_user` currently qualifies to RECEIVE an ROI stream at 0-indexed
+    // `level`. Per-level ACTIVE self-stake gate only — the team-business gate has been removed.
+    // Owner is the catch-all sink and always qualifies.
     function _eligibleForLevel(address _user, uint8 level) internal view returns (bool) {
         if (_user == owner) return true;
-        if (_activeSelfStakeUSDT(_user) < selfStakeGate[level]) return false;
-        if (_teamBusinessUSDT[_user]   < businessGate[level])  return false;
-        return true;
+        return _activeSelfStakeUSDT(_user) >= selfStakeGate[level];
+    }
+
+    // Referral-commission eligibility: a single flat ACTIVE self-stake threshold unlocks ALL 10
+    // referral levels (no per-level escalation, no team-business gate). Owner always qualifies.
+    uint256 internal constant _REFERRAL_SELF_STAKE_MIN = 25; // USDT
+    function _eligibleForReferralLevel(address _user) internal view returns (bool) {
+        if (_user == owner) return true;
+        return _activeSelfStakeUSDT(_user) >= _REFERRAL_SELF_STAKE_MIN;
     }
 
     // Adjusts an accrual window [startTs, endTs] by subtracting the forfeited natural-expiry gap

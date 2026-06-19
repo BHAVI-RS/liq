@@ -403,8 +403,13 @@ function _rwStartROITicker() {
       }
     }
 
-    // ACCRUED display: lifetime total (claimed + pending + live). Always purple.
-    liveEl.style.color = '#a78bfa';
+    // ACCRUED display: lifetime total (claimed + pending + live).
+    // Color and dot go red/gray when cap is frozen, purple when actively accumulating.
+    liveEl.style.color = _effPaused ? '#ef4444' : '#a78bfa';
+    {
+      const _dotEl = document.getElementById('rwROIAccrDot');
+      if (_dotEl) _dotEl.style.color = _effPaused ? '#ef4444' : '#a78bfa';
+    }
     {
       const _outstandingETH = _rwROICapPaused
         ? _rwROIBaseETH
@@ -796,7 +801,7 @@ function _rwRefHistHtml() {
 
     if (ev._missed) {
       const tipText = ev._missedReason === 'cap'        ? 'Referral cap exceeded — excess spilled to next upline'
-                   : ev._missedReason === 'ineligible' ? 'Self-stake or team business below this level’s threshold (see Network tab)'
+                   : ev._missedReason === 'ineligible' ? 'Active self-stake below the $25 referral threshold (see Network tab)'
                    :                                     'No active investment lock or lock expired';
       rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.8);background:rgba(248,113,113,0.04);">
         <td class="rw-ref-col-date" style="padding:7px 8px;color:rgba(248,113,113,0.6);white-space:nowrap;">${date}</td>
@@ -1021,14 +1026,15 @@ async function loadRwReferral() {
   try {
     const _zeroStats = { earned: ethers.BigNumber.from(0), totalCap: ethers.BigNumber.from(0), remainingCap: ethers.BigNumber.from(0) };
     // Fast on-chain calls only — _computeMissedWei runs in the background after render
-    const [commStats, commRecords, activeCountRaw, minInvRaw, roiDataRef] = await Promise.all([
+    const [commStats, commRecords, eligRaw, minInvRaw, roiDataRef] = await Promise.all([
       contract.getUserCommissionStats(walletAddress).catch(() => _zeroStats),
       contract.getCommissionRecords(walletAddress).catch(() => []),
-      contract.getActiveDirectReferralCount(walletAddress).catch(() => ethers.BigNumber.from(0)),
+      contract.getUserEligibility(walletAddress).catch(() => null),
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
       contract.getROIData(walletAddress).catch(() => null),
     ]);
-    const activeCount = Number(activeCountRaw);
+    // Referral eligibility (new model): a flat $25 active self-stake unlocks ALL 10 referral levels.
+    const refSelfStakeUSDT = eligRaw ? Number(eligRaw.selfStakeUSDT ?? eligRaw[0]) : 0;
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
     const minInvLabel = minInvETH > 0 ? `≥ ${fmtUSDT(minInvETH,{noEth:true})} each` : 'any active investment';
 
@@ -1054,7 +1060,7 @@ async function loadRwReferral() {
     _rwRefAllEvents  = receivedEvs.sort((a, b) => (b._ts || 0) - (a._ts || 0));
     _rwRefPage = 1;
 
-    const maxEligibleLevel = Math.min(activeCount, 10);
+    const maxEligibleLevel = refSelfStakeUSDT >= 25 ? 10 : 0;
 
     // Render immediately — missed card shows loading dots
     el.innerHTML = `
@@ -1799,7 +1805,7 @@ async function loadRwROI(silent = false) {
     el.innerHTML = `
       <div class="rw-stat-grid-4 rw-roi-stat-grid" style="margin-bottom:16px;">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">ACCRUED (USDT) <span style="color:#a78bfa;font-size:9px;">●</span></span><span class="rw-stat-label-mob">Accrued <span style="color:#a78bfa;font-size:9px;">●</span></span></div>
+          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">ACCRUED (USDT) <span id="rwROIAccrDot" style="color:#a78bfa;font-size:9px;">●</span></span><span class="rw-stat-label-mob">Accrued <span style="color:#a78bfa;font-size:9px;">●</span></span></div>
           <div id="rwROILive" style="font-size:16px;color:#a78bfa;font-family:var(--font-display);">$${(totalAccruedETH * USDT_PER_ETH).toFixed(5)}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">

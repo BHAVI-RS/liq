@@ -27,7 +27,7 @@ contract HordexViewFacet is HordexStorage {
     address private immutable WETH;
     address public  immutable platformToken;
 
-    uint256 private constant LP_LOCK_DURATION = 540; // 90 days scaled: 1 day = 6 s (testing)
+    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
     uint256 private constant USDT_PER_ETH     = 1;
     uint256 private constant SWAP_SLIPPAGE_BPS = 200; // hybrid buy pool leg cap — mirrors Hordex.swapBuy
 
@@ -167,6 +167,10 @@ contract HordexViewFacet is HordexStorage {
     function getLPEventRecords(address _user) external view returns (LPEventRecord[] memory) {
         return _lpEventRecords[_user];
     }
+    // Per-lock period history (initial + each restake) for the Lock History modal.
+    function getLockPeriods(address _user, uint256 _lockIndex) external view returns (LockPeriod[] memory) {
+        return _lockPeriods[_user][_lockIndex];
+    }
     function getCapPausedAt(address user) external view returns (uint64) {
         return _capPausedAt[user];
     }
@@ -247,17 +251,21 @@ contract HordexViewFacet is HordexStorage {
         return _calcAccrued(stream, investor, lockIndex, level);
     }
 
-    // ── Level-eligibility views (self-stake + team-business gates) ──────────────
-    // The per-level USDT thresholds. selfGates[i]/bizGates[i] gate paid level N = i+1.
+    // ── Level-eligibility views (active self-stake gate) ────────────────────────
+    // selfGates[i] is the per-level ROI self-stake threshold for paid level N = i+1. bizGates is
+    // INERT (team-business gating removed) and returned as the seeded zeros for ABI stability.
+    // Referral commissions instead use a flat $25 active self-stake for all levels.
     function getEligibilityGates()
         external view returns (uint32[10] memory selfGates, uint32[10] memory bizGates)
     {
         return (selfStakeGate, businessGate);
     }
 
-    // A user's live eligibility: active self-stake (USDT), cumulative team business (USDT, the value
-    // that actually gates — rolled up 10 levels, sticky), and how many levels (1..10) they currently
-    // unlock (gates are monotonic, so this is the highest contiguous level qualified for).
+    // A user's live eligibility: active self-stake (USDT), cumulative team business (USDT, now an
+    // informational stat — it no longer gates), and how many ROI levels (1..10) they currently
+    // unlock. ROI eligibility is gated by active self-stake only (selfStakeGate is monotonic, so
+    // this is the highest contiguous level qualified for). Referral eligibility is separate: all 10
+    // levels unlock once active self-stake >= $25 (compute client-side from selfStakeUSDT).
     function getUserEligibility(address user)
         external view returns (uint256 selfStakeUSDT, uint256 teamBusinessUSDT, uint8 unlockedLevels)
     {

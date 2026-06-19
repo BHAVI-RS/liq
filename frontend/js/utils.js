@@ -3,6 +3,14 @@
 // USDT_PER_ETH = 1 means: 1 unit of base currency = 1 USDT.
 const USDT_PER_ETH = 1;
 
+// ── Time scaling ──
+// Seconds per "day" — MUST match SECONDS_PER_DAY in contracts/HordexTypes.sol.
+//   TESTING    = 6      (1 day = 6 s)
+//   PRODUCTION = 86400  (real calendar days)
+// Only used to convert a lock's on-chain second-span back into whole days (e.g. the
+// restake streak preview). Change this together with the contract's SECONDS_PER_DAY.
+const LP_DAY_SCALE = 6;
+
 function ethToUSDT(usdtFloat) {
   return usdtFloat * USDT_PER_ETH;
 }

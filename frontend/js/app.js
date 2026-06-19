@@ -105,8 +105,8 @@ async function checkMissedCommissions() {
 
     document.getElementById('missedCommText').innerHTML =
       `You missed referral commissions totalling <strong style="color:#f87171;">${usdtTotal} USDT</strong>.<br><br>` +
-      `This includes commissions that bypassed you because you didn't meet a level's eligibility — your active self-stake or cumulative team business was below that level's threshold — or because your lock had expired / had no remaining 5× cap, and commissions where your cap filled mid-payment and the excess spilled to the next eligible upline.<br><br>` +
-      `<strong>To receive future commissions:</strong> keep an active (locked) investment with remaining cap, and unlock deeper levels by raising your self-stake and team business (see the <strong>Network</strong> tab for your levels unlocked and what each one needs). Restake before your lock expires to avoid gaps.`;
+      `This includes commissions that bypassed you because your active self-stake was below the $25 referral threshold, or because your lock had expired / had no remaining 5× cap, and commissions where your cap filled mid-payment and the excess spilled to the next eligible upline.<br><br>` +
+      `<strong>To receive future commissions:</strong> keep an active (locked) investment of at least $25 self-stake with remaining cap (this unlocks all 10 referral levels). Restake before your lock expires to avoid gaps. (See the <strong>Network</strong> tab for your ROI level eligibility, which is gated separately by self-stake per level.)`;
 
     document.getElementById('missedCommAlert').style.display = 'flex';
   } catch(e) { console.warn('checkMissedCommissions:', e); }

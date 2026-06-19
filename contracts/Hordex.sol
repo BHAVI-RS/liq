@@ -41,7 +41,7 @@ contract Hordex is HordexStorage {
     // deploy flow / constructor signature is unchanged — owner wires it once with setViewFacet().
     address private _viewFacet;
 
-    uint256 private constant LP_LOCK_DURATION  = 540; // 90 days scaled: 1 day = 6 s (testing)
+    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
     uint256 private constant USDT_PER_ETH      = 1;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant REGISTRATION_FEE  = 1e18 / USDT_PER_ETH; // 1 USDT legitimacy check
@@ -154,10 +154,12 @@ contract Hordex is HordexStorage {
         _roiFacet       = roiFacet_;
         referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
         roiCommissionRates      = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
-        // Level-eligibility gates (USDT), per 0-indexed level. To earn level i a recipient needs
-        // active self-stake >= selfStakeGate[i] AND cumulative team business >= businessGate[i].
-        selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 1000, 1000, 1000, 1000];
-        businessGate  = [uint32(0),  0,  500, 2500, 5000, 10000, 10000, 10000, 10000, 10000];
+        // Level-eligibility (USDT), per 0-indexed level. ROI level i requires active self-stake
+        // >= selfStakeGate[i]. Referral commissions use a flat $25 active self-stake for all levels
+        // (_REFERRAL_SELF_STAKE_MIN). The team-business gate is removed: businessGate is seeded to
+        // zero and is no longer consulted (kept only for storage-layout/ABI stability).
+        selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000];
+        businessGate  = [uint32(0),  0,  0,   0,    0,    0,    0,    0,    0,     0];
         _initStakingRates();
         _initPackages();
     }
@@ -613,11 +615,13 @@ contract Hordex is HordexStorage {
     function setROICommissionRates(uint16[10] calldata rates) external onlyOwner {
         roiCommissionRates = rates;
     }
-    // Level-eligibility gates (USDT), 0-indexed by level. Earning level i requires active
-    // self-stake >= selfStakeGate[i] AND cumulative team business >= businessGate[i].
+    // ROI level-eligibility gate (USDT), 0-indexed by level: earning ROI level i requires active
+    // self-stake >= selfStakeGate[i]. (Referral commissions use the flat $25 self-stake threshold.)
     function setSelfStakeGates(uint32[10] calldata gates) external onlyOwner {
         selfStakeGate = gates;
     }
+    // INERT: the team-business gate has been removed from eligibility. This setter is retained for
+    // ABI stability only — businessGate no longer affects referral or ROI eligibility.
     function setBusinessGates(uint32[10] calldata gates) external onlyOwner {
         businessGate = gates;
     }

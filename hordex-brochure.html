@@ -750,24 +750,27 @@ table.rt td.ra{color:rgba(201,168,76,0.82)}
         <!-- Eligibility rules -->
         <div class="cg" style="flex:1;display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px">
           <div>
-            <div style="font-family:var(--fm);font-size:7.5px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">ELIGIBILITY — TWO GATES PER LEVEL</div>
-            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.62);line-height:1.5">Clear <strong style="color:var(--cream)">both</strong> gates for a level — <strong style="color:var(--gold2)">self-stake</strong> (active locked USDT) and <strong style="color:var(--gold2)">team business</strong> (downline volume, 10 levels deep):</div>
+            <div style="font-family:var(--fm);font-size:7.5px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">ELIGIBILITY — FLAT $25 SELF-STAKE</div>
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.62);line-height:1.5">Referral commissions are gated by <strong style="color:var(--gold2)">active self-stake</strong> only — your own locked USDT. There is <strong style="color:var(--cream)">no team-business requirement</strong>.</div>
           </div>
 
-          <!-- Gate table -->
-          <div style="display:flex;flex-direction:column;gap:2px;margin:3px 0">
-            <div style="display:flex;font-family:var(--fm);font-size:6.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.7);padding:0 9px 2px">
-              <span style="flex:0 0 78px">LEVEL</span><span style="flex:1;text-align:right">SELF-STAKE</span><span style="flex:1;text-align:right">TEAM BUSINESS</span>
-            </div>
-            <div style="display:flex;align-items:center;font-family:var(--fm);font-size:7px;padding:2px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="flex:0 0 78px;color:var(--cream)">Level 1</span><span style="flex:1;text-align:right;color:var(--gold2)">$25</span><span style="flex:1;text-align:right;color:var(--muted)">—</span></div>
-            <div style="display:flex;align-items:center;font-family:var(--fm);font-size:7px;padding:2px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="flex:0 0 78px;color:var(--cream)">Level 2</span><span style="flex:1;text-align:right;color:var(--gold2)">$50</span><span style="flex:1;text-align:right;color:var(--muted)">—</span></div>
-            <div style="display:flex;align-items:center;font-family:var(--fm);font-size:7px;padding:2px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="flex:0 0 78px;color:var(--cream)">Level 3</span><span style="flex:1;text-align:right;color:var(--gold2)">$100</span><span style="flex:1;text-align:right;color:rgba(237,232,220,0.62)">$500</span></div>
-            <div style="display:flex;align-items:center;font-family:var(--fm);font-size:7px;padding:2px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="flex:0 0 78px;color:var(--cream)">Level 4</span><span style="flex:1;text-align:right;color:var(--gold2)">$250</span><span style="flex:1;text-align:right;color:rgba(237,232,220,0.62)">$2,500</span></div>
-            <div style="display:flex;align-items:center;font-family:var(--fm);font-size:7px;padding:2px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="flex:0 0 78px;color:var(--cream)">Level 5</span><span style="flex:1;text-align:right;color:var(--gold2)">$500</span><span style="flex:1;text-align:right;color:rgba(237,232,220,0.62)">$5,000</span></div>
-            <div style="display:flex;align-items:center;font-family:var(--fm);font-size:7px;padding:2px 9px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);border-radius:3px"><span style="flex:0 0 78px;color:var(--gold2)">Levels 6–10</span><span style="flex:1;text-align:right;color:var(--gold2)">$1,000</span><span style="flex:1;text-align:right;color:var(--gold2)">$10,000</span></div>
+          <!-- $25 unlocks all 10 referral levels -->
+          <div style="display:flex;align-items:center;gap:13px;padding:9px 14px;background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:4px">
+            <div style="font-family:var(--fd);font-size:32px;letter-spacing:1px;color:var(--gold2);line-height:0.9;flex-shrink:0">$25</div>
+            <div style="font-family:var(--fb);font-size:7.5px;color:rgba(237,232,220,0.7);line-height:1.5">A single <strong style="color:var(--cream)">$25</strong> active self-stake unlocks <strong style="color:var(--gold2)">all 10</strong> referral levels — the same threshold applies to every level.</div>
           </div>
 
-          <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.46);line-height:1.5">Self-stake is <strong style="color:rgba(237,232,220,0.66)">active</strong> (falls when a lock expires); team business is <strong style="color:rgba(237,232,220,0.66)">lifetime</strong>. Levels you don't qualify for roll up to the next eligible upline.</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;gap:6px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.55);line-height:1.5">Self-stake is <strong style="color:rgba(237,232,220,0.66)">active</strong> — it falls when a lock expires, so re-stake to stay eligible.</span></div>
+            <div style="display:flex;gap:6px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.55);line-height:1.5">Each person earns <strong style="color:rgba(237,232,220,0.66)">one</strong> commission per investment — the highest level they qualify for; the rest skip upward to the next eligible upline.</span></div>
+            <div style="display:flex;gap:6px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.55);line-height:1.5">Commissions are paid <strong style="color:rgba(237,232,220,0.66)">instantly in USDT</strong>, in the same transaction as the downline's investment — right after their LP locks .</span></div>
+          </div>
+
+          <!-- Missed-commission example -->
+          <div style="padding:7px 11px;background:rgba(255,184,0,0.05);border:1px solid rgba(255,184,0,0.18);border-left:3px solid var(--warn);border-radius:4px">
+            <div style="font-family:var(--fm);font-size:6px;letter-spacing:1px;color:var(--warn);margin-bottom:3px">EXAMPLE — STAY STAKED</div>
+            <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.55);line-height:1.5">If <strong style="color:rgba(237,232,220,0.66)">your own</strong> self-stake has lapsed below $25 when a downline invests, the commission <strong style="color:rgba(237,232,220,0.66)">skips over you</strong> to the next eligible upline — you forfeit it (it logs as a missed commission). Keep $25 actively staked to keep earning at every level.</div>
+          </div>
         </div>
 
         <!-- Commission cap -->
@@ -832,7 +835,7 @@ table.rt td.ra{color:rgba(201,168,76,0.82)}
           <div class="rrow"><div class="rlbl" style="font-size:7px;width:38px">Level 10</div><div class="rbw"><div class="rb" style="width:0.7%"></div></div><div class="rv" style="font-size:7px;width:105px"><span style="color:var(--text)">0.35%</span><span style="color:var(--muted);font-size:7px"> of investment</span></div></div>
         </div>
         <div style="margin-top:6px;padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.12);border-radius:3px;font-family:var(--fm);font-size:7px;color:var(--muted);line-height:1.6">
-          Same eligibility rules as referral commissions. Ineligible levels are skipped — streams pass upward to the next eligible recipient. Total distributed: 69.7% of each downline staking reward.
+          Each ROI level needs that level's active self-stake (see the gate table at right). Ineligible levels are skipped — streams pass upward to the next eligible recipient. Total distributed: 69.7% of each downline staking reward.
         </div>
       </div>
 
@@ -853,36 +856,28 @@ table.rt td.ra{color:rgba(201,168,76,0.82)}
         </div>
 
         <!-- Eligibility & stream assignment -->
-        <div class="cg" style="flex:1;display:flex;flex-direction:column">
+        <div class="cg" style="flex:1;display:flex;flex-direction:column;justify-content:space-between">
           <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:5px">ELIGIBILITY &amp; STREAM ASSIGNMENT</div>
-          <div style="display:flex;flex-direction:column;gap:4px;flex:1;justify-content:center">
-            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Governed by the <strong style="color:var(--cream)">same two gates as referral</strong> — self-stake (active locked USDT) and team business — applied per level (see previous page).</span></div>
-            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Each ROI level uses that level's <strong style="color:var(--cream)">self-stake and team-business threshold</strong> — clearing it unlocks the right to receive that level's rate.</span></div>
-            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">The <strong style="color:var(--cream)">closest eligible upline</strong> always gets the highest-rate level — assignment walks up from the direct referrer every time, so the best rate never goes to a farther person while a closer one qualifies.</span></div>
-            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.55">Ineligible levels are skipped — the stream passes upward until a qualifying recipient is found or the platform absorbs it.</span></div>
-          </div>
-        </div>
+          <div style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.5;margin-bottom:5px">Gated by an <strong style="color:var(--cream)">active self-stake</strong> threshold per level — <strong style="color:var(--cream)">no team-business requirement</strong>. Clear a level's threshold to unlock the right to receive its rate:</div>
 
-        <!-- Multiple streams & lifecycle -->
-        <div class="card" style="display:flex;flex-direction:column;gap:5px">
-          <div style="font-family:var(--fm);font-size:7px;letter-spacing:2px;color:var(--gold);margin-bottom:2px">MULTIPLE STREAMS &amp; LIFECYCLE</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
-            <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px">
-              <div style="font-family:var(--fm);font-size:6px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">CONCURRENT STREAMS</div>
-              <div style="font-family:var(--fb);font-size:6.5px;color:rgba(237,232,220,0.45);line-height:1.5">Every downline LP lock creates its own streams — you receive from all active downline locks simultaneously, all accruing in parallel.</div>
-            </div>
-            <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px">
-              <div style="font-family:var(--fm);font-size:6px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">PER-SECOND ACCRUAL</div>
-              <div style="font-family:var(--fb);font-size:6.5px;color:rgba(237,232,220,0.45);line-height:1.5">Each stream accrues as elapsed ÷ lock duration × downline staking reward × your level rate — ticking live every block.</div>
-            </div>
-            <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px">
-              <div style="font-family:var(--fm);font-size:6px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">RESTAKE RESETS STREAM</div>
-              <div style="font-family:var(--fb);font-size:6.5px;color:rgba(237,232,220,0.45);line-height:1.5">When a downline restakes, the existing stream settles its accrued total and a fresh stream begins at the new lock's rate and duration.</div>
-            </div>
-            <div style="padding:5px 8px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);border-radius:3px">
-              <div style="font-family:var(--fm);font-size:6px;color:var(--gold);letter-spacing:1px;margin-bottom:2px">TOKEN CONVERSION</div>
-              <div style="font-family:var(--fb);font-size:6.5px;color:rgba(237,232,220,0.45);line-height:1.5">ROI commissions are denominated in USDT and converted to platform tokens at the live market price at the moment you claim.</div>
-            </div>
+          <!-- ROI self-stake gate table -->
+          <div style="font-family:var(--fm);font-size:6.5px;letter-spacing:0.5px;color:rgba(201,168,76,0.7);margin-bottom:3px;padding:0 2px">ROI LEVEL — MINIMUM ACTIVE SELF-STAKE (LOCKED USDT)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 1</span><span style="color:var(--gold2)">$25</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 6</span><span style="color:var(--gold2)">$1,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 2</span><span style="color:var(--gold2)">$50</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 7</span><span style="color:var(--gold2)">$2,500</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 3</span><span style="color:var(--gold2)">$100</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 8</span><span style="color:var(--gold2)">$5,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 4</span><span style="color:var(--gold2)">$250</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 9</span><span style="color:var(--gold2)">$10,000</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.08);border-radius:3px"><span style="color:var(--cream)">Level 5</span><span style="color:var(--gold2)">$500</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:7px;padding:3px 9px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);border-radius:3px"><span style="color:var(--gold2)">Level 10</span><span style="color:var(--gold2)">$25,000</span></div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.5">The <strong style="color:var(--cream)">closest eligible upline</strong> gets the highest-rate level — assignment walks up from the direct referrer, so the best rate never skips a closer qualifier.</span></div>
+            <div style="display:flex;gap:5px;align-items:flex-start"><span style="color:var(--gold);font-size:7px;flex-shrink:0;margin-top:1px">◆</span><span style="font-family:var(--fb);font-size:7px;color:rgba(237,232,220,0.6);line-height:1.5">Ineligible levels are skipped — the stream passes upward until a qualifying recipient is found or the platform absorbs it.</span></div>
           </div>
         </div>
 
