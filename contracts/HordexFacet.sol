@@ -253,7 +253,7 @@ contract HordexFacet is HordexStorage {
                 while (search != address(0) && users[search].isRegistered) {
                     if (hops >= MAX_REFERRAL_HOPS) { search = address(0); break; }
                     unchecked { hops++; }
-                    if (!_eligibleForReferralLevel(search)) { search = users[search].referrer; continue; }
+                    if (!_eligibleForReferralLevel(search, uint8(i))) { search = users[search].referrer; continue; }
                     // Skip anyone who already took a (higher) commission from this investment.
                     if (search != owner && _refAlreadyPaid(paid, paidCount, search)) {
                         search = users[search].referrer; continue;
@@ -298,7 +298,7 @@ contract HordexFacet is HordexStorage {
                 totalMissedCommissions[naturalRecipient] += missedAmt;
                 uint8 reason;
                 if (naturalReceivedHere > 0)                          reason = 2;
-                else if (!_eligibleForReferralLevel(naturalRecipient)) reason = 0;
+                else if (!_eligibleForReferralLevel(naturalRecipient, uint8(i))) reason = 0;
                 else                                                   reason = 1;
                 emit CommissionMissed(naturalRecipient, _from, missedAmt, i + 1, reason);
                 _missedRecords[naturalRecipient].push(MissedRecord({

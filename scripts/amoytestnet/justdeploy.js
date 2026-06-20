@@ -19,7 +19,6 @@ const hre  = require("hardhat");
 const fs   = require("fs");
 const path = require("path");
 const { deployAndWireViewFacet, mergedLiquidityAbi } = require("./_viewfacet");
-const { verifyAllContracts } = require("./_verify");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 // Uniswap V2 Factory + Router are deployed FRESH each run (see PHASE 1) from
@@ -285,16 +284,6 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   };
   fs.writeFileSync(outputPath, JSON.stringify(outputData, null, 2));
   console.log("  deploy-output.json written ✓");
-
-  // ── PHASE 2b: Verify source on PolygonScan ─────────────────────────────────
-  // Runs right after deploy so contracts are verified even if a later phase fails.
-  // No-ops (with a notice) when ETHERSCAN_API_KEY is unset; never aborts the deploy.
-  console.log("\n" + sep()); console.log("  PHASE 2b — VERIFY ON POLYGONSCAN"); console.log(sep());
-  await verifyAllContracts(hre, {
-    router: routerAddress, factory: factoryAddress, usdt: DEPLOYED_USDT, token: PLATFORM_TOKEN,
-    liquidity: liquidityAddress, facet: facetAddress, roiFacet: roiFacetAddress,
-    lib: libAddress, libView: libViewAddress, viewFacet: viewFacetAddress,
-  });
 
   // ── PHASE 3: Token setup ───────────────────────────────────────────────────
   console.log("\n" + sep()); console.log("  PHASE 3 — TOKEN SETUP"); console.log(sep());

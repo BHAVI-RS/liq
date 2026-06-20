@@ -209,9 +209,10 @@ abstract contract HordexStorage {
     // ── Level-eligibility: ACTIVE self-stake gate (per 0-indexed level for ROI) ──────────────
     // Eligibility is gated purely by ACTIVE self-stake (USDT, sum of non-removed non-expired
     // locks) — the team-business gate has been REMOVED from both referral and ROI.
-    //   • Referral commissions: a single FLAT threshold (_REFERRAL_SELF_STAKE_MIN = $25) unlocks
-    //     ALL 10 referral levels. An ineligible ancestor is skipped and the commission rolls up to
-    //     the next eligible ancestor (see _eligibleForReferralLevel).
+    //   • Referral commissions: per-level gate active self-stake >= selfStakeGate[i] — the SAME gate
+    //     as ROI ($25 → level 1, $50 → levels 1-2, $100 → levels 1-3, …). An ineligible ancestor is
+    //     skipped and the level's commission rolls up to the next eligible ancestor (see
+    //     _eligibleForReferralLevel).
     //   • ROI streams: per-level gate active self-stake >= selfStakeGate[i] (see _eligibleForLevel).
     //     An ineligible upline is skipped at assignment (no stream created); a live stream's accrual
     //     stops via the cap/natural-expiry machinery once stake fully expires (cap → 0), forfeiting
@@ -247,12 +248,14 @@ abstract contract HordexStorage {
         return _activeSelfStakeUSDT(_user) >= selfStakeGate[level];
     }
 
-    // Referral-commission eligibility: a single flat ACTIVE self-stake threshold unlocks ALL 10
-    // referral levels (no per-level escalation, no team-business gate). Owner always qualifies.
-    uint256 internal constant _REFERRAL_SELF_STAKE_MIN = 25; // USDT
-    function _eligibleForReferralLevel(address _user) internal view returns (bool) {
+    // Referral-commission eligibility: per-level ACTIVE self-stake gate, IDENTICAL to ROI
+    // (_eligibleForLevel). Level i (0-indexed) requires active self-stake >= selfStakeGate[i]:
+    // $25 unlocks level 1, $50 unlocks levels 1-2, $100 unlocks levels 1-3, and so on. An
+    // ineligible ancestor is skipped and the level's commission rolls up to the next eligible,
+    // not-yet-paid ancestor. Owner always qualifies.
+    function _eligibleForReferralLevel(address _user, uint8 level) internal view returns (bool) {
         if (_user == owner) return true;
-        return _activeSelfStakeUSDT(_user) >= _REFERRAL_SELF_STAKE_MIN;
+        return _activeSelfStakeUSDT(_user) >= selfStakeGate[level];
     }
 
     // Adjusts an accrual window [startTs, endTs] by subtracting the forfeited natural-expiry gap

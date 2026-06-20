@@ -154,10 +154,10 @@ contract Hordex is HordexStorage {
         _roiFacet       = roiFacet_;
         referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
         roiCommissionRates      = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
-        // Level-eligibility (USDT), per 0-indexed level. ROI level i requires active self-stake
-        // >= selfStakeGate[i]. Referral commissions use a flat $25 active self-stake for all levels
-        // (_REFERRAL_SELF_STAKE_MIN). The team-business gate is removed: businessGate is seeded to
-        // zero and is no longer consulted (kept only for storage-layout/ABI stability).
+        // Level-eligibility (USDT), per 0-indexed level. BOTH ROI and referral level i require
+        // active self-stake >= selfStakeGate[i] (same gate): $25 → level 1, $50 → levels 1-2, etc.
+        // The team-business gate is removed: businessGate is seeded to zero and is no longer
+        // consulted (kept only for storage-layout/ABI stability).
         selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000];
         businessGate  = [uint32(0),  0,  0,   0,    0,    0,    0,    0,    0,     0];
         _initStakingRates();

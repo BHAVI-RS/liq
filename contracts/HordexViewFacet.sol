@@ -252,9 +252,9 @@ contract HordexViewFacet is HordexStorage {
     }
 
     // ── Level-eligibility views (active self-stake gate) ────────────────────────
-    // selfGates[i] is the per-level ROI self-stake threshold for paid level N = i+1. bizGates is
-    // INERT (team-business gating removed) and returned as the seeded zeros for ABI stability.
-    // Referral commissions instead use a flat $25 active self-stake for all levels.
+    // selfGates[i] is the per-level self-stake threshold (BOTH ROI and referral) for paid level
+    // N = i+1. bizGates is INERT (team-business gating removed) and returned as the seeded zeros
+    // for ABI stability.
     function getEligibilityGates()
         external view returns (uint32[10] memory selfGates, uint32[10] memory bizGates)
     {
@@ -262,10 +262,9 @@ contract HordexViewFacet is HordexStorage {
     }
 
     // A user's live eligibility: active self-stake (USDT), cumulative team business (USDT, now an
-    // informational stat — it no longer gates), and how many ROI levels (1..10) they currently
-    // unlock. ROI eligibility is gated by active self-stake only (selfStakeGate is monotonic, so
-    // this is the highest contiguous level qualified for). Referral eligibility is separate: all 10
-    // levels unlock once active self-stake >= $25 (compute client-side from selfStakeUSDT).
+    // informational stat — it no longer gates), and how many levels (1..10) they currently unlock.
+    // BOTH ROI and referral commissions share this same per-level active-self-stake gate
+    // (selfStakeGate is monotonic, so unlockedLevels is the highest contiguous level qualified for).
     function getUserEligibility(address user)
         external view returns (uint256 selfStakeUSDT, uint256 teamBusinessUSDT, uint8 unlockedLevels)
     {

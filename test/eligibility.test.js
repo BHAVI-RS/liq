@@ -1,14 +1,13 @@
 // Characterization for the LEVEL-ELIGIBILITY model (active self-stake gate; team-business gate
-// REMOVED) for referral commissions and ROI.
+// REMOVED). Referral commissions and ROI now share the SAME per-level gate.
 //
-// Referral commissions (0-indexed level i, paid level N = i+1):
-//   a recipient earns ALL 10 levels once active self-stake >= $25 (flat — no per-level escalation,
-//   no team-business requirement). Below $25 active self-stake the recipient is skipped and the
-//   commission rolls up to the next eligible ancestor.
-// ROI streams:
+// Referral commissions AND ROI streams (0-indexed level i, paid level N = i+1):
 //   a recipient earns level i only if active self-stake >= selfStakeGate[i]
-//   ([25,50,100,250,500,1000,2500,5000,10000,25000]). No team-business requirement. An ineligible
-//   ancestor is assigned no stream for that level (skipped); a later restake re-runs assignment.
+//   ([25,50,100,250,500,1000,2500,5000,10000,25000]). No team-business requirement.
+//   • Referral: an ineligible ancestor is skipped and the level's commission rolls up to the next
+//     eligible ancestor (ultimately the owner).
+//   • ROI: an ineligible ancestor is assigned no stream for that level (skipped); a later restake
+//     re-runs assignment.
 // Self-stake is ACTIVE (drops when locks expire/are removed).
 //
 // Run:  npx hardhat test test/eligibility.test.js
@@ -100,56 +99,56 @@ async function inv(ctx, who, amt) {
 describe("Level-eligibility (active self-stake gate; team-business gate removed)", function () {
   this.timeout(300000);
 
-  // ── REFERRAL: flat $25 self-stake unlocks every level (incl. a level the OLD model gated) ──
-  it("referral: a level-3 recipient with only $25 self-stake and low team business EARNS (flat $25 rule)", async () => {
+  // ── REFERRAL: per-level gate — a level-3 recipient earns once active self-stake >= $100 ──────
+  it("referral: a level-3 recipient meeting the $100 self-stake gate EARNS (per-level gate, same as ROI)", async () => {
     const ctx = await deploy();
     const { owner, signers, usdt } = ctx;
-    const A = signers[2], B = signers[3], C = signers[4], D = signers[5], X = signers[6];
+    const A = signers[2], B = signers[3], C = signers[4], X = signers[5];
 
-    // chain owner → A → B → C → D → X. From X: D=L0, C=L1, B=L2, A=L3.
-    // A stakes only $25 (old model needed $100 self + $500 business for L3; new model: $25 ⇒ all levels).
-    await fund(ctx, A); await fund(ctx, B); await fund(ctx, C); await fund(ctx, D); await fund(ctx, X);
-    await reg(ctx, A, owner); await inv(ctx, A, 25);
+    // chain owner → A → B → C → X. From X: C=L1 (i=0), B=L2 (i=1), A=L3 (i=2, gate selfStakeGate[2]=$100).
+    // A stakes exactly $100 ⇒ meets the level-3 gate ⇒ earns the level-3 tranche.
+    await fund(ctx, A); await fund(ctx, B); await fund(ctx, C); await fund(ctx, X);
+    await reg(ctx, A, owner); await inv(ctx, A, 100);
     await reg(ctx, B, A);     await inv(ctx, B, 100);
     await reg(ctx, C, B);     await inv(ctx, C, 100);
-    await reg(ctx, D, C);     await inv(ctx, D, 100);
-    await reg(ctx, X, D);     await inv(ctx, X, 100);
+    await reg(ctx, X, C);     await inv(ctx, X, 100);
 
-    // X invests again → A is the fixed level-3 recipient. $25 active self-stake ⇒ eligible ⇒ earns.
+    // X invests again → A is the fixed level-3 recipient with $100 active self-stake ⇒ eligible ⇒ earns.
     const b = await usdt.balanceOf(A.address);
     await inv(ctx, X, 100);
     const got = (await usdt.balanceOf(A.address)) - b;
 
-    console.log("      L3 recipient with $25 self-stake earned:", f(got));
-    assert(got > 0n, "a $25-self-stake recipient must earn even deep referral levels (no business gate)");
+    console.log("      L3 recipient with $100 self-stake earned:", f(got));
+    assert(got > 0n, "a recipient meeting its level's self-stake gate must earn that referral level");
   });
 
-  // ── REFERRAL: below $25 active self-stake ⇒ skipped & rolled up, then qualifies at $25 ──────
-  it("referral: a recipient below $25 active self-stake is skipped, then qualifies after staking $25", async () => {
+  // ── REFERRAL: below the level's gate ⇒ skipped & rolled up, then qualifies once the gate is met ──
+  it("referral: a level-2 recipient below the $50 gate is skipped (rolled up), then earns after staking $50", async () => {
     const ctx = await deploy();
     const { owner, signers, usdt } = ctx;
     const R = signers[2], M = signers[3], X = signers[4];
 
-    // chain owner → R → M → X. From X: M=L0, R=L1. R registers but does NOT stake (self-stake $0).
+    // chain owner → R → M → X. From X: M=L1 (i=0), R=L2 (i=1, gate selfStakeGate[1]=$50).
+    // R registers but does NOT stake (self-stake $0) ⇒ below the level-2 gate.
     await fund(ctx, R); await fund(ctx, M); await fund(ctx, X);
     await reg(ctx, R, owner);                  // R has NO active self-stake
     await reg(ctx, M, R);     await inv(ctx, M, 100);
     await reg(ctx, X, M);     await inv(ctx, X, 100);
 
-    // X invests → R is the level-1 recipient but has $0 self-stake ⇒ skipped (rolled up to owner).
+    // X invests → R is the level-2 recipient but has $0 self-stake ⇒ skipped (rolled up to owner).
     let b = await usdt.balanceOf(R.address);
     await inv(ctx, X, 100);
     const blocked = (await usdt.balanceOf(R.address)) - b;
 
-    // R stakes $25 ⇒ now eligible for all referral levels.
-    await inv(ctx, R, 25);
+    // R stakes $50 ⇒ meets the level-2 gate ⇒ now eligible for the level-2 tranche.
+    await inv(ctx, R, 50);
     b = await usdt.balanceOf(R.address);
     await inv(ctx, X, 100);
     const allowed = (await usdt.balanceOf(R.address)) - b;
 
-    console.log("      referral — blocked@ $0 self:", f(blocked), " allowed@ $25 self:", f(allowed));
-    assert(blocked === 0n, "below $25 active self-stake the recipient receives nothing (rolled up)");
-    assert(allowed > 0n, "at/above $25 active self-stake the recipient receives the commission");
+    console.log("      referral L2 — blocked@ $0 self:", f(blocked), " allowed@ $50 self:", f(allowed));
+    assert(blocked === 0n, "below the level-2 $50 gate the recipient receives nothing (rolled up)");
+    assert(allowed > 0n, "at/above the level-2 $50 gate the recipient receives the commission");
   });
 
   // ── ROI: per-level self-stake gate, NO business gate ────────────────────────────────────
