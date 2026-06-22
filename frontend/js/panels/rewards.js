@@ -98,7 +98,7 @@ function _rwROIStreamsHtml() {
     const _liveClaimable   = Math.min(d.accruedETH, _rwROIAvailableCapETH);
     const claimableETH     = _streamPending + _liveClaimable;
     const accruedPct       = _barRef > 0 ? Math.min(100 - paidPct - pendingPct, _liveClaimable / _barRef * 100) : 0;
-    const heldPct          = _barRef > 0 ? Math.min(100 - paidPct - pendingPct - accruedPct, (d.heldCarryETH || 0) / _barRef * 100) : 0;
+    const heldPct          = _barRef > 0 ? Math.min(100 - paidPct - pendingPct - accruedPct, ((d.heldCarryETH || 0) + (d.projectedHeldETH || 0)) / _barRef * 100) : 0;
     const missedPct        = _barRef > 0 ? Math.min(100 - paidPct - pendingPct - accruedPct - heldPct, ((d.liveWindowGapETH || 0) + (d.postExpiryMissedETH || 0)) / _barRef * 100) : 0;
     const totalPct     = paidPct + pendingPct + accruedPct + heldPct + missedPct;
     const levelRate  = ROI_LEVEL_RATES[d.level] !== undefined ? ROI_LEVEL_RATES[d.level] : '—';
@@ -106,7 +106,7 @@ function _rwROIStreamsHtml() {
 
     // HELD (earned ROI awaiting cap → claimable by investing for cap, yellow) and MISSED (no-cap /
     // over-cap while staked + post-expiry gap + on-chain forfeit → red, forfeited forever).
-    const _rowHeldETH   = (d.heldCarryETH || 0);
+    const _rowHeldETH   = (d.heldCarryETH || 0) + (d.projectedHeldETH || 0);
     const _rowMissedETH = (d.histMissedETH || 0) + (d.postExpiryMissedETH || 0) + (d.liveWindowGapETH || 0);
     rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
       <td style="padding:8px 8px;cursor:pointer;outline:none;user-select:none;-webkit-tap-highlight-color:transparent;" onclick="showROIStreamPopup(${i})">
@@ -232,12 +232,12 @@ function showROIStreamPopup(i) {
   // Max earning potential = full-period ROI ceiling for this stream (current lock period).
   const maxPotentialUSDT = (d.periodMax || 0) * USDT_PER_ETH;
   const _elapsed         = Math.max(0, Math.floor(Date.now() / 1000) - _rwROIFetchWall);
-  // ROI accruing past the 5x cap while still staked is now FORFEITED (MISSED) — it is NOT recoverable
-  // by investing more. Only the natural-expiry carried-over balance (heldCarryETH) stays HELD.
-  // MISSED = on-chain forfeit (histMissedETH) + over-cap-while-staked (liveWindowGapETH) +
-  // post-expiry gap + ongoing blocked accrual. Both shown side by side.
+  // HELD = ROI EARNED before claimable accrual stopped (on-chain heldCarryETH carry + projectedHeldETH,
+  // the pre-cap-exhaustion / pre-expiry earned portion) → claimable once you regain cap. MISSED =
+  // accrual AFTER the boundary: on-chain forfeit (histMissedETH) + post-boundary gap (liveWindowGapETH)
+  // + post-expiry gap + ongoing blocked accrual. Both shown side by side.
   const _growth          = _elapsed * (d.perStreamMissRate || 0);
-  const _heldETH         = (d.heldCarryETH || 0) + (_rwROIBlockedIsMissed ? 0 : _growth);
+  const _heldETH         = (d.heldCarryETH || 0) + (d.projectedHeldETH || 0) + (_rwROIBlockedIsMissed ? 0 : _growth);
   const _missedETH       = (d.histMissedETH || 0) + (d.postExpiryMissedETH || 0) + (d.liveWindowGapETH || 0) + (_rwROIBlockedIsMissed ? _growth : 0);
   const _showHeld        = _heldETH > 1e-15;
   const _hasMissed       = _missedETH > 1e-15;
@@ -277,7 +277,7 @@ function showROIStreamPopup(i) {
         ${_showHeld ? `
         <div style="font-size:10px;padding:7px 10px;background:rgba(251,191,36,0.10);border:1px solid rgba(251,191,36,0.45);border-radius:5px;">
           <span style="font-size:9px;letter-spacing:1px;color:var(--muted);">HELD </span><span style="color:#fbbf24;font-weight:700;">$${_heldStr}</span>
-          <span style="font-size:8px;color:var(--muted);margin-left:6px;">carried over · invest more to claim</span>
+          <span style="font-size:8px;color:var(--muted);margin-left:6px;">earned ROI awaiting cap · invest more to claim</span>
         </div>` : ''}
         <div style="font-size:10px;padding:9px 12px;margin-top:8px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.3);border-radius:5px;display:flex;align-items:center;justify-content:space-between;">
           <span style="font-size:9px;letter-spacing:1px;color:var(--muted);">MAX POTENTIAL <span style="opacity:0.65;">· this period</span></span>
@@ -653,10 +653,11 @@ function _rwStartROITicker() {
         const _claimableA2 = Math.min(_effectiveA, _rwROIAvailableCapETH);
         const _accPct      = Math.min(100 - _paidPct - _pendingPct2, _claimableA2 / _barRef2 * 100);
 
-        // YELLOW = HELD (natural-expiry carry, recoverable); RED = MISSED (over-cap while staked +
-        // post-expiry gap + ongoing blocked accrual → forfeited). Same split as the text indicators.
+        // YELLOW = HELD (heldCarryETH carry + projectedHeldETH pre-boundary earned, recoverable);
+        // RED = MISSED (post-boundary gap + post-expiry gap + ongoing blocked accrual → forfeited).
+        // Must mirror the initial render (incl. projectedHeldETH) or the yellow bar vanishes on first tick.
         const _growthB    = elapsed * (_d.perStreamMissRate || 0);
-        const _heldB      = (_d.heldCarryETH || 0) + (_rwROIBlockedIsMissed ? 0 : _growthB);
+        const _heldB      = (_d.heldCarryETH || 0) + (_d.projectedHeldETH || 0) + (_rwROIBlockedIsMissed ? 0 : _growthB);
         const _missedB    = (_d.liveWindowGapETH || 0) + (_d.postExpiryMissedETH || 0) + (_rwROIBlockedIsMissed ? _growthB : 0);
         const _heldPctB   = Math.min(100 - _paidPct - _pendingPct2 - _accPct, _heldB / _barRef2 * 100);
         const _missedPctB = Math.min(100 - _paidPct - _pendingPct2 - _accPct - _heldPctB, _missedB / _barRef2 * 100);
@@ -687,7 +688,7 @@ function _rwStartROITicker() {
         // natural-expiry carry (heldCarryETH) stays HELD. histMissedETH + post-expiry gap are missed.
         const _perMissRate = _d.perStreamMissRate || 0;
         const _growth      = elapsed * _perMissRate;
-        const _heldPS      = (_d.heldCarryETH || 0) + (_rwROIBlockedIsMissed ? 0 : _growth);
+        const _heldPS      = (_d.heldCarryETH || 0) + (_d.projectedHeldETH || 0) + (_rwROIBlockedIsMissed ? 0 : _growth);
         const _missedPS    = (_d.histMissedETH || 0) + (_d.postExpiryMissedETH || 0) + (_d.liveWindowGapETH || 0)
                            + (_rwROIBlockedIsMissed ? _growth : 0);
         const _heldEl     = document.getElementById('rwROIStreamHeld-' + _si);
@@ -1746,7 +1747,23 @@ async function loadRwROI(silent = false) {
         // Gap in the CURRENT recipientSince window only (not from lockedAt).
         // histMissedETH already captures all gap events before the last recipientSince reset.
         // Using accrualFromRecSince avoids double-counting when histMissedETH is added for display.
-        const liveWindowGapETH = Math.max(0, accrualFromRecSince - accruedETH);
+        let liveWindowGapETH = Math.max(0, accrualFromRecSince - accruedETH);
+
+        // Split the blocked accrual at the boundary where claimable accrual stopped — cap-exhaustion
+        // (_rwROICapPausedAt) or the recipient's lock expiry, whichever came FIRST. Accrual BEFORE that
+        // instant was earned while staked-with-cap → HELD (claimable once cap regains, mirroring the
+        // contract's _absorbResume held carry); only accrual AFTER it is the forfeited gap (MISSED).
+        const _heldStopTs = _rwROICapPausedAt > 0
+          ? (_recipientExpiryTs > 0 ? Math.min(_rwROICapPausedAt, _recipientExpiryTs) : _rwROICapPausedAt)
+          : _recipientExpiryTs;
+        let projectedHeldETH = 0;
+        if (_heldStopTs > 0 && liveWindowGapETH > 0) {
+          const _heldElapsed = Math.max(0, Math.min(_heldStopTs, Math.min(unlockTime, _heldBound)) - recSinceTs);
+          projectedHeldETH = lockDur > 0 && ratePPM > 0 && roiRate > 0
+            ? ethInv * ratePPM * _heldElapsed * roiRate / (50_000_000_000 * lockDur) : 0;
+          if (projectedHeldETH > liveWindowGapETH) projectedHeldETH = liveWindowGapETH;
+          liveWindowGapETH -= projectedHeldETH;  // remaining = post-boundary forfeited gap
+        }
 
         // Post-expiry MISSED accrual: from max(recipientExpiry, recipientSince) to now, bounded by the
         // investor's lock. Mirrors the contract's gapROI (lastExpiry → now → historicalMissedETH).
@@ -1765,7 +1782,7 @@ async function loadRwROI(silent = false) {
         _rwROIStreamDetails.push({
           investor: ref.investor, lockIndex: Number(ref.lockIndex), level: Number(ref.level),
           roiRate, ethInv, periodMax, accruedETH, streamRate, roiPaidETH, roiPaidNonZero,
-          histPaidETH, histMissedETH, heldCarryETH, liveWindowGapETH, postExpiryMissedETH, lockDur, elapsedPotAtFetch, unlockTime,
+          histPaidETH, histMissedETH, heldCarryETH, projectedHeldETH, liveWindowGapETH, postExpiryMissedETH, lockDur, elapsedPotAtFetch, unlockTime,
           perStreamMissRate,
         });
       }
@@ -1797,7 +1814,7 @@ async function loadRwROI(silent = false) {
     // (on-chain forfeit) + post-expiry gap are also missed. Only heldCarryETH (natural-expiry
     // carry) is HELD/recoverable.
     missedBaseETH    = _rwROIStreamDetails.reduce((s, d) => s + (d.histMissedETH || 0) + (d.postExpiryMissedETH || 0) + (d.liveWindowGapETH || 0), 0);
-    heldBaseETH      = _rwROIStreamDetails.reduce((s, d) => s + (d.heldCarryETH || 0), 0);
+    heldBaseETH      = _rwROIStreamDetails.reduce((s, d) => s + (d.heldCarryETH || 0) + (d.projectedHeldETH || 0), 0);
     missedRatePerSec = _rwROIStreamDetails.reduce((s, d) => {
       if (d.streamRate === 0 && d.lockDur > 0 && d.periodMax > 0 && effNow < d.unlockTime)
         return s + d.periodMax / d.lockDur;
@@ -1840,7 +1857,7 @@ async function loadRwROI(silent = false) {
         }
         // Recompute held/missed — liveWindowGapETH (over-cap excess) is now MISSED (forfeited).
         missedBaseETH = _rwROIStreamDetails.reduce((s, d) => s + (d.histMissedETH || 0) + (d.postExpiryMissedETH || 0) + (d.liveWindowGapETH || 0), 0);
-        heldBaseETH   = _rwROIStreamDetails.reduce((s, d) => s + (d.heldCarryETH || 0), 0);
+        heldBaseETH   = _rwROIStreamDetails.reduce((s, d) => s + (d.heldCarryETH || 0) + (d.projectedHeldETH || 0), 0);
         // Streams are now blocked; recompute miss rate using full unblocked stream rates.
         // missedBaseETH was just recomputed above (not 0 at exhaustion anymore).
         missedRatePerSec = _rwROIStreamDetails.reduce((s, d) => {
