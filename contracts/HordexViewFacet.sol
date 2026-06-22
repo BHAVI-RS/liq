@@ -155,6 +155,16 @@ contract HordexViewFacet is HordexStorage {
     function getMissedRecords(address _user) external view returns (MissedRecord[] memory) {
         return _missedRecords[_user];
     }
+    // ── Referral reserve (held over-1× commission) ──────────────────────────────
+    // total = every tranche (locked + matured); claimable = tranches past their unlock time.
+    function getReserveStats(address _user) external view returns (uint256 total, uint256 claimable) {
+        total     = _reserveTotalWei[_user];
+        claimable = _reserveClaimableWei(_user);
+    }
+    // Per-tranche breakdown (amount + unlock time) for the reserve detail modal.
+    function getReserveTranches(address _user) external view returns (ReserveTranche[] memory) {
+        return _reserveTranches[_user];
+    }
     function getInvestRecords(address _user) external view returns (InvestRecord[] memory) {
         return _investRecords[_user];
     }
@@ -262,9 +272,10 @@ contract HordexViewFacet is HordexStorage {
     }
 
     // A user's live eligibility: active self-stake (USDT), cumulative team business (USDT, now an
-    // informational stat — it no longer gates), and how many levels (1..10) they currently unlock.
-    // BOTH ROI and referral commissions share this same per-level active-self-stake gate
-    // (selfStakeGate is monotonic, so unlockedLevels is the highest contiguous level qualified for).
+    // informational stat — it no longer gates), and how many ROI levels (1..10) they currently
+    // unlock. `unlockedLevels` is the ROI per-level gate depth (selfStakeGate is monotonic, so it is
+    // the highest contiguous level qualified for). REFERRAL eligibility is DIFFERENT: a flat $25
+    // active self-stake unlocks ALL 10 referral levels (so referral depth = selfStakeUSDT >= 25 ? 10 : 0).
     function getUserEligibility(address user)
         external view returns (uint256 selfStakeUSDT, uint256 teamBusinessUSDT, uint8 unlockedLevels)
     {

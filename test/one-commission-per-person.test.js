@@ -78,13 +78,14 @@ async function inv(ctx, who, amt) { await (await ctx.liq.connect(who).invest(ctx
 describe("One referral commission per person per investment", function () {
   this.timeout(300000);
 
-  it("an eligible ancestor with ineligible uplines below it receives ONLY the highest level (not 3)", async () => {
+  it("an ancestor receives ONLY its own natural level (no roll-up); ineligible uplines' levels go to the deployer", async () => {
     const ctx = await deploy();
     const { owner, signers, liq, usdt, hordexAddr } = ctx;
     const A = signers[1], B = signers[2], C = signers[3], X = signers[4];
 
-    // chain owner → A → B → C → X. A is eligible ($25 self-stake); B and C are NOT (no stake).
-    // From X: C=L0, B=L1, A=L2. Without the rule A would absorb L0+L1+L2.
+    // chain owner → A → B → C → X. A is eligible (flat $25 referral gate); B and C are NOT (no stake).
+    // From X: C=L1 (i=0), B=L2 (i=1), A=L3 (i=2). No roll-up — A only ever earns its OWN depth (L3),
+    // and B's/C's ineligible levels go to the deployer, NOT up to A.
     await fund(ctx, A); await fund(ctx, B); await fund(ctx, C); await fund(ctx, X);
     await reg(ctx, A, owner); await inv(ctx, A, 25);   // A eligible (>= $25), holds cap
     await reg(ctx, B, A);                               // B registered, NO stake → ineligible
@@ -103,13 +104,13 @@ describe("One referral commission per person per investment", function () {
       newRecs.map(r => `L${Number(r.level)}=$${ethers.formatEther(r.amount)}`).join(" "));
     assert.equal(newRecs.length, 1, "A must receive exactly ONE referral commission from one investment");
 
-    // The one it keeps must be the HIGHEST level it can reach = L1 (level index 0, rate 50% of pool).
-    assert.equal(Number(newRecs[0].level), 1, "A must keep the highest-value level (paid level 1)");
+    // A earns ONLY its natural depth — paid level 3 (index i=2). No roll-up to the higher-value L1.
+    assert.equal(Number(newRecs[0].level), 3, "A keeps its own natural level (paid level 3), not a rolled-up one");
 
-    // Sanity: that single commission equals 10% of the $100 package (50% of the 20% pool) minus the
-    // 5% deployer cut → 100 * 0.10 * 0.95 = $9.50.
+    // Sanity: that single commission = rate[2] (10%) of the 20% pool of the $100 package, minus the
+    // 5% deployer cut → 100 * 0.20 * 0.10 * 0.95 = $1.90.
     console.log(`      A single-commission gain: $${ethers.formatEther(aGain)}`);
-    assert(aGain > E(9) && aGain < E(10), "A's single commission should be the level-1 amount (~$9.50)");
+    assert(aGain > E(1.8) && aGain < E(2.0), "A's single commission should be its natural level-3 amount (~$1.90)");
   });
 
   it("with all uplines eligible, each distinct ancestor still gets exactly one (their own) level", async () => {
@@ -138,12 +139,14 @@ describe("One referral commission per person per investment", function () {
     assert.equal(aNew, 1, "A gets exactly one (its level 3)");
   });
 
-  it("the levels an ancestor is skipped on are NOT recorded as 'missed' for it (it got a higher one)", async () => {
+  it("an ancestor is only ever the recipient at its OWN depth, so it is never 'missed' on other levels", async () => {
     const ctx = await deploy();
     const { owner, signers, liq, hordexAddr } = ctx;
     const A = signers[1], B = signers[2], C = signers[3], X = signers[4];
 
-    // Same ineligible-uplines setup: A keeps L1; L2/L3-equivalents skip to owner.
+    // Same ineligible-uplines setup. A's natural depth from X is L3 (i=2); A is eligible there (flat
+    // $25 gate) and gets paid, so it has no missed record. The lower levels (C's L1, B's L2) are
+    // B's/C's natural depths — not A's — so A is never flagged as "missing" them.
     await fund(ctx, A); await fund(ctx, B); await fund(ctx, C); await fund(ctx, X);
     await reg(ctx, A, owner); await inv(ctx, A, 25);
     await reg(ctx, B, A);
@@ -155,7 +158,7 @@ describe("One referral commission per person per investment", function () {
     const missedAfter = (await liq.getMissedRecords(A.address)).length;
 
     console.log(`      A missed records delta: ${missedAfter - missedBefore}`);
-    // A received its highest commission; it must not be flagged as "missing" the lower levels.
-    assert.equal(missedAfter - missedBefore, 0, "A must not be recorded as missing levels it was skipped on after being paid a higher one");
+    // A is the recipient only at its own depth (where it is eligible and paid) → no missed records.
+    assert.equal(missedAfter - missedBefore, 0, "A is only the recipient at its own depth, so it has no missed levels");
   });
 });

@@ -160,6 +160,16 @@ struct StreamRef {
     uint8   level;
 }
 
+// A held referral-commission "reserve" chunk. Created when a single downline investment pays an
+// eligible upline MORE than its per-event 1× wallet cap (active self-stake): the over-1× band (up
+// to the 5× cap) is held here instead of paid out immediately. Net of the 5% deployer cut. Locked
+// until `unlockTime` (the TRIGGERING downline package's 90-day unlock), then claimable; spendable
+// on a new package at any time before then. Packs into a single storage slot (128 + 64 bits).
+struct ReserveTranche {
+    uint128 amount;     // net reserved WETH wei (after the 5% cut)
+    uint64  unlockTime; // claimable at/after this time (= triggering downline lock's unlockTime)
+}
+
 // Compact per-referral info for the dashboard's Direct Referral Performance section.
 // Returned by getDirectRefsInfo() to replace N×3 individual RPC calls with one batch call.
 struct DirectRefInfo {

@@ -40,14 +40,8 @@ contract HordexFacet is HordexStorage {
     uint256 private constant USDT_PER_ETH      = 1;
     uint256 private constant TWAP_PERIOD       = 30 seconds;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
-    uint256 private constant MAX_REFERRAL_HOPS = 15;
     uint256 private constant MAX_SLIPPAGE_BPS  = 200;
     uint256 private constant TWAP_GUARD_BPS    = 500;
-    // Max distinct NON-OWNER recipients of referral commission per investment. Each such recipient
-    // is paid at most once (the highest level reaching it); the rest skip upward. Bounds both the
-    // paid-set memory array and the per-distribution gas. Beyond this (only reachable via pathological
-    // cap fragmentation) the remainder routes to owner.
-    uint256 private constant REF_PAID_MAX      = 30;
 
     // Errors (must match Hordex.sol exactly so revert data is correct)
     error NotDelegatecall();
@@ -91,6 +85,8 @@ contract HordexFacet is HordexStorage {
     event CommissionPaid(address indexed recipient, address indexed from, uint256 amount, uint256 level);
     // reason: 0=level-ineligible, 1=no-cap (expired/no lock/wrong token), 2=cap-overflow (partial)
     event CommissionMissed(address indexed naturalRecipient, address indexed from, uint256 amount, uint256 level, uint8 reason);
+    // Over-1× commission HELD in reserve (net of 5% cut) until the triggering downline lock unlocks.
+    event CommissionReserved(address indexed recipient, address indexed from, uint256 amount, uint256 level, uint64 unlockTime);
     event Invested(address indexed user, address indexed token, uint256 ethAmount, uint256 lpTokens);
     event LPRemoved(address indexed user, address indexed token, uint256 lpAmount, uint256 ethReturned, uint256 tokensReturned);
     event LPRestaked(address indexed user, address indexed token, uint256 lpAmount, uint256 newUnlockTime, uint256 durationDays);
@@ -199,21 +195,24 @@ contract HordexFacet is HordexStorage {
         emit CommissionPaid(recipient, from, toRecipient, level);
     }
 
-    // True if `who` has already been paid a referral commission earlier in this same investment.
-    function _refAlreadyPaid(address[REF_PAID_MAX] memory paid, uint256 count, address who)
-        private pure returns (bool)
-    {
-        for (uint256 k = 0; k < count; ) {
-            if (paid[k] == who) return true;
-            unchecked { k++; }
+    // Holds `amount` of an eligible recipient's commission in reserve instead of paying it now.
+    // Takes the same 5% deployer cut as _payCommission, then stores the net as a tranche unlocking
+    // at `unlockTime` (the triggering downline lock's unlockTime). The 5× cap has ALREADY been
+    // charged by the caller for this amount, so no cap change here.
+    function _reserveCommission(address recipient, address from, uint256 amount, uint256 level, uint64 unlockTime) internal {
+        uint256 deployerCut = amount * 5 / 100;
+        uint256 toReserve   = amount - deployerCut;
+        if (deployerCut > 0) {
+            if (!IERC20F(WETH).transfer(owner, deployerCut)) revert CommissionTransferFailed();
         }
-        return false;
+        if (toReserve > 0) {
+            _pushReserveTranche(recipient, toReserve, unlockTime);
+            emit CommissionReserved(recipient, from, toReserve, level, unlockTime);
+        }
     }
 
     function _distributeReferralCommissions(address _from, uint256 _amount) internal {
-        // Pre-build the 10-hop ancestor chain so that level i always starts its
-        // search at the fixed depth-(i+1) referrer, regardless of who received
-        // commissions at lower levels.
+        // Pre-build the 10-hop ancestor chain so that level i pays the fixed depth-(i+1) referrer.
         address[10] memory chain;
         {
             address c = users[_from].referrer;
@@ -225,81 +224,73 @@ contract HordexFacet is HordexStorage {
             }
         }
 
-        // One commission per NON-OWNER address per investment: levels are processed 0→9 (highest
-        // rate first), so the FIRST level that reaches an address is the highest one it qualifies
-        // for. Once paid, that address is skipped by every later level, whose commission then skips
-        // upward to the next eligible, not-yet-paid ancestor (ultimately the owner sink). Owner is
-        // exempt — it can absorb multiple levels.
-        address[REF_PAID_MAX] memory paid;
-        uint256 paidCount = 0;
+        // Unlock time for any reserve created by this distribution = the TRIGGERING downline lock's
+        // unlockTime (its 90-day window). investExt has already appended this lock, so it is _from's
+        // last lock. Guarded for the (unreachable from invest) empty-lock case.
+        uint64 trancheUnlock;
+        {
+            LPLock[] storage fl = userLPLocks[_from];
+            trancheUnlock = fl.length > 0
+                ? uint64(fl[fl.length - 1].unlockTime)
+                : uint64(block.timestamp + LP_LOCK_DURATION);
+        }
 
+        // Each level's commission is paid ONLY to the natural ancestor at that exact depth, and only
+        // to the extent that ancestor is (a) registered, (b) self-stake eligible for the level, and
+        // (c) within their 5× commission cap. The eligible, within-cap amount is split per event:
+        // the first 0.5× of the ancestor's active self-stake is paid to their WALLET immediately; the
+        // band above 0.5× (up to 5×) is HELD in their RESERVE (see _reserveCommission). Anything above
+        // the 5× cap — plus empty-slot / ineligible levels — is routed to the DEPLOYER (owner). The
+        // natural recipient's over-5× shortfall is still recorded as a missed commission for display
+        // (reason 0/1/2). Owner is the catch-all sink and is uncapped.
         for (uint256 i = 0; i < 10; ) {
             uint256 toDistribute = (_amount * referralCommissionRates[i]) / 10000;
             if (toDistribute == 0) { unchecked { i++; } continue; }
 
-            address naturalRecipient   = chain[i];
-            uint256 originalToDistribute = toDistribute;
-            uint256 naturalReceivedHere  = 0;
-            address search = chain[i]; // fixed starting position for this level
+            address naturalRecipient = chain[i];
+            uint256 paidToNatural = 0;
 
-            while (toDistribute > 0) {
-                // Paid-set saturated (pathological cap fragmentation): route the rest to owner.
-                if (paidCount >= REF_PAID_MAX) {
-                    _payCommission(owner, _from, toDistribute, i + 1);
-                    break;
-                }
-                uint256 cachedCap = 0;
-                uint256 hops = 0;
-                while (search != address(0) && users[search].isRegistered) {
-                    if (hops >= MAX_REFERRAL_HOPS) { search = address(0); break; }
-                    unchecked { hops++; }
-                    if (!_eligibleForReferralLevel(search, uint8(i))) { search = users[search].referrer; continue; }
-                    // Skip anyone who already took a (higher) commission from this investment.
-                    if (search != owner && _refAlreadyPaid(paid, paidCount, search)) {
-                        search = users[search].referrer; continue;
+            if (naturalRecipient == owner) {
+                // Owner sits at this depth: it absorbs the whole level directly (uncapped, not "missed").
+                _payCommission(owner, _from, toDistribute, i + 1);
+                paidToNatural = toDistribute;
+            } else if (naturalRecipient != address(0) && users[naturalRecipient].isRegistered &&
+                       _eligibleForReferralLevel(naturalRecipient, uint8(i))) {
+                uint256 cap   = _getCommissionCap(naturalRecipient); // committed 5× cap (O(locks))
+                uint256 toPay = toDistribute < cap ? toDistribute : cap;
+                if (toPay > 0) {
+                    _chargeCap(naturalRecipient, toPay);            // charge the whole within-5× amount
+                    // Per-event wallet cap = HALF the recipient's CURRENT active self-stake (WETH wei).
+                    // Up to 0.5× is paid to wallet now; the over-0.5× remainder (still within 5×) is held.
+                    uint256 walletCap     = _activeSelfStakeWei(naturalRecipient) / 2;
+                    uint256 walletPortion = toPay < walletCap ? toPay : walletCap;
+                    if (walletPortion > 0) {
+                        _payCommission(naturalRecipient, _from, walletPortion, i + 1);
                     }
-                    if (search == owner) break;
-                    cachedCap = _getCommissionCap(search); // committed cap (O(locks)) — never iterates streams
-                    if (cachedCap > 0) break;
-                    search = users[search].referrer;
+                    uint256 reservePortion = toPay - walletPortion;
+                    if (reservePortion > 0) {
+                        _reserveCommission(naturalRecipient, _from, reservePortion, i + 1, trancheUnlock);
+                    }
+                    paidToNatural = toPay;   // wallet + reserve are both "delivered" (not missed)
                 }
-
-                if (search == address(0) || !users[search].isRegistered) {
-                    _payCommission(owner, _from, toDistribute, i + 1);
-                    break;
-                }
-
-                uint256 toPay;
-                if (search == owner) {
-                    toPay = toDistribute;
-                } else {
-                    toPay = toDistribute < cachedCap ? toDistribute : cachedCap;
-                    _chargeCap(search, toPay);
-                }
-
-                if (search == naturalRecipient) naturalReceivedHere += toPay;
-                _payCommission(search, _from, toPay, i + 1);
-
-                // Lock this non-owner out of any further level from this investment.
-                if (search != owner) { paid[paidCount] = search; unchecked { paidCount++; } }
-
-                toDistribute -= toPay;
-                search = users[search].referrer; // continue above for cap-split remainder
             }
 
-            // Missed accounting for the natural recipient. Skip it when the natural recipient took
-            // NOTHING at this level only because it had already been paid a higher commission earlier
-            // in this investment (it didn't "miss" — it got a better one). A partial cap-overflow at
-            // this level (naturalReceivedHere > 0) is still recorded as reason 2.
+            // Everything the natural ancestor did not take goes to the deployer (owner) wallet.
+            uint256 toOwner = toDistribute - paidToNatural;
+            if (toOwner > 0) {
+                _payCommission(owner, _from, toOwner, i + 1);
+            }
+
+            // Missed accounting for a registered NON-OWNER natural recipient that took less than its
+            // full level. reason 2 = partial cap-overflow, 0 = level-ineligible, 1 = no cap.
             if (naturalRecipient != address(0) && users[naturalRecipient].isRegistered &&
-                    naturalRecipient != owner && naturalReceivedHere < originalToDistribute &&
-                    !(naturalReceivedHere == 0 && _refAlreadyPaid(paid, paidCount, naturalRecipient))) {
-                uint256 missedAmt = originalToDistribute - naturalReceivedHere;
+                    naturalRecipient != owner && paidToNatural < toDistribute) {
+                uint256 missedAmt = toDistribute - paidToNatural;
                 totalMissedCommissions[naturalRecipient] += missedAmt;
                 uint8 reason;
-                if (naturalReceivedHere > 0)                          reason = 2;
-                else if (!_eligibleForReferralLevel(naturalRecipient, uint8(i))) reason = 0;
-                else                                                   reason = 1;
+                if (paidToNatural > 0)                                           reason = 2;
+                else if (!_eligibleForReferralLevel(naturalRecipient, uint8(i)))  reason = 0;
+                else                                                             reason = 1;
                 emit CommissionMissed(naturalRecipient, _from, missedAmt, i + 1, reason);
                 _missedRecords[naturalRecipient].push(MissedRecord({
                     from:   _from,
@@ -534,7 +525,12 @@ contract HordexFacet is HordexStorage {
             tokensAccumulated:  0,
             totalTokensClaimed: 0,
             rewardRatePPM:      rewardPPM,
-            restakeCounts:      [uint8(0), 0, 0, 0, 0, 0],
+            // Per-duration streak counters. The invest lock is always 90-day at base (level 0),
+            // so the 90-day slot (index 3) starts at 1 — its base period is already consumed, and
+            // the FIRST 90-day restake reads streak level 1. Every other duration starts virgin (0),
+            // so its first restake lands on base and builds from there. Counters persist across
+            // duration switches (each duration keeps its own streak); see restakeLPExt.
+            restakeCounts:      [uint8(0), 0, 0, 1, 0, 0],
             streakBaseEth:      T,
             commissionsCapUsed: 0
         }));
@@ -692,22 +688,16 @@ contract HordexFacet is HordexStorage {
             lock.streakBaseEth = lock.ethInvested;
         }
 
-        // Recover the ENDING period's duration in days. Lock windows are scaled at SECONDS_PER_DAY
-        // (see the unlockTime assignment below), so divide the stored second-span by the same
-        // factor to get back to whole days — otherwise the recovered "days" land on the wrong
-        // duration bucket, dIdx never matches prevDIdx, and the streak resets to base on every
-        // same-duration restake.
-        uint256 prevDurDays = lock.unlockTime > lock.lockedAt ? (lock.unlockTime - lock.lockedAt) / SECONDS_PER_DAY : 90;
-        uint256 prevDIdx    = HordexMath.getDurationIndex(stakingDurations, prevDurDays);
-        uint256 sIdx;
-        if (dIdx == prevDIdx) {
-            lock.restakeCounts[dIdx] += 1;
-            uint256 cnt = lock.restakeCounts[dIdx];
-            sIdx = cnt > 3 ? 3 : cnt;
-        } else {
-            lock.restakeCounts[dIdx] = 0;
-            sIdx = 0;
-        }
+        // Per-duration PERSISTENT streak: each duration keeps its own counter and is only ever
+        // touched for the duration being restaked INTO — switching durations never resets another
+        // duration's streak. restakeCounts[dIdx] is the number of periods already started in that
+        // duration (the 90-day slot is seeded to 1 at invest, see investExt). The level for THIS
+        // period is min(count, 3): 0 (base) on a duration's first-ever period, climbing by one on
+        // each subsequent restake into the same duration, capped at 3. So 90d→30d→90d continues the
+        // 90d streak instead of vanishing.
+        uint256 cnt  = lock.restakeCounts[dIdx];
+        uint256 sIdx = cnt > 3 ? 3 : cnt;
+        if (cnt < 4) lock.restakeCounts[dIdx] = uint8(cnt + 1); // bound the counter (level saturates at 3)
 
         // Cap is a lifetime 5× per principal: restaking neither restores already-consumed
         // cap nor grants a new cap period. commissionsCapUsed is left untouched here so any

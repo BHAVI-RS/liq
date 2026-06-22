@@ -209,10 +209,9 @@ abstract contract HordexStorage {
     // ── Level-eligibility: ACTIVE self-stake gate (per 0-indexed level for ROI) ──────────────
     // Eligibility is gated purely by ACTIVE self-stake (USDT, sum of non-removed non-expired
     // locks) — the team-business gate has been REMOVED from both referral and ROI.
-    //   • Referral commissions: per-level gate active self-stake >= selfStakeGate[i] — the SAME gate
-    //     as ROI ($25 → level 1, $50 → levels 1-2, $100 → levels 1-3, …). An ineligible ancestor is
-    //     skipped and the level's commission rolls up to the next eligible ancestor (see
-    //     _eligibleForReferralLevel).
+    //   • Referral commissions: FLAT gate — a single active self-stake >= selfStakeGate[0] ($25)
+    //     unlocks ALL 10 referral levels (DECOUPLED from ROI; see _eligibleForReferralLevel). An
+    //     ancestor below $25 earns no referral at any level and that amount goes to the deployer.
     //   • ROI streams: per-level gate active self-stake >= selfStakeGate[i] (see _eligibleForLevel).
     //     An ineligible upline is skipped at assignment (no stream created); a live stream's accrual
     //     stops via the cap/natural-expiry machinery once stake fully expires (cap → 0), forfeiting
@@ -227,17 +226,22 @@ abstract contract HordexStorage {
 
     uint256 private constant _USDT_PER_ETH = 1;
 
-    // Active self-stake (USDT) = sum of ethInvested across the user's non-removed, non-expired locks.
-    function _activeSelfStakeUSDT(address _user) internal view returns (uint256) {
+    // Active self-stake (WETH wei) = sum of ethInvested across the user's non-removed, non-expired
+    // locks. This is the per-event 1× wallet cap for referral commissions (HordexFacet) — the band
+    // above it (up to 5×) is routed to the reserve instead of being paid out immediately.
+    function _activeSelfStakeWei(address _user) internal view returns (uint256 sumWei) {
         LPLock[] storage locks = userLPLocks[_user];
         uint256 len = locks.length;
-        uint256 sumWei;
         for (uint256 j = 0; j < len; ) {
             LPLock storage l = locks[j];
             if (!l.removed && block.timestamp < l.unlockTime) sumWei += l.ethInvested;
             unchecked { j++; }
         }
-        return sumWei * _USDT_PER_ETH / 1e18;
+    }
+
+    // Active self-stake (USDT) = the wei sum above, converted 1:1.
+    function _activeSelfStakeUSDT(address _user) internal view returns (uint256) {
+        return _activeSelfStakeWei(_user) * _USDT_PER_ETH / 1e18;
     }
 
     // ROI eligibility: whether `_user` currently qualifies to RECEIVE an ROI stream at 0-indexed
@@ -248,14 +252,14 @@ abstract contract HordexStorage {
         return _activeSelfStakeUSDT(_user) >= selfStakeGate[level];
     }
 
-    // Referral-commission eligibility: per-level ACTIVE self-stake gate, IDENTICAL to ROI
-    // (_eligibleForLevel). Level i (0-indexed) requires active self-stake >= selfStakeGate[i]:
-    // $25 unlocks level 1, $50 unlocks levels 1-2, $100 unlocks levels 1-3, and so on. An
-    // ineligible ancestor is skipped and the level's commission rolls up to the next eligible,
-    // not-yet-paid ancestor. Owner always qualifies.
-    function _eligibleForReferralLevel(address _user, uint8 level) internal view returns (bool) {
+    // Referral-commission eligibility: FLAT gate, DECOUPLED from ROI. A single active self-stake of
+    // >= selfStakeGate[0] ($25) unlocks ALL 10 referral levels at once (the `level` argument is
+    // ignored). This differs from ROI, which keeps the per-level gate (_eligibleForLevel: $25 → L1,
+    // $50 → L1-2, $100 → L1-3, …). An ancestor below $25 earns no referral commission at any level;
+    // that level's amount goes to the deployer (owner). Owner always qualifies.
+    function _eligibleForReferralLevel(address _user, uint8 /* level */) internal view returns (bool) {
         if (_user == owner) return true;
-        return _activeSelfStakeUSDT(_user) >= selfStakeGate[level];
+        return _activeSelfStakeUSDT(_user) >= selfStakeGate[0];
     }
 
     // Adjusts an accrual window [startTs, endTs] by subtracting the forfeited natural-expiry gap
@@ -547,5 +551,84 @@ abstract contract HordexStorage {
         _roiResumeBoundary[_user] = lastExpiry;
         _roiResumeAt[_user]       = block.timestamp;
         _roiUnabsorbed[_user]     = _activeROIStreams[_user].length;
+    }
+
+    // ── Referral-commission RESERVE (held over-1× commission) ────────────────────
+    // When a single downline investment pays an eligible upline more than its per-event 1× wallet
+    // cap (active self-stake), the over-1× band (bounded by the 5× cap) is HELD here instead of
+    // being paid out immediately. Each chunk (tranche) is net of the 5% deployer cut and unlocks at
+    // the TRIGGERING downline package's 90-day unlock time. A tranche is claimable for WETH after it
+    // unlocks (claimReserve) and spendable on a new package at any time (investFromReserve). The 5×
+    // cap is already charged (commissionsCapUsed) when the reserve is created, so a later claim/spend
+    // does NOT charge cap again. Appended at the end of storage so existing slots are unchanged.
+    mapping(address => ReserveTranche[]) internal _reserveTranches;
+    mapping(address => uint256)          internal _reserveTotalWei; // O(1) sum of all tranche amounts
+
+    // Append a new reserve tranche (net amount, already after the 5% cut) and bump the running total.
+    function _pushReserveTranche(address _user, uint256 _netAmount, uint64 _unlockTime) internal {
+        _reserveTranches[_user].push(ReserveTranche({
+            amount:     uint128(_netAmount),
+            unlockTime: _unlockTime
+        }));
+        _reserveTotalWei[_user] += _netAmount;
+    }
+
+    // Sum of tranches that have reached their unlock time (claimable now).
+    function _reserveClaimableWei(address _user) internal view returns (uint256 sum) {
+        ReserveTranche[] storage tr = _reserveTranches[_user];
+        uint256 n = tr.length;
+        for (uint256 i = 0; i < n; ) {
+            if (block.timestamp >= tr[i].unlockTime) sum += tr[i].amount;
+            unchecked { i++; }
+        }
+    }
+
+    // Remove and return the total of all MATURED tranches (compacting the array; unmatured kept in
+    // their original order). O(tranches).
+    function _consumeMaturedReserve(address _user) internal returns (uint256 claimed) {
+        ReserveTranche[] storage tr = _reserveTranches[_user];
+        uint256 n = tr.length;
+        uint256 write = 0;
+        for (uint256 read = 0; read < n; ) {
+            ReserveTranche memory cur = tr[read];
+            if (block.timestamp >= cur.unlockTime) {
+                claimed += cur.amount;                 // matured → claim, drop
+            } else {
+                if (write != read) tr[write] = cur;    // keep, compact toward front
+                unchecked { write++; }
+            }
+            unchecked { read++; }
+        }
+        while (tr.length > write) tr.pop();
+        if (claimed > 0) {
+            uint256 t = _reserveTotalWei[_user];
+            _reserveTotalWei[_user] = t > claimed ? t - claimed : 0;
+        }
+    }
+
+    // Spend `_amount` of reserve FIFO (oldest tranche first), regardless of maturity. Used to buy a
+    // package from reserve. Caller MUST guarantee _reserveTotalWei[_user] >= _amount. O(tranches).
+    function _consumeReserve(address _user, uint256 _amount) internal {
+        ReserveTranche[] storage tr = _reserveTranches[_user];
+        uint256 n = tr.length;
+        uint256 remaining = _amount;
+        uint256 write = 0;
+        for (uint256 read = 0; read < n; ) {
+            ReserveTranche memory cur = tr[read];
+            if (remaining == 0) {
+                if (write != read) tr[write] = cur;     // fully past the spend — keep as-is
+                unchecked { write++; }
+            } else if (cur.amount <= remaining) {
+                remaining -= cur.amount;                // consume whole tranche
+            } else {
+                cur.amount = uint128(cur.amount - remaining); // partially consume boundary tranche
+                remaining  = 0;
+                tr[write]  = cur;
+                unchecked { write++; }
+            }
+            unchecked { read++; }
+        }
+        while (tr.length > write) tr.pop();
+        _reserveTotalWei[_user] -= _amount;             // safe: caller guarantees _amount <= total
     }
 }

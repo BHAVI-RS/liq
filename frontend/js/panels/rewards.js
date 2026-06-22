@@ -1,3 +1,8 @@
+// ─── Referral-commission reserve (held over-0.5× commission) ─────────────────
+let _rwReserveTotalETH     = 0;   // all tranches (locked + matured), USDT
+let _rwReserveClaimableETH = 0;   // tranches past their unlock time
+let _rwReserveTranches     = [];  // [{ amount, unlockTime }]
+
 // ─── Referral pagination / sort state ────────────────────────────────────────
 let _rwRefAllEvents  = [];
 let _rwRefBlockTsMap = new Map();
@@ -88,8 +93,8 @@ function _rwROIStreamsHtml() {
     const pendingPct       = _barRef > 0 ? Math.min(100 - paidPct, _curPeriodPending / _barRef * 100) : 0;
     // Bar segments (current period, % of periodMax), ordered claimed → pending → accruing → held → missed:
     //   PURPLE = normal accumulation (claimed + pending + claimable accruing)
-    //   YELLOW = HELD (natural-expiry carry → still recoverable by investing more)
-    //   RED    = MISSED (over-cap while staked + post-expiry gap → forfeited forever)
+    //   YELLOW = HELD (earned ROI awaiting cap → claimable once you invest for cap)
+    //   RED    = MISSED (no-cap / over-cap while staked + post-expiry gap → forfeited forever)
     const _liveClaimable   = Math.min(d.accruedETH, _rwROIAvailableCapETH);
     const claimableETH     = _streamPending + _liveClaimable;
     const accruedPct       = _barRef > 0 ? Math.min(100 - paidPct - pendingPct, _liveClaimable / _barRef * 100) : 0;
@@ -99,8 +104,8 @@ function _rwROIStreamsHtml() {
     const levelRate  = ROI_LEVEL_RATES[d.level] !== undefined ? ROI_LEVEL_RATES[d.level] : '—';
     const totalClaimed   = _trulyClaimedETH;
 
-    // HELD (natural-expiry carry → recoverable, yellow) and MISSED (over-cap while staked +
-    // post-expiry gap + on-chain forfeit → red, forfeited forever) shown as SEPARATE indicators.
+    // HELD (earned ROI awaiting cap → claimable by investing for cap, yellow) and MISSED (no-cap /
+    // over-cap while staked + post-expiry gap + on-chain forfeit → red, forfeited forever).
     const _rowHeldETH   = (d.heldCarryETH || 0);
     const _rowMissedETH = (d.histMissedETH || 0) + (d.postExpiryMissedETH || 0) + (d.liveWindowGapETH || 0);
     rows += `<tr style="border-bottom:1px solid rgba(20,30,42,0.7);">
@@ -300,6 +305,144 @@ function showROIStreamPopup(i) {
     </div>`;
 
   document.body.appendChild(overlay);
+}
+
+
+// ─── Reserve modal (held over-0.5× referral commission) ───────────────────────
+// A reserve tranche unlocks at its triggering downline package's 90-day mark. LP_DAY_SCALE
+// (utils.js) mirrors the contract's SECONDS_PER_DAY so the countdown matches on-chain timing.
+function _rwReserveUnlockLabel(unlockTime) {
+  const now = Math.floor(Date.now() / 1000);
+  if (unlockTime <= now) return { text: 'UNLOCKED', claimable: true, color: '#4ade80' };
+  const secs     = unlockTime - now;
+  const dayScale = (typeof LP_DAY_SCALE !== 'undefined' && LP_DAY_SCALE > 0) ? LP_DAY_SCALE : 86400;
+  const days     = secs / dayScale;
+  const text     = days >= 1
+    ? `unlocks in ${days < 10 ? days.toFixed(1) : Math.round(days)}d`
+    : `unlocks in ${(secs / (dayScale / 24)).toFixed(1)}h`;
+  return { text, claimable: false, color: '#f59e0b', abs: `unix ${unlockTime}` };
+}
+
+function openReserveModal() {
+  const existing = document.getElementById('rwReserveOverlay');
+  if (existing) existing.remove();
+
+  const tranches = (_rwReserveTranches || []).slice().sort((a, b) => a.unlockTime - b.unlockTime);
+  const totalUSDT  = (_rwReserveTotalETH || 0) * USDT_PER_ETH;
+  const claimUSDT  = (_rwReserveClaimableETH || 0) * USDT_PER_ETH;
+  const lockedUSDT = Math.max(0, totalUSDT - claimUSDT);
+
+  const rows = tranches.length ? tranches.map((t, i) => {
+    const lbl = _rwReserveUnlockLabel(t.unlockTime);
+    const amt = t.amount * USDT_PER_ETH;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--surface);">
+        <div>
+          <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">PACKAGE ${i + 1}</div>
+          <div style="font-size:15px;color:var(--cream);font-family:var(--font-display);">$${amt.toFixed(2)}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:11px;color:${lbl.color};font-family:var(--font-mono);">${lbl.text}</div>
+          ${lbl.abs ? `<div style="font-size:9px;color:var(--muted);">${lbl.abs}</div>` : `<div style="font-size:9px;color:#4ade80;">claim now</div>`}
+        </div>
+      </div>`;
+  }).join('') : `<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px;">No reserve held.</div>`;
+
+  const PKG = [25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000];
+  const affordable = PKG.filter(p => p <= totalUSDT + 1e-9);
+  const pkgBtns = affordable.length
+    ? affordable.map(p => `<button onclick="buyPackageFromReserve(${p})"
+          style="padding:6px 12px;font-family:var(--font-mono);font-size:11px;border:1px solid var(--border);
+                 background:var(--surface);color:var(--cream);border-radius:4px;cursor:pointer;">$${p}</button>`).join('')
+    : `<span style="font-size:11px;color:var(--muted);">Reserve below the $25 minimum package — claim it once it unlocks.</span>`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'rwReserveOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:460px;width:100%;box-sizing:border-box;font-family:var(--font-mono);position:relative;max-height:88vh;overflow-y:auto;">
+      <button onclick="document.getElementById('rwReserveOverlay').remove()"
+        style="position:absolute;top:12px;right:12px;width:26px;height:26px;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;">✕</button>
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">COMMISSION RESERVE</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:14px;line-height:1.5;">
+        Referral commission above your package size, held per downline package. Each chunk unlocks at
+        its package's 90-day mark — then claim it as USDT, or use it to buy a package any time.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+        <div style="background:rgba(96,165,250,0.07);border:1px solid rgba(96,165,250,0.22);border-radius:8px;padding:12px;">
+          <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">CLAIMABLE NOW</div>
+          <div style="font-size:16px;color:#4ade80;font-family:var(--font-display);">$${claimUSDT.toFixed(2)}</div>
+        </div>
+        <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.22);border-radius:8px;padding:12px;">
+          <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:5px;">STILL LOCKED</div>
+          <div style="font-size:16px;color:#f59e0b;font-family:var(--font-display);">$${lockedUSDT.toFixed(2)}</div>
+        </div>
+      </div>
+      <button id="rwReserveClaimBtn" onclick="claimReserveAction()" ${claimUSDT > 0.000001 ? '' : 'disabled'}
+        style="width:100%;padding:11px;margin-bottom:16px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;
+               border:1px solid ${claimUSDT > 0.000001 ? 'rgba(74,222,128,0.5)' : 'var(--border)'};border-radius:5px;
+               background:${claimUSDT > 0.000001 ? 'rgba(74,222,128,0.12)' : 'var(--surface)'};
+               color:${claimUSDT > 0.000001 ? '#4ade80' : 'var(--muted)'};cursor:${claimUSDT > 0.000001 ? 'pointer' : 'not-allowed'};">
+        CLAIM $${claimUSDT.toFixed(2)} MATURED
+      </button>
+      <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px;">BUY A PACKAGE WITH RESERVE</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">${pkgBtns}</div>
+      <div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px;">RESERVE BY PACKAGE</div>
+      ${rows}
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function claimReserveAction() {
+  if (!requireConnected()) return;
+  _txBegin();
+  try {
+    const _c = contract.connect(signer);
+    const gasLimit = await gasLimitWithBuffer(_c, 'claimReserve', [], 30);
+    toast('Confirm reserve claim in your wallet…', 'info');
+    const tx = await _c.claimReserve({ ..._GAS, gasLimit });
+    await tx.wait();
+    _txDone();
+    toast('Reserve claimed to your wallet.', 'success');
+    const ov = document.getElementById('rwReserveOverlay'); if (ov) ov.remove();
+    invalidateTabs('rewards');
+    loadRwROI(true);
+  } catch (e) {
+    _txDone();
+    console.error('[claimReserve] failed:', e);
+    toast('Claim failed: ' + decodeContractError(e, contract && contract.interface), 'error');
+  }
+}
+
+async function buyPackageFromReserve(usdtAmount) {
+  if (!requireConnected()) return;
+  // Token: prefer the featured token, fall back to the invest panel's current selection.
+  let tokenAddr = '';
+  try { tokenAddr = await contract.featuredToken(); } catch (_) {}
+  if (!tokenAddr || /^0x0+$/.test(tokenAddr)) {
+    const sel = document.getElementById('investTokenSelect');
+    tokenAddr = sel && sel.value ? sel.value : '';
+  }
+  if (!tokenAddr) { toast('No token available to buy into — pick one on the Invest tab first.', 'warn'); return; }
+
+  _txBegin();
+  try {
+    const wei = ethers.utils.parseEther(String(usdtAmount));
+    const _c  = contract.connect(signer);
+    toast(`Buying a $${usdtAmount} package from reserve…`, 'info');
+    const gasLimit = await gasLimitWithBuffer(_c, 'investFromReserve', [tokenAddr, wei], 30);
+    const tx = await _c.investFromReserve(tokenAddr, wei, { ..._GAS, gasLimit });
+    await tx.wait();
+    _txDone();
+    toast(`$${usdtAmount} package purchased from reserve.`, 'success');
+    const ov = document.getElementById('rwReserveOverlay'); if (ov) ov.remove();
+    invalidateTabs('rewards', 'dashboard', 'investments');
+    loadRwROI(true);
+  } catch (e) {
+    _txDone();
+    console.error('[investFromReserve] failed:', e);
+    toast('Purchase failed: ' + decodeContractError(e, contract && contract.interface), 'error');
+  }
 }
 
 
@@ -1388,7 +1531,7 @@ async function loadRwROI(silent = false) {
     // These must match the on-chain values set in the constructor / setROICommissionRates().
     const ROI_CONTRACT_RATES = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
 
-    const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords, capPausedAtRaw, commStats, ownLocks] = await Promise.all([
+    const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords, capPausedAtRaw, commStats, ownLocks, reserveStats, reserveTranches] = await Promise.all([
       contract.getROIData(walletAddress).catch(() => null),
       contract.getActiveROIStreams(walletAddress).catch(() => null),
       cachedConstant('platformToken', () => contract.platformToken()).catch(() => null),
@@ -1397,7 +1540,17 @@ async function loadRwROI(silent = false) {
       Promise.resolve().then(() => contract.getCapPausedAt(walletAddress)).catch(() => 0),
       Promise.resolve().then(() => contract.getUserCommissionStats(walletAddress)).catch(() => null),
       contract.getUserLPLocks(walletAddress).catch(() => []),
+      Promise.resolve().then(() => contract.getReserveStats(walletAddress)).catch(() => null),
+      Promise.resolve().then(() => contract.getReserveTranches(walletAddress)).catch(() => []),
     ]);
+
+    // Referral-commission RESERVE (held over-0.5× commission). Cached so the modal + cap chip read it.
+    _rwReserveTotalETH     = reserveStats ? parseFloat(ethers.utils.formatEther(reserveStats.total ?? reserveStats[0])) : 0;
+    _rwReserveClaimableETH = reserveStats ? parseFloat(ethers.utils.formatEther(reserveStats.claimable ?? reserveStats[1])) : 0;
+    _rwReserveTranches     = (reserveTranches || []).map(t => ({
+      amount:     parseFloat(ethers.utils.formatEther(t.amount ?? t[0])),
+      unlockTime: Number(t.unlockTime ?? t[1]),
+    }));
 
     _rwROICapPausedAt  = capPausedAtRaw ? Number(capPausedAtRaw) : 0;
     _rwROICapPaused            = _rwROICapPausedAt > 0;
@@ -1789,12 +1942,28 @@ async function loadRwROI(silent = false) {
           _caAmt = `<div id="rwROICapAmt" style="font-size:16px;font-family:var(--font-display);color:#4ade80;margin:6px 0 2px;">$${(_initLiveCap * USDT_PER_ETH).toFixed(2)}</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">live · decreases as ROI accrues</div>`;
         }
+        // Reserve chip — held over-0.5× referral commission. Sits at the right of AVAILABLE CAP and
+        // opens the per-package reserve modal (claim matured / buy a package). Hidden when empty.
+        const _resTotal = _rwReserveTotalETH || 0;
+        const _resClaim = _rwReserveClaimableETH || 0;
+        const _resChip = _resTotal > 0.000001 ? `
+            <span onclick="openReserveModal()" title="Held referral commission — click for the per-package breakdown"
+                  style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-size:9px;font-family:var(--font-mono);
+                         letter-spacing:1px;padding:2px 8px;border-radius:3px;background:rgba(96,165,250,0.10);
+                         color:#60a5fa;border:1px solid rgba(96,165,250,0.35);">
+              RESERVE $${(_resTotal * USDT_PER_ETH).toFixed(2)}
+              ${_resClaim > 0.000001 ? `<span style="color:#4ade80;">●</span>` : ``}
+              <span style="opacity:0.6;">›</span>
+            </span>` : ``;
         return `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;gap:8px;">
             <div style="font-size:9px;letter-spacing:2px;color:var(--muted);">AVAILABLE CAP</div>
-            <span id="rwROICapBadge" style="font-size:9px;font-family:var(--font-mono);letter-spacing:1px;
-                  padding:2px 7px;border-radius:3px;background:${_cbBg};color:${_cbColor};border:1px solid ${_cbBorder};"
-            >${_cbTxt}</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${_resChip}
+              <span id="rwROICapBadge" style="font-size:9px;font-family:var(--font-mono);letter-spacing:1px;
+                    padding:2px 7px;border-radius:3px;background:${_cbBg};color:${_cbColor};border:1px solid ${_cbBorder};"
+              >${_cbTxt}</span>
+            </div>
           </div>
           ${_caAmt}
           ${_caSub}
@@ -1815,7 +1984,7 @@ async function loadRwROI(silent = false) {
             <span id="rwROIMissedWrap" style="display:${missedBaseETH > 0.000001 ? '' : 'none'};"><span id="rwROIMissed" style="font-size:16px;color:#ef4444;font-family:var(--font-display);">$${(missedBaseETH * USDT_PER_ETH).toFixed(2)}</span><span style="font-size:8px;color:var(--muted);"> missed</span></span>
             <span id="rwROIHeldMissedDash" style="font-size:16px;color:var(--muted);font-family:var(--font-display);display:${(heldBaseETH > 0.000001 || missedBaseETH > 0.000001) ? 'none' : ''};">—</span>
           </div>
-          <div style="font-size:8px;color:var(--muted);margin-top:3px;display:${heldBaseETH > 0.000001 ? '' : 'none'};">held is over-cap · invest more to claim</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:3px;display:${heldBaseETH > 0.000001 ? '' : 'none'};">held is earned ROI awaiting cap · invest more to claim</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;"><span class="rw-stat-label-desk">CLAIMABLE (USDT)</span><span class="rw-stat-label-mob">Claimable</span></div>

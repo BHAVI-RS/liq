@@ -269,20 +269,20 @@ async function loadGenealogy() {
       contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0))
     ]);
     _geneTree = treeData;
-    // Eligibility model: BOTH referral commissions and ROI use the SAME per-level gate — level N
-    // needs active self-stake >= selfGate[N-1] ($25→L1, $50→L1-2, $100→L1-3, …). The team-business
-    // gate was removed (team business is now informational only). Self-stake is ACTIVE (drops when
-    // locks expire); unlockedLevels (from getUserEligibility) is the highest contiguous level qualified for.
+    // Eligibility model (team-business gate removed — informational only):
+    //   • REFERRAL: a FLAT $25 active self-stake (selfGates[0]) unlocks ALL 10 referral levels.
+    //   • ROI: per-level ACTIVE self-stake gate — level N needs >= selfGates[N-1] ($25→L1, $50→L1-2,
+    //     $100→L1-3, …). unlockedLevels (from getUserEligibility) is the ROI depth.
+    // Self-stake is ACTIVE (drops when locks expire/are removed).
     const selfStakeUSDT  = eligRaw ? Number(eligRaw.selfStakeUSDT    ?? eligRaw[0]) : 0;
     const teamBizUSDT    = eligRaw ? Number(eligRaw.teamBusinessUSDT ?? eligRaw[1]) : 0;
-    const unlockedLevels = eligRaw ? Number(eligRaw.unlockedLevels   ?? eligRaw[2]) : 0;
+    const roiUnlocked    = eligRaw ? Number(eligRaw.unlockedLevels   ?? eligRaw[2]) : 0;
     const selfGates = gatesRaw ? Array.from(gatesRaw.selfGates ?? gatesRaw[0]).map(Number) : [];
-    // Eligibility model (team-business gate removed — it's now an informational stat only):
-    //   • BOTH referral commissions AND ROI streams use the per-level ACTIVE self-stake gate
-    //     (selfGates[level-1]) — the same gate, shown per-level below.
-    const unlocked = unlockedLevels;                           // highest contiguous level (ROI + referral)
-    const _gate = (lvl) => selfGates[lvl - 1] ?? 0;
-    const _elig = (lvl) => selfStakeUSDT >= _gate(lvl);
+    const _gate          = (lvl) => selfGates[lvl - 1] ?? 0;
+    const refGate        = selfGates[0] ?? 25;                 // flat referral gate ($25)
+    const refUnlockedAll = selfStakeUSDT >= refGate;           // referral: all 10 levels or none
+    const refUnlocked    = refUnlockedAll ? 10 : 0;
+    const _roiElig       = (lvl) => selfStakeUSDT >= _gate(lvl); // ROI per-level
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
 
     // Investment amounts now arrive with the downline (node._inv) — no per-node RPC calls.
@@ -320,28 +320,36 @@ async function loadGenealogy() {
     // ── List view ───────────────────────────────────────────────────────────
     listEl.innerHTML = '';
 
-    // Eligibility summary card (always shown) — ROI + referral levels unlocked, your active
-    // self-stake, team business (informational), and what's still needed to unlock the next level.
-    // ROI and referral share the SAME per-level self-stake gate, so one count covers both.
+    // Eligibility summary card (always shown) — REFERRAL levels (flat $25 → all 10) and ROI levels
+    // (per-level gate) shown separately, your active self-stake, team business (informational), and
+    // what's still needed to unlock the next level of each.
     {
-      // Next-step toward the next ROI + referral level (per-level self-stake gate).
-      let nextLine;
-      if (unlocked >= 10) {
-        nextLine = '<span style="color:#4ade80;">All 10 ROI + referral levels unlocked ✓</span>';
-      } else {
-        const need = Math.max(0, _gate(unlocked + 1) - selfStakeUSDT);
-        nextLine = need > 0
-          ? `+$${fmtNum(need)} self-stake to unlock <strong style="color:var(--gold);">Level ${unlocked + 1}</strong> (ROI + referral)`
-          : `Requirements met — invest to apply <strong style="color:var(--gold);">Level ${unlocked + 1}</strong>`;
+      // Next-step lines: referral (flat $25) and ROI (per-level).
+      const lines = [];
+      if (!refUnlockedAll) {
+        lines.push(`+$${fmtNum(Math.max(0, refGate - selfStakeUSDT))} self-stake to unlock <strong style="color:var(--gold);">all 10 referral levels</strong>`);
       }
+      if (roiUnlocked >= 10) {
+        lines.push(`<span style="color:#4ade80;">All 10 ROI levels unlocked ✓${refUnlockedAll ? ' · referral fully unlocked ✓' : ''}</span>`);
+      } else {
+        const need = Math.max(0, _gate(roiUnlocked + 1) - selfStakeUSDT);
+        lines.push(need > 0
+          ? `+$${fmtNum(need)} self-stake to unlock <strong style="color:var(--gold);">ROI Level ${roiUnlocked + 1}</strong>`
+          : `Requirements met — invest to apply <strong style="color:var(--gold);">ROI Level ${roiUnlocked + 1}</strong>`);
+      }
+      const nextLine = lines.join('<br>');
       const summary = document.createElement('div');
       summary.className = 'gene-level-block';
       summary.style.cssText = 'padding:14px 16px;margin-bottom:10px;';
       summary.innerHTML = `
         <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between;">
           <div>
-            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">ROI + REFERRAL LEVELS UNLOCKED</div>
-            <div style="font-family:var(--font-display);font-size:20px;color:var(--gold);">${unlocked} <span style="font-size:12px;color:var(--muted);">/ 10</span></div>
+            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">REFERRAL LEVELS <span style="opacity:0.6;">· flat $25</span></div>
+            <div style="font-family:var(--font-display);font-size:20px;color:${refUnlockedAll ? '#4ade80' : 'var(--muted)'};">${refUnlocked} <span style="font-size:12px;color:var(--muted);">/ 10</span></div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">ROI LEVELS <span style="opacity:0.6;">· per level</span></div>
+            <div style="font-family:var(--font-display);font-size:20px;color:var(--gold);">${roiUnlocked} <span style="font-size:12px;color:var(--muted);">/ 10</span></div>
           </div>
           <div style="text-align:right;">
             <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">ACTIVE SELF-STAKE</div>
@@ -369,13 +377,17 @@ async function loadGenealogy() {
         const blockId  = `glvl${level}`;
         const rate     = COMMISSION_RATES[idx] !== undefined ? fmtNum(COMMISSION_RATES[idx], 2) + '%' : '—';
         const levelTotal = addrs.reduce((s, a) => s + (_geneInvestedMap.get(a) || 0), 0);
-        // Per-level badge tracks eligibility for this level — ROI and referral share the SAME
-        // per-level active-self-stake gate (selfGates[level-1]), so one badge covers both.
-        const eligible  = _elig(level);
-        const eligStyle = eligible
+        // Per-level badge: REFERRAL uses the flat $25 gate (same for every level); ROI uses the
+        // per-level gate (selfGates[level-1]). Green when both are met, amber when only one, red when none.
+        const roiElig   = _roiElig(level);
+        const eligStyle = (refUnlockedAll && roiElig)
           ? 'color:#4ade80;font-size:10px;font-family:var(--font-mono);margin-left:8px;'
-          : 'color:#f87171;font-size:10px;font-family:var(--font-mono);margin-left:8px;';
-        const eligLabel = eligible ? '✓ ROI + REFERRAL' : `✗ ROI + REFERRAL NEEDS $${fmtNum(_gate(level))} self`;
+          : (refUnlockedAll || roiElig)
+            ? 'color:#fbbf24;font-size:10px;font-family:var(--font-mono);margin-left:8px;'
+            : 'color:#f87171;font-size:10px;font-family:var(--font-mono);margin-left:8px;';
+        const refTag    = refUnlockedAll ? '✓ REF' : `✗ REF $${fmtNum(refGate)}`;
+        const roiTag    = roiElig ? '✓ ROI' : `✗ ROI $${fmtNum(_gate(level))}`;
+        const eligLabel = `${refTag} · ${roiTag}`;
 
         const memberRows = addrs.map(a => {
           const inv      = _geneInvestedMap.get(a) || 0;

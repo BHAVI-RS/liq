@@ -1,10 +1,11 @@
-// Pins the restake "streak" bonus. Restaking a lock for the SAME duration should raise the
-// reward rate each time (streak 1→2→3, capped at 3); restaking a DIFFERENT duration resets it.
+// Pins the restake "streak" bonus. Restaking a lock for the SAME duration raises the reward rate
+// each time (streak 1→2→3, capped at 3). Each duration owns an INDEPENDENT, PERSISTENT streak:
+// switching to another duration starts/continues that duration's own streak and does NOT wipe the
+// others, so a 90d→30d→90d sequence returns to 90d at streak 2 (not base).
 //
-// Regression: restakeLPExt recovered the ending period's duration with `(unlockTime-lockedAt)/2`
-// while lock windows are scaled 1 day = 6 s, so the recovered "days" landed on the wrong bucket
-// (90d → 270 ≈ 180d). dIdx never matched prevDIdx, the streak reset every time, and every
-// same-duration restake paid the BASE rate. Fixed by dividing by 6.
+// Model: restakeCounts[dIdx] = periods already started in that duration (the 90-day slot is seeded
+// to 1 at invest, since the invest lock is a 90-day base period). A new period in dIdx applies
+// streak level min(count, 3), then advances that one counter. No cross-duration reset.
 //
 // Run:  npx hardhat test test/restake-streak.test.js
 
@@ -124,31 +125,44 @@ describe("Restake streak bonus", function () {
     assert.equal(counts[3], 4, "90-day bucket counts every same-duration restake");
   });
 
-  it("resets the streak when the restake duration changes", async () => {
+  it("keeps each duration's streak PERSISTENT across a duration switch (90→30→90 continues)", async () => {
+    // The exact scenario: invest (90d base) → restake 90d (streak 1) → restake 30d (base, its own
+    // streak) → restake 90d AGAIN must continue at streak 2, not reset to base. Each duration owns
+    // an independent streak that never vanishes when you detour through another duration.
     const { u1, liq, hordexAddr } = await deployBase();
-    await (await liq.connect(u1).invest(hordexAddr, PKG)).wait(); // 90-day lock
+    await (await liq.connect(u1).invest(hordexAddr, PKG)).wait(); // 90-day lock, base
 
-    await expireAndRestake(liq, hordexAddr, u1, 90); // streak 1 @ 90d
+    const [durs, baseRates] = await liq.getStakingRatesForAmount(PKG);
+    assert.equal(Number(durs[3]), 90, "index 3 = 90d");
+    assert.equal(Number(durs[1]), 30, "index 1 = 30d");
+    const base90  = BigInt(baseRates[3]);
+    const base30  = BigInt(baseRates[1]);
+    const incr90  = 30_000n;
+    const incr30  = 5_000n;
+
+    await expireAndRestake(liq, hordexAddr, u1, 90); // 90d streak 1
     const s1_90 = await rateOf(liq, u1.address);
-    assert(s1_90 > 0n);
+    assert.equal(s1_90.toString(), (base90 + 1n * incr90).toString(), "first 90d restake = streak 1");
 
-    // Switch to a different duration → streak resets to base for that duration.
-    await expireAndRestake(liq, hordexAddr, u1, 30);
-    const base30 = await rateOf(liq, u1.address);
+    await expireAndRestake(liq, hordexAddr, u1, 30); // 30d first visit → base (90d streak preserved)
+    const b30 = await rateOf(liq, u1.address);
+    assert.equal(b30.toString(), base30.toString(), "first 30d restake lands on 30d base");
 
-    await expireAndRestake(liq, hordexAddr, u1, 30); // now streak 1 @ 30d
+    await expireAndRestake(liq, hordexAddr, u1, 90); // back to 90d → CONTINUES at streak 2
+    const s2_90 = await rateOf(liq, u1.address);
+    assert.equal(s2_90.toString(), (base90 + 2n * incr90).toString(), "returning to 90d continues at streak 2 (not reset)");
+
+    await expireAndRestake(liq, hordexAddr, u1, 30); // back to 30d → its own streak advances to 1
     const s1_30 = await rateOf(liq, u1.address);
+    assert.equal(s1_30.toString(), (base30 + 1n * incr30).toString(), "returning to 30d continues that duration's streak");
 
-    console.log(`      streak1@90d=${s1_90}  base@30d=${base30}  streak1@30d=${s1_30}`);
-    assert(base30 < s1_90, "switching duration drops back to that duration's base rate (streak reset)");
-    assert(s1_30 > base30, "after switching durations, the new duration builds its own streak");
+    console.log(`      90d: base=${base90} s1=${s1_90} s2=${s2_90}  |  30d: base=${base30} s1=${s1_30}`);
 
-    // The contract zeroes the bucket being switched INTO, not the one left behind, so the old
-    // 90-day count lies dormant (1) and is harmless — it gets zeroed if the user ever returns to
-    // 90d (that path takes the mismatch branch first). What matters is the 30-day bucket tracking.
+    // Both buckets persist simultaneously: 90d has done base(invest)+streak1+streak2 = 3 periods,
+    // 30d has done base+streak1 = 2 periods. (periods-done counters; level = count-1.)
     const counts = (await liq.getUserLPLocks(u1.address))[0].restakeCounts.map(Number);
-    assert.equal(counts[1], 1, "30-day bucket counts the same-duration 30d restake");
-    assert.equal(counts[3], 1, "old 90-day count lies dormant until the user returns to 90d");
+    assert.equal(counts[3], 3, "90-day bucket persisted across the 30d detour (3 periods done)");
+    assert.equal(counts[1], 2, "30-day bucket tracked its own two periods");
   });
 
   // The default investment lock is ALWAYS 90 days, so restaking 90d continues straight into

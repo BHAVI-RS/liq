@@ -385,28 +385,93 @@ async function invest() {
   const ethAmt    = parseFloat(ethAmtStr);
   if (!ethAmt || ethAmt <= 0) { toast('Select an investment package first', 'warn'); return; }
 
+  // If the user holds any reserve, ask whether to use it before sending the tx.
+  let reserveWei = ethers.BigNumber.from(0);
+  try {
+    const rs = await contract.getReserveStats(walletAddress);
+    reserveWei = rs.total ?? rs[0];
+  } catch (_) {}
+  if (reserveWei && reserveWei.gt(0)) {
+    _showReserveChoiceModal(tokenAddr, ethAmtStr, reserveWei);
+    return;
+  }
+  _executeInvest(tokenAddr, ethAmtStr, false);
+}
+
+// "Use reserve balance?" prompt shown after CONFIRM & INVEST when the user has reserve.
+function _showReserveChoiceModal(tokenAddr, ethAmtStr, reserveWei) {
+  const existing = document.getElementById('investReserveChoice');
+  if (existing) existing.remove();
+
+  const pkg        = parseFloat(ethAmtStr);
+  const reserve    = parseFloat(ethers.utils.formatEther(reserveWei)) * USDT_PER_ETH;
+  const fromRes    = Math.min(reserve, pkg);
+  const fromWallet = Math.max(0, pkg - reserve);
+  const breakdown  = fromWallet > 0
+    ? `<span style="color:#60a5fa;">$${fromRes.toFixed(2)}</span> from reserve + <span style="color:var(--cream);">$${fromWallet.toFixed(2)}</span> from your wallet`
+    : `the full <span style="color:#60a5fa;">$${pkg.toFixed(2)}</span> from reserve · wallet untouched`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'investReserveChoice';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:1100;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:22px;max-width:420px;width:100%;box-sizing:border-box;font-family:var(--font-mono);position:relative;">
+      <button onclick="document.getElementById('investReserveChoice').remove()"
+        style="position:absolute;top:12px;right:12px;width:26px;height:26px;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;">✕</button>
+      <div style="font-size:11px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">USE RESERVE BALANCE?</div>
+      <div style="font-size:13px;color:var(--cream);margin-bottom:14px;line-height:1.6;">
+        You have <strong style="color:#60a5fa;">$${reserve.toFixed(2)}</strong> in commission reserve.
+        Use it for this <strong style="color:var(--gold);">$${pkg.toFixed(2)}</strong> package?
+      </div>
+      <div style="font-size:11px;color:var(--muted);padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);margin-bottom:16px;line-height:1.6;">
+        If you use reserve: ${breakdown}.
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="document.getElementById('investReserveChoice').remove(); _executeInvest('${tokenAddr}','${ethAmtStr}',true)"
+          style="flex:1;padding:11px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:1px solid rgba(96,165,250,0.5);border-radius:5px;background:rgba(96,165,250,0.12);color:#60a5fa;cursor:pointer;">USE RESERVE</button>
+        <button onclick="document.getElementById('investReserveChoice').remove(); _executeInvest('${tokenAddr}','${ethAmtStr}',false)"
+          style="flex:1;padding:11px;font-family:var(--font-mono);font-size:12px;letter-spacing:1px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--cream);cursor:pointer;">PAY FROM WALLET</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+// Sends the invest tx. useReserve=false → all wallet (invest); true → reserve first, wallet for the
+// shortfall (investUseReserve). Only the wallet portion needs an approval.
+async function _executeInvest(tokenAddr, ethAmtStr, useReserve) {
+  if (!requireConnected()) return;
   _txBegin();
   try {
     const totalWei  = ethers.utils.parseEther(ethAmtStr);
     const usdtAddr  = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
     const usdtAbi   = ['function approve(address spender, uint256 amount) external returns (bool)'];
     const usdtToken = new ethers.Contract(usdtAddr, usdtAbi, signer);
-
-    toast('Step 1/2 — Approve USDT spending in MetaMask…', 'info');
-    const approveTx = await usdtToken.approve(CONTRACT_ADDRESS, totalWei, _GAS);
-    await approveTx.wait();
-
-    toast('Step 2/2 — Confirm investment in MetaMask…', 'info');
-    // Estimate gas with headroom BEFORE prompting the wallet. This both (a) surfaces any
-    // revert (price stale, slippage, low reserve, not-enough-cap, etc.) up front so the catch
-    // can explain exactly why, and (b) adds 30% over the estimate so the variable-cost ROI
-    // settlement loops (which grow as ROI streams accumulate) don't run out of gas.
     const _inv      = contract.connect(signer);
-    const _gasLimit = await gasLimitWithBuffer(_inv, 'invest', [tokenAddr, totalWei], 30);
-    const tx        = await _inv.invest(tokenAddr, totalWei, { ..._GAS, gasLimit: _gasLimit });
+
+    let method = 'invest';
+    let walletPortion = totalWei;             // amount that needs an approval
+    if (useReserve) {
+      method = 'investUseReserve';
+      let reserveWei = ethers.BigNumber.from(0);
+      try { const rs = await contract.getReserveStats(walletAddress); reserveWei = rs.total ?? rs[0]; } catch (_) {}
+      walletPortion = totalWei.gt(reserveWei) ? totalWei.sub(reserveWei) : ethers.BigNumber.from(0);
+    }
+
+    if (walletPortion.gt(0)) {
+      toast('Step 1/2 — Approve USDT spending in MetaMask…', 'info');
+      await (await usdtToken.approve(CONTRACT_ADDRESS, walletPortion, _GAS)).wait();
+      toast('Step 2/2 — Confirm investment in MetaMask…', 'info');
+    } else {
+      toast('Confirm investment (from reserve) in MetaMask…', 'info');
+    }
+
+    // Estimate gas with headroom BEFORE prompting the wallet so any revert (price stale, slippage,
+    // low cap, insufficient reserve) surfaces up front, plus 30% for the variable ROI settlement loops.
+    const _gasLimit = await gasLimitWithBuffer(_inv, method, [tokenAddr, totalWei], 30);
+    const tx        = await _inv[method](tokenAddr, totalWei, { ..._GAS, gasLimit: _gasLimit });
 
     toast('Transaction sent — waiting for confirmation…', 'info');
-
     const receipt = await tx.wait();
 
     let lpReceived = null;
@@ -437,7 +502,7 @@ async function invest() {
     _selectedPkgUSD = null;
     renderPkgGrid();
 
-    invalidateTabs('dashboard', 'investments');
+    invalidateTabs('dashboard', 'investments', 'rewards');
     loadDashboard();
     switchTabByName('investments');
 

@@ -436,11 +436,15 @@ async function loadInvestments() {
         ? `<button id="removeLPBtn-${i}" onclick="removeLP(${i}, '${lock.token}', '${lpAmountHex}')" style="background:transparent;border:1px solid #f87171;color:#f87171;border-radius:4px;font-family:var(--font-mono);font-size:11px;letter-spacing:1px;padding:9px 18px;cursor:pointer;transition:background 0.2s,color 0.2s;" onmouseover="this.style.background='rgba(248,113,113,0.15)'" onmouseout="this.style.background='transparent'">REMOVE LP</button>`
         : '';
 
-      // Per-duration streak summary: indices 0-5 = 7s/30s/60s/90s/180s/360s
+      // Per-duration streak summary: indices 0-5 = 7s/30s/60s/90s/180s/360s. Each duration keeps
+      // its own persistent streak. restakeCounts holds periods-done (90-day seeded to 1 at invest),
+      // so the achieved streak level = count-1 (base period = level 0); virgin durations show 0.
       const _si = (idx, lbl) => {
-        const cnt = restakeCounts[idx] || 0;
-        const dot = cnt >= 3 ? `<span style="color:var(--gold)">●</span>` : cnt > 0 ? `<span style="color:var(--cream)">●</span>` : `<span style="color:var(--muted)">○</span>`;
-        return `${dot}&nbsp;${lbl}:${cnt >= 3 ? '<span style="color:var(--gold)">MAX</span>' : cnt}`;
+        const cnt   = restakeCounts[idx] || 0;
+        const lvl   = Math.max(cnt - 1, 0);
+        const isMax = lvl >= 3;
+        const dot = isMax ? `<span style="color:var(--gold)">●</span>` : lvl > 0 ? `<span style="color:var(--cream)">●</span>` : `<span style="color:var(--muted)">○</span>`;
+        return `${dot}&nbsp;${lbl}:${isMax ? '<span style="color:var(--gold)">MAX</span>' : lvl}`;
       };
       const _sRow1 = [[0,'7d'],[1,'30d'],[2,'60d']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
       const _sRow2 = [[3,'90d'],[4,'180d'],[5,'360d']].map(([i,l]) => _si(i,l)).join('&nbsp;&nbsp;');
@@ -498,6 +502,18 @@ async function loadInvestments() {
               <span class="did-val">$${fmtNum(Math.max(0, rewardTotalUSDT - rewardClaimedETH * USDT_PER_ETH))} USDT</span>
             </div>` : ''}
             <div class="did-row"><span class="did-label">RESTAKE STREAK</span><div class="did-val">${streakLabel}</div></div>
+            <div class="did-row">
+              <span class="did-label">LOCKED AT</span>
+              <span class="did-val" style="font-family:var(--font-mono);">${lockedAtLabel}<span style="color:var(--muted);font-size:10px;margin-left:4px;">unix</span></span>
+            </div>
+            <div class="did-row">
+              <span class="did-label">UNLOCK TIME</span>
+              <span class="did-val" style="font-family:var(--font-mono);">${unlockLabel}<span style="color:var(--muted);font-size:10px;margin-left:4px;">unix</span></span>
+            </div>
+            <div class="did-row">
+              <span class="did-label">LOCK DURATION</span>
+              <span class="did-val">${lockDurLabel}</span>
+            </div>
             <div class="did-row">
               <span class="did-label">LP TOKENS</span>
               <span class="did-val">${lpFmt}</span>
@@ -785,19 +801,21 @@ async function openStakeModal(lockIndex) {
       if (!rewardEl) return;
       if (cIdx === -1) { rewardEl.textContent = '—'; return; }
 
-      // Streak bonus only applies when continuing the SAME duration as the current lock,
-      // AND only when a base reward rate exists (packages below $100 earn no staking reward).
-      const isSameDur   = secs === lockDurDays;
+      // Each duration carries its OWN persistent streak (it no longer resets when you switch
+      // durations), so the bonus is computed per duration from that duration's own counter —
+      // not gated on matching the current lock's duration. restakeCounts[dIdx] already holds the
+      // level the NEXT restake into that duration applies (the 90-day slot is seeded to 1 at
+      // invest), so there is no +1. Only applies when a base rate exists (packages < $100 earn 0).
       const baseRatePPM = Number(ratesPPM[cIdx]);
       let streakBonusPPM = 0;
       let streakLabel    = 'BASE';
-      if (isSameDur && baseRatePPM > 0) {
+      if (baseRatePPM > 0) {
         const dIdx       = _durToIdx[secs] !== undefined ? _durToIdx[secs] : -1;
         const curCount   = dIdx >= 0 ? (restakeCounts[dIdx] || 0) : 0;
-        const nextStreak = Math.min(curCount + 1, 3);
+        const nextStreak = Math.min(curCount, 3);
         const incrPPM    = dIdx >= 0 ? _streakIncrPPM[dIdx] : 50_000;
         streakBonusPPM   = nextStreak * incrPPM;
-        streakLabel      = nextStreak >= 3 ? 'STREAK MAX' : `STREAK ${nextStreak}`;
+        streakLabel      = nextStreak >= 3 ? 'STREAK MAX' : nextStreak > 0 ? `STREAK ${nextStreak}` : 'BASE';
       }
 
       const ratePPM    = baseRatePPM + streakBonusPPM;

@@ -94,6 +94,7 @@ contract Hordex is HordexStorage {
     error TWAPStale();
     error TokenTWAPStale();
     error RegistrationFeeFailed();
+    error InsufficientReserve();
 
     // ── Events ────────────────────────────────────────────────────────────────
     event UserRegistered(address indexed user, address indexed referrer);
@@ -111,6 +112,7 @@ contract Hordex is HordexStorage {
     event StakingRewardClaimed(address indexed user, uint256 tokensAmount, uint256 ethEquivalent);
     event ROIClaimed(address indexed user, uint256 tokensAmount, uint256 ethEquivalent);
     event TWAPUpdated(uint256 price, uint256 timestamp);
+    event ReserveClaimed(address indexed user, uint256 amount);
 
     // ── Modifiers ─────────────────────────────────────────────────────────────
     modifier onlyOwner() {
@@ -154,11 +156,13 @@ contract Hordex is HordexStorage {
         _roiFacet       = roiFacet_;
         referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
         roiCommissionRates      = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
-        // Level-eligibility (USDT), per 0-indexed level. BOTH ROI and referral level i require
-        // active self-stake >= selfStakeGate[i] (same gate): $25 → level 1, $50 → levels 1-2, etc.
+        // Level-eligibility (USDT), per 0-indexed level. ROI level i requires active self-stake >=
+        // selfStakeGate[i] ($25 → level 1, $50 → levels 1-2, …). Levels 8-10 share the $5,000 gate,
+        // so a $5,000 active self-stake unlocks ALL 10 ROI levels. REFERRAL is decoupled: a flat $25
+        // (selfStakeGate[0]) active self-stake unlocks ALL 10 referral levels at once.
         // The team-business gate is removed: businessGate is seeded to zero and is no longer
         // consulted (kept only for storage-layout/ABI stability).
-        selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000];
+        selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 2500, 5000, 5000, 5000];
         businessGate  = [uint32(0),  0,  0,   0,    0,    0,    0,    0,    0,     0];
         _initStakingRates();
         _initPackages();
@@ -307,13 +311,42 @@ contract Hordex is HordexStorage {
 
     // ── Invest ────────────────────────────────────────────────────────────────
     function invest(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+        // Pull the package amount in fresh, then run the shared invest core.
+        if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
+        _invest(_token, _usdtAmount);
+    }
+
+    // Buy a package using HELD referral RESERVE instead of fresh USDT. The reserve WETH is already
+    // custodied by the contract (it was withheld when the over-1× commission was reserved), so we
+    // only draw down the user's reserve tranches FIFO — no transferFrom. Spendable any time, even
+    // before the tranches unlock (claiming for cash still requires maturity).
+    function investFromReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+        if (_reserveTotalWei[msg.sender] < _usdtAmount) revert InsufficientReserve();
+        _consumeReserve(msg.sender, _usdtAmount);
+        _invest(_token, _usdtAmount);
+    }
+
+    // Buy a package using RESERVE FIRST, then the wallet for any shortfall. If reserve >= the package
+    // the whole amount is funded from reserve (no wallet transfer); otherwise ALL reserve is spent and
+    // the remainder (package - reserve) is pulled from the wallet. The wallet must have approved at
+    // least that remainder. Caller chooses this path via the invest "use reserve?" prompt.
+    function investUseReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+        uint256 reserveBal  = _reserveTotalWei[msg.sender];
+        uint256 fromReserve = reserveBal < _usdtAmount ? reserveBal : _usdtAmount;
+        uint256 fromWallet  = _usdtAmount - fromReserve;
+        if (fromReserve > 0) _consumeReserve(msg.sender, fromReserve);
+        if (fromWallet > 0) {
+            if (!IERC20(WETH).transferFrom(msg.sender, address(this), fromWallet)) revert USDTTransferFailed();
+        }
+        _invest(_token, _usdtAmount);
+    }
+
+    function _invest(address _token, uint256 _usdtAmount) internal {
         if (!validPackageAmounts[_usdtAmount]) revert InvalidPackageAmount();
         if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
         if (tokens[_token].removed) revert TokenDelisted();
         if (bytes(tokens[_token].inProgressLabel).length != 0) revert TokenInProgress();
         if (IERC20(_token).balanceOf(address(this)) == 0) revert InsufficientContractTokenBalance();
-
-        if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
 
         _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         _callFacet(abi.encodeCall(HordexFacet.updateTokenTWAPExt, (_token)));
@@ -368,14 +401,15 @@ contract Hordex is HordexStorage {
 
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
 
-        // Restore ROI accrual now that this new lock supplies fresh cap. ROI that accrued during a
-        // NO-AVAILABLE-CAP period is FORFEITED (missed) and is NOT recovered by re-investing: when the
-        // cap was exhausted while staked (_capPausedAt set), the gap (_capPausedAt → now) is forfeited
-        // exactly like the post-natural-expiry no-stake gap. Pre-gap earned ROI is preserved; accrual
-        // resumes against the fresh cap from now. O(1) checkpoint (see _handleNaturalExpiryResume) —
-        // no per-stream loop, unbounded-stream safe.
+        // Restore ROI accrual now that this new lock supplies fresh cap. ROI is claimable ONLY for the
+        // time it accrued while BOTH the lock was active AND cap was available; the instant cap runs
+        // out (or a lock expires), claimable accrual stops and everything after is FORFEITED (missed),
+        // never recovered by re-investing. When cap was exhausted while staked (_capPausedAt set), the
+        // boundary is the EXHAUSTION time itself — so the whole no-cap stretch (even up to a later lock
+        // expiry) is forfeited; only pre-exhaustion earned ROI is preserved/claimable. Accrual resumes
+        // against the fresh cap from now. O(1) checkpoint (see _handleNaturalExpiryResume).
         if (_capPausedAt[msg.sender] > 0) {
-            uint256 _resumeFrom = _capPausedAt[msg.sender] > _lastExpiry ? _capPausedAt[msg.sender] : _lastExpiry;
+            uint256 _resumeFrom = _capPausedAt[msg.sender];
             _capPausedAt[msg.sender] = 0;
             _handleNaturalExpiryResume(msg.sender, _resumeFrom);
         } else if (hadNoActiveCap) {
@@ -461,11 +495,12 @@ contract Hordex is HordexStorage {
         // Resume ROI accrual if re-locking this lock reactivated dormant unused cap.
         // NOTE: commissionsCapUsed is deliberately NOT reset — restaking carries cap forward
         // unchanged (consumed stays consumed, unused stays usable); only invest() grants new cap.
-        // ROI that accrued during a NO-AVAILABLE-CAP period is FORFEITED (missed): when cap was
-        // exhausted while staked (_capPausedAt set), the gap (_capPausedAt → now) is forfeited like
-        // the post-natural-expiry no-stake gap. Pre-gap earned ROI preserved. O(1), no per-stream loop.
+        // ROI accruing with NO available cap is FORFEITED (missed): when cap was exhausted while staked
+        // (_capPausedAt set), the boundary is the EXHAUSTION time — the whole no-cap stretch (even up to
+        // a later lock expiry) is forfeited, never recovered by re-investing. Pre-exhaustion earned ROI
+        // is preserved/claimable. O(1), no per-stream loop.
         if (_capPausedAt[msg.sender] > 0) {
-            uint256 _resumeFrom = _capPausedAt[msg.sender] > _lastExpiry ? _capPausedAt[msg.sender] : _lastExpiry;
+            uint256 _resumeFrom = _capPausedAt[msg.sender];
             _capPausedAt[msg.sender] = 0;
             _handleNaturalExpiryResume(msg.sender, _resumeFrom);
         } else if (hadNoActiveCap) {
@@ -474,6 +509,18 @@ contract Hordex is HordexStorage {
 
         // Init new ROI streams with updated lock (new rewardRatePPM written by restakeLPExt)
         _callROI(abi.encodeCall(HordexROIFacet.initROIStreamsExt, (msg.sender, _lockIndex)));
+    }
+
+    // ── Reserve (held referral commission) ─────────────────────────────────────
+    // Withdraw all MATURED reserve tranches as USDT (WETH). Tranches unlock at their triggering
+    // downline package's 90-day mark; still-locked tranches stay in reserve. To use reserve before
+    // it unlocks, buy a package with investFromReserve() instead.
+    function claimReserve() external nonReentrant onlyRegistered {
+        uint256 amount = _consumeMaturedReserve(msg.sender);
+        if (amount == 0) revert NothingToClaim();
+        userCommissionsEarned[msg.sender] += amount;   // now delivered to wallet (cap already charged)
+        if (!IERC20(WETH).transfer(msg.sender, amount)) revert USDTTransferFailed();
+        emit ReserveClaimed(msg.sender, amount);
     }
 
     // ── Staking reward claims ─────────────────────────────────────────────────
