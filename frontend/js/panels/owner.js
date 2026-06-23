@@ -264,7 +264,7 @@ async function setFeaturedToken(addr) {
   if (!requireConnected()) return;
   _txBegin();
   try {
-    toast('Confirm transaction in MetaMask…', 'info');
+    toast('Confirm transaction in your wallet…', 'info');
     const tx = await contract.connect(signer).setFeaturedToken(addr, _GAS);
     await tx.wait();
     _txDone();
@@ -282,7 +282,7 @@ async function delistToken(addr) {
   if (!confirm('Delist this token? Users will no longer be able to invest in it. Existing stakers are unaffected.')) return;
   _txBegin();
   try {
-    toast('Confirm transaction in MetaMask…', 'info');
+    toast('Confirm transaction in your wallet…', 'info');
     const tx = await contract.connect(signer).removeToken(addr, _GAS);
     await tx.wait();
     _txDone();
@@ -312,7 +312,7 @@ async function toggleTokenInProgress(addr) {
   }
   _txBegin();
   try {
-    toast('Confirm transaction in MetaMask…', 'info');
+    toast('Confirm transaction in your wallet…', 'info');
     const tx = await contract.connect(signer).setTokenInProgress(addr, label, _GAS);
     await tx.wait();
     _txDone();
@@ -570,10 +570,10 @@ async function ownerAddLiquidity() {
     const usdtAbi  = ['function transfer(address to, uint256 amount) external returns (bool)'];
     const usdtCt   = new ethers.Contract(usdtAddr, usdtAbi, signer);
 
-    toast('Step 1/2 — Transfer USDT to contract in MetaMask…', 'info');
+    toast('Step 1/2 — Transfer USDT to contract in your wallet…', 'info');
     await (await usdtCt.transfer(CONTRACT_ADDRESS, usdtWei, _GAS)).wait();
 
-    toast('Step 2/2 — Seed pool in MetaMask…', 'info');
+    toast('Step 2/2 — Seed pool in your wallet…', 'info');
     await (await contract.connect(signer).seedPool(addr, tokenWei, usdtWei, _GAS)).wait();
 
     toast('Liquidity added successfully!', 'success');
@@ -690,11 +690,11 @@ async function ownerRemoveLiquidity() {
     const minETH = estETH.mul(9900).div(10000);
     const deadline = (latestBlock ? latestBlock.timestamp : Math.floor(Date.now() / 1000)) + 300;
 
-    toast('Step 1/2 — Approve LP tokens in MetaMask…', 'info');
+    toast('Step 1/2 — Approve LP tokens in your wallet…', 'info');
     const lpToken = new ethers.Contract(_ownerRem_PairAddr, ["function approve(address,uint256) returns (bool)"], signer);
     await (await lpToken.approve(DEX_ROUTER, lpWei, _GAS)).wait();
 
-    toast('Step 2/2 — Remove liquidity in MetaMask…', 'info');
+    toast('Step 2/2 — Remove liquidity in your wallet…', 'info');
     const removeLiqAbi = ['function removeLiquidity(address tokenA, address tokenB, uint liquidity, uint amountAMin, uint amountBMin, address to, uint deadline) external returns (uint amountA, uint amountB)'];
     const router = new ethers.Contract(DEX_ROUTER, removeLiqAbi, signer);
     await (await router.removeLiquidity(
@@ -766,7 +766,7 @@ async function ownerWithdrawETH() {
   const amtWei = rawAmt ? ethers.utils.parseEther(rawAmt) : ethers.BigNumber.from(0);
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
-    toast('Confirm in MetaMask…', 'info');
+    toast('Confirm in your wallet…', 'info');
     const tx = await contract.connect(signer).withdrawETH(amtWei, _GAS);
     await tx.wait();
     toast('ETH withdrawn successfully.', 'success');
@@ -790,7 +790,7 @@ async function ownerWithdrawToken() {
     : ethers.BigNumber.from(0);
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
-    toast('Confirm in MetaMask…', 'info');
+    toast('Confirm in your wallet…', 'info');
     const tx = await contract.connect(signer).withdrawToken(addr, amtWei, _GAS);
     await tx.wait();
     toast(`${_ownerWithdrawTokenSym} withdrawn successfully.`, 'success');
@@ -816,7 +816,7 @@ async function saveTokenEdit(addr) {
   if (!name || !symbol) { toast('Name and symbol cannot be empty', 'warn'); return; }
   _txBegin();
   try {
-    toast('Confirm transaction in MetaMask…', 'info');
+    toast('Confirm transaction in your wallet…', 'info');
     const tx = await contract.connect(signer).updateToken(addr, name, symbol, _GAS);
     await tx.wait();
     _txDone();

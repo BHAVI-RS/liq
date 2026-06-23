@@ -419,3 +419,41 @@ async function getLogsBatched(filter, fromBlock, toBlock, batchSize = 100) {
     });
   });
 })();
+
+// ── MULTICALL3 ──────────────────────────────────────────────────────────────────
+// Collapses many view reads into a single RPC request. Multicall3 is deployed at the
+// same canonical address on nearly every chain (Polygon mainnet, Amoy, …). aggregate3
+// allows per-call failure, so one reverting read returns `undefined` instead of
+// blowing up the whole batch.
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const MULTICALL3_ABI = [
+  "function aggregate3((address target, bool allowFailure, bytes callData)[] calls) view returns ((bool success, bytes returnData)[] returnData)"
+];
+function getMulticall(prov) {
+  return new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, prov || (typeof provider !== 'undefined' ? provider : undefined));
+}
+
+// Batch many VIEW calls on ONE contract into a single RPC.
+//   calls: [ [fnName, argsArray?], ... ]
+// Returns an array aligned to `calls`; each entry is the decoded result — unwrapped to
+// the bare value when the function has a single output (exactly like a normal ethers
+// call), or `undefined` if that individual call reverted. The returned promise rejects
+// only if the whole multicall request fails, so callers that relied on per-call
+// `.catch(default)` should keep applying their default via `?? default`, and wrap the
+// call in try/catch (or `.catch`) for the all-or-nothing transport-failure case.
+async function multicallRead(contract, calls) {
+  const iface = contract.interface;
+  const mc = getMulticall(contract.provider);
+  const res = await mc.aggregate3(calls.map(([fn, args]) => ({
+    target: contract.address,
+    allowFailure: true,
+    callData: iface.encodeFunctionData(fn, args || []),
+  })));
+  return res.map((r, i) => {
+    if (!r.success) return undefined;
+    try {
+      const decoded = iface.decodeFunctionResult(calls[i][0], r.returnData);
+      return decoded.length === 1 ? decoded[0] : decoded;
+    } catch (_) { return undefined; }
+  });
+}

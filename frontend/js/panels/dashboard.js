@@ -393,6 +393,52 @@ function _dashStartROITicker() {
 
 const _poolPriceCache = new Map(); // tokenAddr.lower() → { data, ts }
 
+// Pre-warm _poolPriceCache for many tokens with a single multicall (reserves +
+// totalSupply per pair), reusing the pair/decimals metadata resolver from pool.js.
+// After this runs, _dashGetPoolPrice(addr) is a cache hit (0 RPC) for ~60s. Best-
+// effort: on any failure the per-token path in _dashGetPoolPrice still works.
+async function _dashPrewarmPoolPrices(tokenAddrs) {
+  try {
+    if (typeof _resolvePoolMeta !== 'function' || typeof _poolMetaCache === 'undefined'
+        || typeof _PAIR_IFACE === 'undefined') return; // pool.js helpers not present
+    const fresh = [...new Set(tokenAddrs.map(a => a.toLowerCase()))].filter(a => {
+      const c = _poolPriceCache.get(a);
+      return !(c && Date.now() - c.ts < 60_000);
+    });
+    if (fresh.length === 0) return;
+    await _resolvePoolMeta(fresh);
+    const withPool = fresh.filter(a => _poolMetaCache.get(a));
+    if (withPool.length === 0) return;
+
+    const mc = getMulticall();
+    const calls = [];
+    withPool.forEach(a => {
+      const pair = _poolMetaCache.get(a).pairAddr;
+      calls.push({ target: pair, allowFailure: true, callData: _PAIR_IFACE.encodeFunctionData('getReserves', []) });
+      calls.push({ target: pair, allowFailure: true, callData: _PAIR_IFACE.encodeFunctionData('totalSupply', []) });
+    });
+    const res = await mc.aggregate3(calls);
+    withPool.forEach((a, idx) => {
+      const meta = _poolMetaCache.get(a);
+      const rRes = res[idx * 2], rSup = res[idx * 2 + 1];
+      if (!rRes.success || !rSup.success) return;
+      try {
+        const [r0, r1]   = _PAIR_IFACE.decodeFunctionResult('getReserves', rRes.returnData);
+        const [totalSup] = _PAIR_IFACE.decodeFunctionResult('totalSupply', rSup.returnData);
+        const rawToken = meta.isToken0 ? r0 : r1;
+        const rawETH   = meta.isToken0 ? r1 : r0;
+        const resToken = parseFloat(ethers.utils.formatUnits(rawToken, meta.decimals));
+        const resETH   = parseFloat(ethers.utils.formatEther(rawETH));
+        const priceEth = resToken > 0 ? resETH / resToken : 0;
+        _poolPriceCache.set(a, {
+          data: { priceEth, resETH, resToken, totalLPSupply: totalSup, pairAddr: meta.pairAddr },
+          ts: Date.now(),
+        });
+      } catch (_) {}
+    });
+  } catch (_) { /* fall back to per-token _dashGetPoolPrice */ }
+}
+
 async function _dashGetPoolPrice(tokenAddr) {
   const cacheKey = tokenAddr.toLowerCase();
   const cached = _poolPriceCache.get(cacheKey);
@@ -1034,19 +1080,31 @@ async function loadDashboard(silent = false) {
   try {
     const _latestBlockNum = await provider.getBlockNumber();
     const _fromBlock      = getFromBlock(_latestBlockNum);
-    const [lpLocks, commStats, stakingReward, platformToken, latestBlock, roiData, capPausedAtRaw, roiClaimRecords, availCapRaw] = await Promise.all([
-      contract.getUserLPLocks(walletAddress).catch(() => []),
-      contract.getUserCommissionStats(walletAddress).catch(() => null),
-      contract.getStakingReward(walletAddress).catch(() => null),
+    // All seven per-user contract reads go out as ONE multicall (was 7 separate RPCs).
+    // platformToken is cached after first load; getBlock isn't a contract call — both
+    // stay outside the batch. `?? default` reproduces each old per-call `.catch(default)`.
+    const [_mc, platformToken, latestBlock] = await Promise.all([
+      multicallRead(contract, [
+        ['getUserLPLocks',         [walletAddress]],
+        ['getUserCommissionStats', [walletAddress]],
+        ['getStakingReward',       [walletAddress]],
+        ['getROIData',             [walletAddress]],
+        ['getCapPausedAt',         [walletAddress]],
+        ['getROIClaimRecords',     [walletAddress]],
+        // Authoritative live available cap (active locks) — matches the contract's accrual gate.
+        // Used instead of reconstructing from getROIData, whose liveETH reads 0 at exhaustion.
+        ['getAvailableCap',        [walletAddress]],
+      ]).catch(() => []),
       cachedConstant('platformToken', () => contract.platformToken()).catch(() => null),
       provider.getBlock('latest').catch(() => null),
-      contract.getROIData(walletAddress).catch(() => null),
-      contract.getCapPausedAt(walletAddress).catch(() => 0),
-      contract.getROIClaimRecords(walletAddress).catch(() => []),
-      // Authoritative live available cap (active locks) — matches the contract's accrual gate.
-      // Used instead of reconstructing from getROIData, whose liveETH reads 0 at exhaustion.
-      contract.getAvailableCap(walletAddress).catch(() => null),
     ]);
+    const lpLocks         = _mc[0] ?? [];
+    const commStats       = _mc[1] ?? null;
+    const stakingReward   = _mc[2] ?? null;
+    const roiData         = _mc[3] ?? null;
+    const capPausedAtRaw  = _mc[4] ?? 0;
+    const roiClaimRecords = _mc[5] ?? [];
+    const availCapRaw     = _mc[6] ?? null;
     // Silent poll: if every critical call failed the RPC is down — keep existing display
     if (silent && lpLocks.length === 0 && platformToken === null) return;
     // Fetch staking-claim events in the background — they are only needed to add
@@ -1123,6 +1181,9 @@ async function loadDashboard(silent = false) {
 
     if (lpLocks.length) {
       const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
+      // Pre-warm every token's pool data in one multicall; the per-token reads below
+      // then hit the cache instead of doing 5 RPCs each.
+      await _dashPrewarmPoolPrices(tokenSet);
       await Promise.all(tokenSet.map(async addr => {
         const d = await _dashGetPoolPrice(addr);
         if (d) poolCache.set(addr, d);

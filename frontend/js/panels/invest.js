@@ -459,11 +459,11 @@ async function _executeInvest(tokenAddr, ethAmtStr, useReserve) {
     }
 
     if (walletPortion.gt(0)) {
-      toast('Step 1/2 — Approve USDT spending in MetaMask…', 'info');
+      toast('Step 1/2 — Approve USDT spending in your wallet…', 'info');
       await (await usdtToken.approve(CONTRACT_ADDRESS, walletPortion, _GAS)).wait();
-      toast('Step 2/2 — Confirm investment in MetaMask…', 'info');
+      toast('Step 2/2 — Confirm investment in your wallet…', 'info');
     } else {
-      toast('Confirm investment (from reserve) in MetaMask…', 'info');
+      toast('Confirm investment (from reserve) in your wallet…', 'info');
     }
 
     // Estimate gas with headroom BEFORE prompting the wallet so any revert (price stale, slippage,

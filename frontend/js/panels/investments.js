@@ -591,7 +591,7 @@ async function claimLP(lockIndex) {
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
   _txBegin();
   try {
-    toast('Confirm transaction in MetaMask…', 'info');
+    toast('Confirm transaction in your wallet…', 'info');
     const tx = await contract.connect(signer).claimLP(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
@@ -707,12 +707,12 @@ async function _execRemoveLP(lockIndex, tokenAddr, lpAmountHex) {
     const pairAddr = await factory.getPair(tokenAddr, WETH_ADDRESS);
     if (!pairAddr || pairAddr === ethers.constants.AddressZero) throw new Error('Pool not found');
 
-    toast('Step 1/2 — Approve LP tokens to platform in MetaMask…', 'info');
+    toast('Step 1/2 — Approve LP tokens to platform in your wallet…', 'info');
     const pairERC20 = new ethers.Contract(pairAddr, ['function approve(address spender, uint256 amount) returns (bool)'], signer);
     const approveTx = await pairERC20.approve(CONTRACT_ADDRESS, lpAmount, _GAS);
     await approveTx.wait();
 
-    toast('Step 2/2 — Confirm Remove LP in MetaMask…', 'info');
+    toast('Step 2/2 — Confirm Remove LP in your wallet…', 'info');
     const tx = await contract.connect(signer).removeLP(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
@@ -733,7 +733,7 @@ async function _execRemoveLPDirect(lockIndex) {
   if (btn) { btn.disabled = true; btn.textContent = 'REMOVING…'; }
   _txBegin();
   try {
-    toast('Confirm Remove LP in MetaMask…', 'info');
+    toast('Confirm Remove LP in your wallet…', 'info');
     const tx = await contract.connect(signer).removeLPDirect(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
@@ -858,7 +858,7 @@ async function confirmRestake() {
 
   _txBegin();
   try {
-    toast(`Confirm stake for ${days} days in MetaMask…`, 'info');
+    toast(`Confirm stake for ${days} days in your wallet…`, 'info');
     const tx = await contract.connect(signer).restakeLP(lockIndex, days, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
@@ -940,7 +940,7 @@ async function claimStakingRewardForLock(lockIndex) {
   if (mobileBtn) { mobileBtn.disabled = true; mobileBtn.textContent = 'CLAIMING…'; }
   _txBegin();
   try {
-    toast('Confirm staking reward claim in MetaMask…', 'info');
+    toast('Confirm staking reward claim in your wallet…', 'info');
     const tx = await contract.connect(signer).claimStakingRewardForLock(lockIndex, _GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();

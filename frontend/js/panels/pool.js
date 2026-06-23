@@ -50,6 +50,105 @@ window._poolTradeSells    = [];  // last-fetched sell trades (most-recent first)
 
 let _poolRefreshCount = 0;
 
+// ─── Pool price batching via Multicall3 (shared helper lives in utils.js) ────────
+// aggregate3 lets one RPC fetch every token's reserves at once; per-call failure
+// means a dead/empty pool never reverts the whole batch.
+const _FACTORY_IFACE = new ethers.utils.Interface(FACTORY_ABI);
+const _PAIR_IFACE    = new ethers.utils.Interface(PAIR_ABI);
+const _ERC20_IFACE   = new ethers.utils.Interface(ERC20_ABI);
+
+// Static per-token pool metadata (pair address, token ordering, decimals). None of
+// these change once a pool exists, so resolve them once and afterwards only the
+// reserves (which change every block) need re-reading.
+const _poolMetaCache = new Map(); // tokenAddr(lc) -> { pairAddr, isToken0, decimals } | null (= no pool)
+
+// Resolve + cache pool metadata for any tokens not yet known. At most two multicalls
+// total, regardless of how many tokens need resolving.
+async function _resolvePoolMeta(tokenAddrs) {
+  const need = tokenAddrs.filter(a => !_poolMetaCache.has(a.toLowerCase()));
+  if (need.length === 0) return;
+  const mc = getMulticall();
+
+  // 1) factory.getPair(token, WETH) for every unknown token — one RPC.
+  const pairRes = await mc.aggregate3(need.map(a => ({
+    target: DEX_FACTORY, allowFailure: true,
+    callData: _FACTORY_IFACE.encodeFunctionData('getPair', [a, DEX_WETH]),
+  })));
+  const pairAddrs = need.map((_a, i) => {
+    if (!pairRes[i].success) return null;
+    try {
+      const [p] = _FACTORY_IFACE.decodeFunctionResult('getPair', pairRes[i].returnData);
+      return (!p || p === ethers.constants.AddressZero) ? null : p;
+    } catch(_) { return null; }
+  });
+
+  // 2) pair.token0() + token.decimals() for every token that has a pool — one RPC.
+  const calls = [], map = [];
+  need.forEach((a, i) => {
+    if (!pairAddrs[i]) return;
+    calls.push({ target: pairAddrs[i], allowFailure: true, callData: _PAIR_IFACE.encodeFunctionData('token0', []) });
+    map.push({ i, kind: 'token0' });
+    calls.push({ target: a, allowFailure: true, callData: _ERC20_IFACE.encodeFunctionData('decimals', []) });
+    map.push({ i, kind: 'decimals' });
+  });
+  const token0Of = {}, decOf = {};
+  if (calls.length) {
+    const res = await mc.aggregate3(calls);
+    res.forEach((r, k) => {
+      if (!r.success) return;
+      const { i, kind } = map[k];
+      try {
+        if (kind === 'token0') token0Of[i] = _PAIR_IFACE.decodeFunctionResult('token0', r.returnData)[0];
+        else                   decOf[i]    = Number(_ERC20_IFACE.decodeFunctionResult('decimals', r.returnData)[0]);
+      } catch(_) {}
+    });
+  }
+
+  need.forEach((a, i) => {
+    const key = a.toLowerCase();
+    if (!pairAddrs[i]) { _poolMetaCache.set(key, null); return; }
+    const isToken0 = (token0Of[i] || '').toLowerCase() === key;
+    _poolMetaCache.set(key, { pairAddr: pairAddrs[i], isToken0, decimals: decOf[i] ?? 18 });
+  });
+}
+
+// Batch USDT prices for many tokens. Steady state = ONE rpc (reserves only); the
+// first call additionally resolves metadata (≤2 rpc, then cached for the session).
+// Returns Map<tokenAddr, price|null>. Falls back to the per-token path if Multicall3
+// is somehow unavailable, so the list still renders.
+async function _batchGetPoolPrices(tokenAddrs) {
+  const out = new Map();
+  try {
+    await _resolvePoolMeta(tokenAddrs);
+    const withPool = tokenAddrs.filter(a => _poolMetaCache.get(a.toLowerCase()));
+    tokenAddrs.forEach(a => out.set(a, null));
+    if (withPool.length === 0) return out;
+
+    const mc = getMulticall();
+    const res = await mc.aggregate3(withPool.map(a => ({
+      target: _poolMetaCache.get(a.toLowerCase()).pairAddr, allowFailure: true,
+      callData: _PAIR_IFACE.encodeFunctionData('getReserves', []),
+    })));
+    withPool.forEach((a, i) => {
+      if (!res[i].success) return;
+      const meta = _poolMetaCache.get(a.toLowerCase());
+      try {
+        const [r0, r1] = _PAIR_IFACE.decodeFunctionResult('getReserves', res[i].returnData);
+        const rawToken  = meta.isToken0 ? r0 : r1;
+        const rawETH    = meta.isToken0 ? r1 : r0;
+        const resTokenF = parseFloat(ethers.utils.formatUnits(rawToken, meta.decimals));
+        const resETHF   = parseFloat(ethers.utils.formatEther(rawETH));
+        out.set(a, resTokenF > 0 ? ethToUSDT(resETHF / resTokenF) : null);
+      } catch(_) {}
+    });
+    return out;
+  } catch (_) {
+    // Multicall unavailable / failed — fall back to the per-token reads.
+    await Promise.all(tokenAddrs.map(async a => { out.set(a, await _getTokenPoolPrice(a)); }));
+    return out;
+  }
+}
+
 function _stopListPolling() {
   if (window._poolListInterval) { clearInterval(window._poolListInterval); window._poolListInterval = null; }
 }
@@ -57,18 +156,22 @@ function _stopListPolling() {
 async function _refreshListPrices() {
   const panel = document.getElementById('panel-pool');
   if (!panel || !panel.classList.contains('active')) { _stopListPolling(); return; }
+  if (document.hidden) return; // skip the poll while the tab is backgrounded
   const addrs = Object.keys(window._poolListPrices);
-  await Promise.all(addrs.map(async addr => {
-    const price = await _getTokenPoolPrice(addr);
-    if (price === null) return;
+  if (addrs.length === 0) return;
+  // One multicall fetches every token's reserves at once (was 4 RPC per token).
+  const priceMap = await _batchGetPoolPrices(addrs);
+  for (const addr of addrs) {
+    const price = priceMap.get(addr);
+    if (price === null || price === undefined) continue;
     const prev = window._poolListPrices[addr]?.price;
     window._poolListPrices[addr] = { price, prevPrice: prev };
     const el = document.getElementById('poolListPrice-' + addr);
-    if (!el) return;
+    if (!el) continue;
     const color = (prev == null) ? 'var(--cream)' : price > prev ? '#4ade80' : price < prev ? '#f87171' : 'var(--cream)';
     el.style.color = color;
     el.textContent = '$' + fmtNum(price);
-  }));
+  }
 }
 
 function _stopPoolPolling() {
@@ -218,9 +321,9 @@ async function loadPoolPanel() {
     if (!addrs.length) { list.innerHTML = '<div class="empty-state">No registered tokens yet.</div>'; return; }
 
     const reversed = [...addrs].reverse();
-    const [tokens, prices] = await Promise.all([
+    const [tokens, priceMap] = await Promise.all([
       Promise.all(reversed.map(a => contract.getToken(a))),
-      Promise.all(reversed.map(a => _getTokenPoolPrice(a)))
+      _batchGetPoolPrices(reversed)   // one multicall for every token's price
     ]);
 
     list.innerHTML = '';
@@ -228,7 +331,7 @@ async function loadPoolPanel() {
       const addr  = reversed[i];
       const t     = tokens[i];
       if (t.inProgressLabel) continue;
-      const price = prices[i];
+      const price = priceMap.get(addr) ?? null;
       const meta  = getMeta(addr);
 
       // Determine price color vs cached previous
@@ -676,9 +779,9 @@ async function poolBuyTokens() {
     const q         = await contract.quoteSwapBuy(window._poolSelectedToken, ethIn);
     if (q.tokensOut.isZero()) { _txDone(); toast('No liquidity available for this token', 'error'); return; }
     const minOut    = q.tokensOut.mul(990).div(1000); // 1% slippage
-    toast('Step 1/2 — Approve USDT in MetaMask…', 'info');
+    toast('Step 1/2 — Approve USDT in your wallet…', 'info');
     await (await usdtCt.approve(CONTRACT_ADDRESS, ethIn, _GAS)).wait();
-    toast('Step 2/2 — Confirm buy in MetaMask…', 'info');
+    toast('Step 2/2 — Confirm buy in your wallet…', 'info');
     // Route through contract so the trade is recorded in getTradeHistory
     const tx = await contract.connect(signer).swapBuy(
       window._poolSelectedToken, ethIn, minOut, _GAS
@@ -720,11 +823,11 @@ async function poolSellTokens() {
     // Approve platform contract (not router) — contract proxies the swap and records the trade
     const allowance = await erc20.allowance(walletAddress, CONTRACT_ADDRESS);
     if (allowance.lt(amtIn)) {
-      toast('Approve token spend in MetaMask…', 'info');
+      toast('Approve token spend in your wallet…', 'info');
       const approveTx = await erc20.approve(CONTRACT_ADDRESS, amtIn, _GAS);
       await approveTx.wait();
     }
-    toast('Confirm swap in MetaMask…', 'info');
+    toast('Confirm swap in your wallet…', 'info');
     const tx = await contract.connect(signer).swapSell(
       window._poolSelectedToken, amtIn, minETH, _GAS
     );
@@ -1121,7 +1224,7 @@ async function poolUpdateTWAP() {
   const btn = document.getElementById('poolUpdateTwapBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'UPDATING…'; }
   try {
-    toast('Confirm TWAP update in MetaMask…', 'info');
+    toast('Confirm TWAP update in your wallet…', 'info');
     const calls = [contract.updateTWAP(_GAS)];
     if (tokenAddr) calls.push(contract.updateTokenTWAP(tokenAddr, _GAS));
     const txs = await Promise.all(calls);

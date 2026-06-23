@@ -214,7 +214,7 @@ async function ensureCorrectNetwork(eth) {
         return true;
       } catch(_) {}
     }
-    toast('Please switch MetaMask to ' + NET.chainName + ' (chain ID ' + NET.chainId + ').', 'error');
+    toast('Please switch your wallet to ' + NET.chainName + ' (chain ID ' + NET.chainId + ').', 'error');
     return false;
   }
 }
@@ -228,7 +228,7 @@ function registerEthereumListeners(eth) {
     if (accounts.length === 0) return;
     if (accounts[0].toLowerCase() !== (App.walletAddress || '').toLowerCase()) {
       disconnectWallet();
-      toast('MetaMask account changed. Please reconnect.', 'info');
+      toast('Wallet account changed. Please reconnect.', 'info');
     }
   });
 
@@ -253,7 +253,7 @@ function registerEthereumListeners(eth) {
 
 async function connectWallet() {
   const eth = await waitForEthereum();
-  if (!eth) { toast('MetaMask not detected. Please install it.', 'error'); return; }
+  if (!eth) { toast('Wallet not detected. Please install it.', 'error'); return; }
   const landingBtn = document.getElementById('landingBtnLabel');
   if (landingBtn) landingBtn.textContent = 'Connecting...';
   try {
@@ -655,7 +655,7 @@ async function loadLandingStats() {
 window.addEventListener('load', async () => {
   const eth = await waitForEthereum(2000);
   if (!eth) {
-    document.getElementById('connectBtn').textContent = 'METAMASK NOT FOUND';
+    document.getElementById('connectBtn').textContent = 'WALLET NOT FOUND';
     document.getElementById('connectBtn').style.borderColor = 'var(--danger)';
     document.getElementById('connectBtn').style.color = 'var(--danger)';
     return;

@@ -1170,13 +1170,18 @@ async function loadRwReferral() {
   try {
     const _zeroStats = { earned: ethers.BigNumber.from(0), totalCap: ethers.BigNumber.from(0), remainingCap: ethers.BigNumber.from(0) };
     // Fast on-chain calls only — _computeMissedWei runs in the background after render
-    const [commStats, commRecords, eligRaw, minInvRaw, roiDataRef] = await Promise.all([
-      contract.getUserCommissionStats(walletAddress).catch(() => _zeroStats),
-      contract.getCommissionRecords(walletAddress).catch(() => []),
-      contract.getUserEligibility(walletAddress).catch(() => null),
-      contract.minDirectReferralInvestment().catch(() => ethers.BigNumber.from(0)),
-      contract.getROIData(walletAddress).catch(() => null),
-    ]);
+    const _r = await multicallRead(contract, [
+      ['getUserCommissionStats',      [walletAddress]],
+      ['getCommissionRecords',        [walletAddress]],
+      ['getUserEligibility',          [walletAddress]],
+      ['minDirectReferralInvestment', []],
+      ['getROIData',                  [walletAddress]],
+    ]).catch(() => []);
+    const commStats  = _r[0] ?? _zeroStats;
+    const commRecords= _r[1] ?? [];
+    const eligRaw    = _r[2] ?? null;
+    const minInvRaw  = _r[3] ?? ethers.BigNumber.from(0);
+    const roiDataRef = _r[4] ?? null;
     // Referral eligibility (new model): a flat $25 active self-stake unlocks ALL 10 referral levels.
     const refSelfStakeUSDT = eligRaw ? Number(eligRaw.selfStakeUSDT ?? eligRaw[0]) : 0;
     const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
@@ -1304,11 +1309,15 @@ async function loadRwStaking(silent = false) {
   }
   try {
     const _zeroStaking = { totalAccumulated: ethers.BigNumber.from(0), previewNewTokens: ethers.BigNumber.from(0), lifetimeClaimed: ethers.BigNumber.from(0) };
-    const [stakingData, lpLocks, latestBlock] = await Promise.all([
-      contract.getStakingReward(walletAddress).catch(() => _zeroStaking),
-      contract.getUserLPLocks(walletAddress).catch(() => []),
+    const [_r, latestBlock] = await Promise.all([
+      multicallRead(contract, [
+        ['getStakingReward', [walletAddress]],
+        ['getUserLPLocks',   [walletAddress]],
+      ]).catch(() => []),
       provider.getBlock('latest')
     ]);
+    const stakingData = _r[0] ?? _zeroStaking;
+    const lpLocks     = _r[1] ?? [];
 
     // Use same effectiveNow as investments tab (restored from sessionStorage so
     // Hardhat's frozen block.timestamp doesn't cause mismatches).
@@ -1327,10 +1336,11 @@ async function loadRwStaking(silent = false) {
     const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
     const poolCache = new Map();
     const tokenMeta = new Map();
-    await Promise.all([
-      ...tokenSet.map(async addr => { try { const d = await _dashGetPoolPrice(addr); if (d) poolCache.set(addr, d); } catch(_) {} }),
-      ...tokenSet.map(async addr => { try { const t = await contract.getToken(addr); tokenMeta.set(addr, t.symbol); } catch(_) {} })
-    ]);
+    // One multicall pre-warms every pool price; one batches every getToken.
+    await _dashPrewarmPoolPrices(tokenSet);
+    const _toks = await multicallRead(contract, tokenSet.map(a => ['getToken', [a]])).catch(() => tokenSet.map(() => undefined));
+    tokenSet.forEach((addr, i) => { if (_toks[i]) tokenMeta.set(addr, _toks[i].symbol); });
+    await Promise.all(tokenSet.map(async addr => { try { const d = await _dashGetPoolPrice(addr); if (d) poolCache.set(addr, d); } catch(_) {} }));
 
     _rwStakingBaseTime  = effectiveNow;
     _rwStakingWallBase  = wallNow;
@@ -1504,7 +1514,7 @@ async function claimStakingReward() {
   const btn = document.getElementById('claimStakingBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
   try {
-    toast('Confirm staking claim in MetaMask…', 'info');
+    toast('Confirm staking claim in your wallet…', 'info');
     const tx = await contract.connect(signer).claimStakingReward(_GAS);
     toast('Transaction sent — waiting for confirmation…', 'info');
     await tx.wait();
@@ -1532,18 +1542,30 @@ async function loadRwROI(silent = false) {
     // These must match the on-chain values set in the constructor / setROICommissionRates().
     const ROI_CONTRACT_RATES = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
 
-    const [roiData, activeStreams, platformToken, latestBlock, roiClaimRecords, capPausedAtRaw, commStats, ownLocks, reserveStats, reserveTranches] = await Promise.all([
-      contract.getROIData(walletAddress).catch(() => null),
-      contract.getActiveROIStreams(walletAddress).catch(() => null),
+    // Eight per-user reads batched into ONE multicall; platformToken (cached) and
+    // getBlock (not a contract call) stay outside. `?? default` = the old per-call catch.
+    const [_r, platformToken, latestBlock] = await Promise.all([
+      multicallRead(contract, [
+        ['getROIData',              [walletAddress]],
+        ['getActiveROIStreams',     [walletAddress]],
+        ['getROIClaimRecords',      [walletAddress]],
+        ['getCapPausedAt',          [walletAddress]],
+        ['getUserCommissionStats',  [walletAddress]],
+        ['getUserLPLocks',          [walletAddress]],
+        ['getReserveStats',         [walletAddress]],
+        ['getReserveTranches',      [walletAddress]],
+      ]).catch(() => []),
       cachedConstant('platformToken', () => contract.platformToken()).catch(() => null),
       provider.getBlock('latest').catch(() => null),
-      contract.getROIClaimRecords(walletAddress).catch(() => []),
-      Promise.resolve().then(() => contract.getCapPausedAt(walletAddress)).catch(() => 0),
-      Promise.resolve().then(() => contract.getUserCommissionStats(walletAddress)).catch(() => null),
-      contract.getUserLPLocks(walletAddress).catch(() => []),
-      Promise.resolve().then(() => contract.getReserveStats(walletAddress)).catch(() => null),
-      Promise.resolve().then(() => contract.getReserveTranches(walletAddress)).catch(() => []),
     ]);
+    const roiData         = _r[0] ?? null;
+    const activeStreams   = _r[1] ?? null;
+    const roiClaimRecords = _r[2] ?? [];
+    const capPausedAtRaw  = _r[3] ?? 0;
+    const commStats       = _r[4] ?? null;
+    const ownLocks        = _r[5] ?? [];
+    const reserveStats    = _r[6] ?? null;
+    const reserveTranches = _r[7] ?? [];
 
     // Referral-commission RESERVE (held over-0.5× commission). Cached so the modal + cap chip read it.
     _rwReserveTotalETH     = reserveStats ? parseFloat(ethers.utils.formatEther(reserveStats.total ?? reserveStats[0])) : 0;
@@ -1664,21 +1686,26 @@ async function loadRwROI(silent = false) {
       const lockDataMap   = new Map();
       const streamInfoMap = new Map();
       const uniqueInvKeys = [...new Set(streams.map(r => r.investor.toLowerCase()))];
+      const uniqueInvAddrs = uniqueInvKeys.map(key => streams.find(r => r.investor.toLowerCase() === key).investor);
+      // Every investor's locks in ONE batch call; every stream's info in ONE multicall
+      // (was one RPC per investor + one per stream).
       await Promise.all([
-        ...uniqueInvKeys.map(async (key) => {
-          const addr = streams.find(r => r.investor.toLowerCase() === key).investor;
-          try { lockDataMap.set(key, await contract.getUserLPLocks(addr)); } catch(_) {}
-        }),
-        ...streams.map(async (ref) => {
-          const key = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
-          for (let _attempt = 0; _attempt < 2; _attempt++) {
-            try {
-              const info = await contract.getROIStreamInfo(ref.investor, ref.lockIndex, ref.level);
-              streamInfoMap.set(key, info);
-              break;
-            } catch(_) {}
-          }
-        })
+        (async () => {
+          try {
+            const _locksArr = await contract.getUserLPLocksBatch(uniqueInvAddrs);
+            uniqueInvKeys.forEach((key, i) => { if (_locksArr[i]) lockDataMap.set(key, _locksArr[i]); });
+          } catch(_) {}
+        })(),
+        (async () => {
+          try {
+            const _infos = await multicallRead(contract, streams.map(ref => ['getROIStreamInfo', [ref.investor, ref.lockIndex, ref.level]]));
+            streams.forEach((ref, i) => {
+              if (!_infos[i]) return;
+              const key = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
+              streamInfoMap.set(key, _infos[i]);
+            });
+          } catch(_) {}
+        })(),
       ]);
 
       for (const ref of streams) {
@@ -2048,7 +2075,7 @@ async function loadRwROI(silent = false) {
 async function claimROIFromStreamBtn(investor, lockIndex, level, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'CLAIMING…'; }
   try {
-    toast('Confirm ROI claim in MetaMask…', 'info');
+    toast('Confirm ROI claim in your wallet…', 'info');
     // When the stream has pre-settled pending (_streamPendingETH > 0), claimROIFromStream would
     // settle nothing new and revert with NothingToClaim.  Route to claimAllROI which settles all
     // streams and pays out the full pending (including this stream's share).
@@ -2114,12 +2141,12 @@ async function claimAllROI() {
         const stx = await contract.connect(signer).settleROIStreams(from, _ROI_CLAIM_CHUNK, _GAS);
         await stx.wait();
       }
-      toast('Confirm final ROI payout in MetaMask…', 'info');
+      toast('Confirm final ROI payout in your wallet…', 'info');
       const ctx = await contract.connect(signer).claimPendingROI(_GAS);
       await ctx.wait();
     } else {
       // Single-tx path (small stream count) — original behaviour.
-      toast('Confirm ROI commission claim in MetaMask…', 'info');
+      toast('Confirm ROI commission claim in your wallet…', 'info');
       const tx = await contract.connect(signer).claimAllROI(_GAS);
       toast('Transaction sent — waiting for confirmation…', 'info');
       await tx.wait();
@@ -2153,10 +2180,11 @@ async function loadRwLPFees(silent = false) {
     const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
     const poolCache = new Map();
     const tokenMeta = new Map();
-    await Promise.all([
-      ...tokenSet.map(async addr => { const d = await _dashGetPoolPrice(addr); if (d) poolCache.set(addr, d); }),
-      ...tokenSet.map(async addr => { try { const t = await contract.getToken(addr); tokenMeta.set(addr, { symbol: t.symbol, meta: getMeta(addr) }); } catch(_) {} })
-    ]);
+    // One multicall pre-warms every pool price; one batches every getToken.
+    await _dashPrewarmPoolPrices(tokenSet);
+    const _toks = await multicallRead(contract, tokenSet.map(a => ['getToken', [a]])).catch(() => tokenSet.map(() => undefined));
+    tokenSet.forEach((addr, i) => { if (_toks[i]) tokenMeta.set(addr, { symbol: _toks[i].symbol, meta: getMeta(addr) }); });
+    await Promise.all(tokenSet.map(async addr => { const d = await _dashGetPoolPrice(addr); if (d) poolCache.set(addr, d); }));
 
     const now = Math.floor(Date.now() / 1000);
     let totalGainETH = 0;
