@@ -8,10 +8,22 @@ pragma solidity ^0.8.0;
 // Change ONLY this one line to flip the whole system's timing. Every duration below
 // (and in the contracts that import this file) derives from it, so nothing else needs
 // touching. NOTE: keep the frontend's LP_DAY_SCALE in sync with this value.
-uint256 constant SECONDS_PER_DAY = 6;
+uint256 constant SECONDS_PER_DAY = 86400;
 
 // Default LP / ROI lock window = 90 days, expressed in the scaled unit above.
 uint256 constant LP_LOCK_DURATION = 90 * SECONDS_PER_DAY;
+
+// ── USDT decimal scale: ONE USDT in the base ("_weth"/USDT) token's smallest unit ──
+// This is the unit of account for the registration fee, package amounts, tier /
+// eligibility ($) thresholds, and team-business roll-ups. It MUST equal 10**decimals
+// of the deployed base token:
+//   • Polygon USDT (0xc2132D05D31c914a87C6611C10748AEb04B58e8F) → 6 decimals → 1e6
+//   • an 18-decimal stablecoin / mock                            → 1e18
+// Like SECONDS_PER_DAY above, this is the ONE line to flip per environment. Every $ ↔
+// base-unit conversion in the contracts derives from it. NOTE: token-conversion math
+// (rewards/ROI priced via the TWAP) is decimal-agnostic and intentionally does NOT use
+// this — only true dollar conversions do. Keep the frontend's USDT decimals in sync.
+uint256 constant USDT_ONE = 1e6;
 
 struct User {
     address userAddress;

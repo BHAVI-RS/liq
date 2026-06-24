@@ -36,9 +36,8 @@ contract HordexFacet is HordexStorage {
     address private immutable _self;
     address private immutable _deployer;
 
-    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
-    uint256 private constant USDT_PER_ETH      = 1;
-    uint256 private constant TWAP_PERIOD       = 30 seconds;
+    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
+    uint256 private constant TWAP_PERIOD       = 15 minutes;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant MAX_SLIPPAGE_BPS  = 200;
     uint256 private constant TWAP_GUARD_BPS    = 500;
@@ -557,7 +556,7 @@ contract HordexFacet is HordexStorage {
     }
 
     function _getRewardRatePPM(uint256 ethInvestedWei, uint256 durationDays, uint256 streakLevel) internal view returns (uint256) {
-        if (ethInvestedWei * USDT_PER_ETH / 1e18 < 100) return 0;
+        if (ethInvestedWei / USDT_ONE < 100) return 0;
         uint256 sIdx = streakLevel > 3 ? 3 : streakLevel;
         return stakingRates
             [HordexMath.getDurationIndex(stakingDurations, durationDays)]

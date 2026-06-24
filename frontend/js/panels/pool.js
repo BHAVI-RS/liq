@@ -137,7 +137,7 @@ async function _batchGetPoolPrices(tokenAddrs) {
         const rawToken  = meta.isToken0 ? r0 : r1;
         const rawETH    = meta.isToken0 ? r1 : r0;
         const resTokenF = parseFloat(ethers.utils.formatUnits(rawToken, meta.decimals));
-        const resETHF   = parseFloat(ethers.utils.formatEther(rawETH));
+        const resETHF   = usdtToFloat(rawETH);
         out.set(a, resTokenF > 0 ? ethToUSDT(resETHF / resTokenF) : null);
       } catch(_) {}
     });
@@ -170,7 +170,7 @@ async function _refreshListPrices() {
     if (!el) continue;
     const color = (prev == null) ? 'var(--cream)' : price > prev ? '#4ade80' : price < prev ? '#f87171' : 'var(--cream)';
     el.style.color = color;
-    el.textContent = '$' + fmtNum(price);
+    el.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 }
 
@@ -200,7 +200,7 @@ async function _refreshPoolData() {
     window._poolReserveToken = resToken;
     window._poolReserveETH   = resETH;
     const resTokenF = parseFloat(ethers.utils.formatUnits(resToken, dec));
-    const resETHF   = parseFloat(ethers.utils.formatEther(resETH));
+    const resETHF   = usdtToFloat(resETH);
     const supplyF   = parseFloat(ethers.utils.formatEther(supply));
     const priceUSDT = ethToUSDT(resETHF / resTokenF);
 
@@ -234,7 +234,7 @@ async function _updateChartData(pairAddr, isToken0, dec) {
     const points = [];
 
     for (const snap of snapHistory) {
-      const resETHF   = parseFloat(ethers.utils.formatEther(snap.resETH));
+      const resETHF   = usdtToFloat(snap.resETH);
       const resTokenF = parseFloat(ethers.utils.formatUnits(snap.resToken, dec));
       if (!resTokenF || resTokenF <= 0) continue;
       const price = ethToUSDT(resETHF / resTokenF);
@@ -244,7 +244,7 @@ async function _updateChartData(pairAddr, isToken0, dec) {
 
     // Append live current-price point from getReserves()
     const resTokenF = parseFloat(ethers.utils.formatUnits(isToken0 ? r0 : r1, dec));
-    const resETHF   = parseFloat(ethers.utils.formatEther(isToken0 ? r1 : r0));
+    const resETHF   = usdtToFloat(isToken0 ? r1 : r0);
     if (resTokenF > 0) {
       const curPrice = ethToUSDT(resETHF / resTokenF);
       const now = Date.now();
@@ -272,7 +272,7 @@ function _updateHeaderPrice(priceUSDT) {
   const up   = prev <= 0 || priceUSDT >= prev;
   const color = prev <= 0 ? 'var(--muted)' : up ? '#4ade80' : '#f87171';
   el.style.color = color;
-  el.textContent = '$' + fmtNum(priceUSDT);
+  el.textContent = '$' + priceUSDT.toLocaleString(undefined, { minimumFractionDigits: 5, maximumFractionDigits: 5 });
   if (chEl && prev > 0) {
     const pct = ((priceUSDT - prev) / prev) * 100;
     chEl.style.color = up ? '#4ade80' : '#f87171';
@@ -304,7 +304,7 @@ async function _getTokenPoolPrice(tokenAddr) {
     const erc20    = new ethers.Contract(tokenAddr, ERC20_ABI, provider);
     const dec      = Number(await erc20.decimals().catch(() => 18));
     const resTokenF = parseFloat(ethers.utils.formatUnits(resToken, dec));
-    const resETHF   = parseFloat(ethers.utils.formatEther(resETH));
+    const resETHF   = usdtToFloat(resETH);
     if (resTokenF <= 0) return null;
     return ethToUSDT(resETHF / resTokenF);
   } catch(_) { return null; }
@@ -358,7 +358,7 @@ async function loadPoolPanel() {
           </div>
         </div>
         ${price !== null
-          ? `<div id="poolListPrice-${addr}" style="font-size:12px;color:${priceColor};font-family:var(--font-mono);font-weight:400;flex-shrink:0;letter-spacing:.03em;transition:color .4s;">$${fmtNum(price)}</div>`
+          ? `<div id="poolListPrice-${addr}" style="font-size:12px;color:${priceColor};font-family:var(--font-mono);font-weight:400;flex-shrink:0;letter-spacing:.03em;transition:color .4s;">$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>`
           : `<div id="poolListPrice-${addr}" style="font-size:12px;color:var(--muted);font-family:var(--font-mono);flex-shrink:0;">—</div>`}`;
       div.onclick = () => loadPoolInfo(addr);
       list.appendChild(div);
@@ -443,7 +443,7 @@ async function loadPoolInfo(tokenAddr) {
     window._poolTokenDecimals = dec;
 
     const resTokenF = parseFloat(ethers.utils.formatUnits(resToken, dec));
-    const resETHF   = parseFloat(ethers.utils.formatEther(resETH));
+    const resETHF   = usdtToFloat(resETH);
     const supplyF   = parseFloat(ethers.utils.formatEther(supply));
 
     const priceETH  = resETHF / resTokenF;
@@ -485,7 +485,7 @@ async function updateBalances(tokenAddr, dec) {
       new ethers.Contract(usdtAddr, ERC20_ABI, provider).balanceOf(walletAddress),
     ]);
     const tokenF = parseFloat(ethers.utils.formatUnits(tokenBal, dec));
-    const usdtF  = parseFloat(ethers.utils.formatEther(usdtBal));
+    const usdtF  = usdtToFloat(usdtBal);
     const sellEl = document.getElementById('poolSellBal');
     const buyEl  = document.getElementById('poolBuyUsdtBal');
     if (sellEl) sellEl.textContent = fmtNum(tokenF);
@@ -500,7 +500,7 @@ function _updatePoolRateDisplay(priceUSDT, tokenSymbol) {
   const sellEl = document.getElementById('poolSellRate');
   const text   = (!priceUSDT || priceUSDT <= 0)
     ? '—'
-    : `1 ${tokenSymbol} = ${fmtNum(priceUSDT)} USDT`;
+    : `1 ${tokenSymbol} = ${priceUSDT.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
   if (buyEl  && buyEl.textContent  !== text) buyEl.textContent  = text;
   if (sellEl && sellEl.textContent !== text) sellEl.textContent = text;
 }
@@ -602,13 +602,13 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
             if (buys.length >= 5) continue;
             const tokF = parseFloat(ethers.utils.formatUnits(tokOut, dec));
             if (tokF <= 0) continue;
-            const usdtAmt = ethToUSDT(parseFloat(ethers.utils.formatEther(ethIn)));
+            const usdtAmt = ethToUSDT(usdtToFloat(ethIn));
             buys.push({ tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF });
           } else if (tokIn.gt(0)) {                 // token entered the pool → SELL
             if (sells.length >= 5) continue;
             const tokF = parseFloat(ethers.utils.formatUnits(tokIn, dec));
             if (tokF <= 0) continue;
-            const usdtAmt = ethToUSDT(parseFloat(ethers.utils.formatEther(ethOut)));
+            const usdtAmt = ethToUSDT(usdtToFloat(ethOut));
             sells.push({ tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF });
           }
           if (buys.length >= 5 && sells.length >= 5) break;
@@ -663,7 +663,7 @@ async function onBuyUsdtInput() {
     return;
   }
   try {
-    const ethIn = ethers.utils.parseEther((usdt / USDT_PER_ETH).toString());
+    const ethIn = parseUSDT((usdt / USDT_PER_ETH).toString());
     const q     = await contract.quoteSwapBuy(window._poolSelectedToken, ethIn);
     const out   = parseFloat(ethers.utils.formatUnits(q.tokensOut, window._poolTokenDecimals));
     document.getElementById('poolBuyToken').value = parseFloat(out.toFixed(5)).toString();
@@ -692,7 +692,7 @@ async function onBuyTokenInput() {
   try {
     const dec     = window._poolTokenDecimals;
     const resTokF = parseFloat(ethers.utils.formatUnits(window._poolReserveToken, dec));
-    const resETHF = parseFloat(ethers.utils.formatEther(window._poolReserveETH));
+    const resETHF = usdtToFloat(window._poolReserveETH);
     if (resTokF <= 0 || resETHF <= 0) { document.getElementById('poolBuyUSDT').value = ''; return; }
     const bps          = 200;
     const maxPoolUsdt  = resETHF * (997 * bps - 30000) / 9970000;       // 2% cap (incl. 0.3% fee)
@@ -726,7 +726,7 @@ async function onSellTokenInput() {
       ethers.utils.parseUnits(amt.toString(), window._poolTokenDecimals),
       [window._poolSelectedToken, DEX_WETH]
     );
-    const usdtOut = parseFloat(ethers.utils.formatEther(amounts[1])) * USDT_PER_ETH;
+    const usdtOut = usdtToFloat(amounts[1]) * USDT_PER_ETH;
     document.getElementById('poolSellUSDT').value = parseFloat(usdtOut.toFixed(2)).toString();
   } catch(_) { document.getElementById('poolSellUSDT').value = ''; }
 }
@@ -740,7 +740,7 @@ async function onSellUsdtInput() {
   try {
     const router  = getRouter();
     const amounts = await router.getAmountsIn(
-      ethers.utils.parseEther((usdt / USDT_PER_ETH).toString()),
+      parseUSDT((usdt / USDT_PER_ETH).toString()),
       [window._poolSelectedToken, DEX_WETH]
     );
     const tokNeeded = parseFloat(ethers.utils.formatUnits(amounts[0], window._poolTokenDecimals));
@@ -774,7 +774,7 @@ async function poolBuyTokens() {
     const usdtAddr  = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
     const usdtAbi   = ['function approve(address,uint256) returns (bool)'];
     const usdtCt    = new ethers.Contract(usdtAddr, usdtAbi, signer);
-    const ethIn     = ethers.utils.parseEther((usdtVal / USDT_PER_ETH).toString());
+    const ethIn     = parseUSDT((usdtVal / USDT_PER_ETH).toString());
     // Authoritative hybrid quote (pool + treasury) drives the minimum tokens out.
     const q         = await contract.quoteSwapBuy(window._poolSelectedToken, ethIn);
     if (q.tokensOut.isZero()) { _txDone(); toast('No liquidity available for this token', 'error'); return; }
@@ -883,7 +883,7 @@ async function loadPriceChart(pairAddr, isToken0, dec) {
     const points = [];
 
     for (const snap of snapHistory) {
-      const resETHF   = parseFloat(ethers.utils.formatEther(snap.resETH));
+      const resETHF   = usdtToFloat(snap.resETH);
       const resTokenF = parseFloat(ethers.utils.formatUnits(snap.resToken, dec));
       if (!resTokenF || resTokenF <= 0) continue;
       const price = ethToUSDT(resETHF / resTokenF);
@@ -894,7 +894,7 @@ async function loadPriceChart(pairAddr, isToken0, dec) {
     // Always append current reserves as the most recent price point.
     const [r0, r1] = reserves;
     const resTokenF = parseFloat(ethers.utils.formatUnits(isToken0 ? r0 : r1, dec));
-    const resETHF   = parseFloat(ethers.utils.formatEther(isToken0 ? r1 : r0));
+    const resETHF   = usdtToFloat(isToken0 ? r1 : r0);
     if (resTokenF > 0) {
       const price = ethToUSDT(resETHF / resTokenF);
       const now   = Date.now();

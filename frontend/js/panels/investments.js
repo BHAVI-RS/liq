@@ -174,7 +174,7 @@ async function loadInvestments() {
 
     // Platform-token TWAP (ETH/token) — the price the contract pays staking rewards at.
     _invStakingPayoutPrice = 0;
-    try { _invStakingPayoutPrice = parseFloat(ethers.utils.formatEther(await contract.getTWAPPrice())); } catch(_) {}
+    try { _invStakingPayoutPrice = usdtToFloat(await contract.getTWAPPrice()); } catch(_) {}
 
     const expandedIndices = new Set();
     el.querySelectorAll('.dash-inv-card[data-lock-index]').forEach(card => {
@@ -187,8 +187,8 @@ async function loadInvestments() {
     // pendingETH (_roiPendingETH) is pre-settled but NOT yet charged to commissionsCapUsed
     // — it gets charged only when the user calls claimAllROI. Include it here so each
     // lock's cap consumed bar accurately reflects all outstanding debt against the cap.
-    const _roiLive    = roiData ? parseFloat(ethers.utils.formatEther(roiData[0])) : 0;
-    const _roiPending = roiData ? parseFloat(ethers.utils.formatEther(roiData[1])) : 0;
+    const _roiLive    = roiData ? usdtToFloat(roiData[0]) : 0;
+    const _roiPending = roiData ? usdtToFloat(roiData[1]) : 0;
     // True outstanding ROI debt against cap = rawCap(incl. expired) − availableCap(incl. expired).
     // getAvailableCapInclExpired already subtracts pending + the REAL live accrual, so this stays
     // correct even at ROI-driven exhaustion — where getROIData.liveETH collapses to 0 and the old
@@ -198,11 +198,11 @@ async function loadInvestments() {
       let _rawInclExpired = 0;
       for (const _l of lpLocks) {
         if (_l.removed || _l.capPaused) continue;
-        const _e = parseFloat(ethers.utils.formatEther(_l.ethInvested));
-        const _u = parseFloat(ethers.utils.formatEther(_l.commissionsCapUsed || ethers.BigNumber.from(0)));
+        const _e = usdtToFloat(_l.ethInvested);
+        const _u = usdtToFloat(_l.commissionsCapUsed || ethers.BigNumber.from(0));
         _rawInclExpired += Math.max(0, _e * 5 - _u);
       }
-      const _availInclExpired = parseFloat(ethers.utils.formatEther(availCapInclExpiredRaw));
+      const _availInclExpired = usdtToFloat(availCapInclExpiredRaw);
       _totalROI = Math.max(0, _rawInclExpired - _availInclExpired);
     }
     const _roiPerLock = new Array(lpLocks.length).fill(0);
@@ -210,9 +210,9 @@ async function loadInvestments() {
     // Attribute a lock's free cap slot to outstanding ROI (helper for the two passes below).
     const _attribRoiToLock = (_fi) => {
       const _fl = lpLocks[_fi];
-      const _fEth      = parseFloat(ethers.utils.formatEther(_fl.ethInvested));
+      const _fEth      = usdtToFloat(_fl.ethInvested);
       const _fCap      = _fEth * 5;
-      const _fCommUsed = parseFloat(ethers.utils.formatEther(_fl.commissionsCapUsed || ethers.BigNumber.from(0)));
+      const _fCommUsed = usdtToFloat(_fl.commissionsCapUsed || ethers.BigNumber.from(0));
       const _fSlot     = Math.max(0, _fCap - _fCommUsed);
       const _fRoi      = Math.min(_roiLeft, _fSlot);
       _roiPerLock[_fi] = _fRoi;
@@ -246,7 +246,10 @@ async function loadInvestments() {
       const pool = poolCache.get(key);
       const td   = tokenMeta.get(key) || { symbol: lock.token, name: '', meta: {} };
 
-      const ethInvested     = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const ethInvested     = usdtToFloat(lock.ethInvested);
+      // $25 / $50 packages: on mobile, swap the "rewards claimed" cell for an unlocks timer
+      const _invPkgUSDT     = Math.round(ethInvested);
+      const _invIsSmallPkg  = (_invPkgUSDT === 25 || _invPkgUSDT === 50);
       const restakeCounts   = lock.restakeCounts
         ? Array.from(lock.restakeCounts).map(c => typeof c.toNumber === 'function' ? c.toNumber() : Number(c))
         : [0,0,0,0,0,0];
@@ -272,7 +275,12 @@ async function loadInvestments() {
       }
       const growthCls   = growthETH > 0.000001 ? 'dash-growth-pos' : growthETH < -0.000001 ? 'dash-growth-neg' : 'dash-growth-neu';
       const priceEth    = pool ? pool.priceEth : null;
-      const lpFmt       = fmtNum(parseFloat(ethers.utils.formatEther(lpAmount)));
+      // LP token quantities for these pairs are tiny (≈1e-6–1e-4 after formatEther), so a
+      // 5-decimal format collapses them to "0". Keep 6 significant figures for sub-1 amounts.
+      const _lpFloat    = parseFloat(ethers.utils.formatEther(lpAmount));
+      const lpFmt       = _lpFloat <= 0 ? '0'
+                          : _lpFloat >= 1 ? fmtNum(_lpFloat)
+                          : Number(_lpFloat.toPrecision(6)).toString();
       const logoSrc     = td.meta && td.meta.logo ? `<img src="${td.meta.logo}" style="width:100%;height:100%;object-fit:contain;"/>` : '⬡';
       const badgeHtml   = isRemoved ? `<span class="dash-inv-badge removed">REMOVED</span>` : isClaimed ? `<span class="dash-inv-badge claimed">CLAIMED</span>` : isUnlocked ? `<span class="dash-inv-badge unlocked">NOT LOCKED</span>` : `<span class="dash-inv-badge locked">LOCKED</span>`;
       const cdId        = `inv-cd-${i}`;
@@ -296,7 +304,7 @@ async function loadInvestments() {
       const rewardTotalUSDT    = rewardTotalETH * USDT_PER_ETH;
       const elapsedStaking     = Math.min(lockDurForStaking, Math.max(0, effectiveNow - lockedAt));
       const tokenSymbol        = td.symbol || 'HORDEX';
-      const rewardClaimedETH   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH || ethers.BigNumber.from(0)));
+      const rewardClaimedETH   = usdtToFloat(lock.rewardClaimedETH || ethers.BigNumber.from(0));
       const tokensAccumulated  = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
       const totalTokensClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
 
@@ -317,7 +325,7 @@ async function loadInvestments() {
       const showStakingRow  = rewardTotalETH > 0 && (isInActiveLock || canClaimStaking);
 
       // ── Per-lock cap (referral commissions + live/pending ROI attributed by FIFO) ──
-      const commissionsCapUsed = parseFloat(ethers.utils.formatEther(lock.commissionsCapUsed || ethers.BigNumber.from(0)));
+      const commissionsCapUsed = usdtToFloat(lock.commissionsCapUsed || ethers.BigNumber.from(0));
       const lockCap            = ethInvested * 5;
       const roiAttrib          = _roiPerLock[i] || 0;
       const totalCapUsed       = Math.min(lockCap, commissionsCapUsed + roiAttrib);
@@ -465,11 +473,14 @@ async function loadInvestments() {
             <div class="dis-col">
               <div class="dis-label">LP VALUE</div>
               <div class="dis-val">${pool && currentETH > 0 ? fmtUSDT(currentETH) : '—'}</div>
-              <div class="dis-sub">position #${i+1}</div>
+              <div class="dis-sub">#${i+1}</div>
             </div>
-            <div class="dis-col">
-              <div class="dis-label">REWARDS CLAIMED</div>
-              <div class="dis-val" style="color:#4ade80;">${totalTokensClaimed > 0 ? fmtNum(totalTokensClaimed) + ' ' + tokenSymbol : '—'}</div>
+            <div class="dis-col dis-col-rewards${(_invIsSmallPkg && !isUnlocked && !isClaimed && !isRemoved) ? ' dis-col-rewards-small' : ''}">
+              <div class="dis-label dis-label-rewards">REWARDS CLAIMED</div>
+              <div class="dis-val dis-val-rewards" style="color:#4ade80;">${totalTokensClaimed > 0 ? fmtNum(totalTokensClaimed) + ' ' + tokenSymbol : '—'}</div>
+              ${(_invIsSmallPkg && !isUnlocked && !isClaimed && !isRemoved) ? `
+              <div class="dis-label dis-label-unlocks">UNLOCKS IN</div>
+              <div class="dis-val-unlocks" data-unlock-time="${unlockTime}"><span class="dis-timer-val">${_dashFmtCompact(_dashFmtCountdown(secsLeft)) || '0 days 00:00:00'}</span></div>` : ''}
             </div>
             ${actionColHtml}
           </div>
@@ -631,7 +642,7 @@ async function _computeRemoveLPPreview(tokenAddr, lpAmountHex) {
   const totalF   = parseFloat(ethers.utils.formatEther(totalSupply));
   const share    = totalF > 0 ? lpF / totalF : 0;
   const tokensOut = share * parseFloat(ethers.utils.formatUnits(resToken, dec));
-  const usdtOut   = share * parseFloat(ethers.utils.formatEther(resETH)) * USDT_PER_ETH;
+  const usdtOut   = share * usdtToFloat(resETH) * USDT_PER_ETH;
 
   let sym = tokenAddr;
   try { const t = await contract.getToken(tokenAddr); sym = t.symbol; } catch(_) {}
@@ -789,7 +800,7 @@ async function openStakeModal(lockIndex) {
   if (!weiHex) return;
   try {
     const ethInvestedBN = ethers.BigNumber.from(weiHex);
-    const investedUSDT  = parseFloat(ethers.utils.formatEther(ethInvestedBN)) * USDT_PER_ETH;
+    const investedUSDT  = usdtToFloat(ethInvestedBN) * USDT_PER_ETH;
     const [durSecs, ratesPPM] = await contract.getStakingRatesForAmount(ethInvestedBN);
 
     document.querySelectorAll('.stake-day-btn').forEach(b => {
@@ -972,7 +983,7 @@ async function showLockHistory(lockIndex) {
 
   const key          = lock.token.toLowerCase();
   const td           = _invTokenMetaMap.get(key) || { symbol: lock.token, name: '' };
-  const ethInvested  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+  const ethInvested  = usdtToFloat(lock.ethInvested);
   const totalClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
 
   function fmtDur(s) {

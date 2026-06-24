@@ -27,8 +27,7 @@ contract HordexViewFacet is HordexStorage {
     address private immutable WETH;
     address public  immutable platformToken;
 
-    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
-    uint256 private constant USDT_PER_ETH     = 1;
+    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
     uint256 private constant SWAP_SLIPPAGE_BPS = 200; // hybrid buy pool leg cap — mirrors Hordex.swapBuy
 
     constructor(address _factory, address _weth, address _platform) {
@@ -128,7 +127,7 @@ contract HordexViewFacet is HordexStorage {
     function getStakingRatesForAmount(uint256 ethInvestedWei) external view returns (
         uint256[6] memory durSecs, uint256[6] memory ratesPPM
     ) {
-        uint256 investUSDT = ethInvestedWei * USDT_PER_ETH / 1e18;
+        uint256 investUSDT = ethInvestedWei / USDT_ONE;
         bool hasReward = investUSDT >= 100;
         uint256 tierIdx = hasReward ? HordexMath.getTierIndex(investmentTiers, ethInvestedWei) : 0;
         for (uint256 i = 0; i < 6; ) {

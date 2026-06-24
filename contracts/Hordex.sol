@@ -41,10 +41,9 @@ contract Hordex is HordexStorage {
     // deploy flow / constructor signature is unchanged — owner wires it once with setViewFacet().
     address private _viewFacet;
 
-    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
-    uint256 private constant USDT_PER_ETH      = 1;
+    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
-    uint256 private constant REGISTRATION_FEE  = 1e18 / USDT_PER_ETH; // 1 USDT legitimacy check
+    uint256 private constant REGISTRATION_FEE  = USDT_ONE; // 1 USDT legitimacy check
 
     // ── Errors ────────────────────────────────────────────────────────────────
     error NotOwner();
@@ -95,6 +94,7 @@ contract Hordex is HordexStorage {
     error TokenTWAPStale();
     error RegistrationFeeFailed();
     error InsufficientReserve();
+    error Paused();
 
     // ── Events ────────────────────────────────────────────────────────────────
     event UserRegistered(address indexed user, address indexed referrer);
@@ -113,6 +113,7 @@ contract Hordex is HordexStorage {
     event ROIClaimed(address indexed user, uint256 tokensAmount, uint256 ethEquivalent);
     event TWAPUpdated(uint256 price, uint256 timestamp);
     event ReserveClaimed(address indexed user, uint256 amount);
+    event PausedSet(bool paused);
 
     // ── Modifiers ─────────────────────────────────────────────────────────────
     modifier onlyOwner() {
@@ -132,6 +133,10 @@ contract Hordex is HordexStorage {
         _locked = true;
         _;
         _locked = false;
+    }
+    modifier whenNotPaused() {
+        if (_paused) revert Paused();
+        _;
     }
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -204,7 +209,7 @@ contract Hordex is HordexStorage {
             2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000
         ];
         for (uint256 i = 0; i < 14; ) {
-            validPackageAmounts[usdtAmounts[i] * 1e18 / USDT_PER_ETH] = true;
+            validPackageAmounts[usdtAmounts[i] * USDT_ONE] = true;
             unchecked { i++; }
         }
     }
@@ -212,7 +217,7 @@ contract Hordex is HordexStorage {
     function _getRewardRatePPM(uint256 ethInvestedWei, uint256 durationDays, uint256 streakLevel)
         internal view returns (uint256)
     {
-        if (ethInvestedWei * USDT_PER_ETH / 1e18 < 100) return 0;
+        if (ethInvestedWei / USDT_ONE < 100) return 0;
         uint256 sIdx = streakLevel > 3 ? 3 : streakLevel;
         return stakingRates
             [HordexMath.getDurationIndex(stakingDurations, durationDays)]
@@ -221,7 +226,7 @@ contract Hordex is HordexStorage {
     }
 
     // ── Registration ──────────────────────────────────────────────────────────
-    function register(address _referrer) external notRegistered {
+    function register(address _referrer) external notRegistered whenNotPaused {
         if (_referrer == msg.sender) revert CannotReferSelf();
         if (!users[_referrer].isRegistered) revert ReferrerNotRegistered();
         // 1 USDT legitimacy check — sent directly to the deployer wallet
@@ -310,7 +315,7 @@ contract Hordex is HordexStorage {
     }
 
     // ── Invest ────────────────────────────────────────────────────────────────
-    function invest(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+    function invest(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant whenNotPaused {
         // Pull the package amount in fresh, then run the shared invest core.
         if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
         _invest(_token, _usdtAmount);
@@ -320,7 +325,7 @@ contract Hordex is HordexStorage {
     // custodied by the contract (it was withheld when the over-1× commission was reserved), so we
     // only draw down the user's reserve tranches FIFO — no transferFrom. Spendable any time, even
     // before the tranches unlock (claiming for cash still requires maturity).
-    function investFromReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+    function investFromReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant whenNotPaused {
         if (_reserveTotalWei[msg.sender] < _usdtAmount) revert InsufficientReserve();
         _consumeReserve(msg.sender, _usdtAmount);
         _invest(_token, _usdtAmount);
@@ -330,7 +335,7 @@ contract Hordex is HordexStorage {
     // the whole amount is funded from reserve (no wallet transfer); otherwise ALL reserve is spent and
     // the remainder (package - reserve) is pulled from the wallet. The wallet must have approved at
     // least that remainder. Caller chooses this path via the invest "use reserve?" prompt.
-    function investUseReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant {
+    function investUseReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant whenNotPaused {
         uint256 reserveBal  = _reserveTotalWei[msg.sender];
         uint256 fromReserve = reserveBal < _usdtAmount ? reserveBal : _usdtAmount;
         uint256 fromWallet  = _usdtAmount - fromReserve;
@@ -383,7 +388,7 @@ contract Hordex is HordexStorage {
         // Bounded at 10 hops — the levels you can ever earn from — so invest stays O(1) in chain
         // depth and a long referral chain can never push it past the block gas limit.
         {
-            uint256 _bizUSDT = T * USDT_PER_ETH / 1e18;
+            uint256 _bizUSDT = T / USDT_ONE;
             if (_bizUSDT > 0) {
                 address _up = users[msg.sender].referrer;
                 for (uint256 _d = 0; _d < 10 && _up != address(0); ) {
@@ -465,7 +470,7 @@ contract Hordex is HordexStorage {
     }
 
     // ── Restake ───────────────────────────────────────────────────────────────
-    function restakeLP(uint256 _lockIndex, uint256 _durationDays) external nonReentrant {
+    function restakeLP(uint256 _lockIndex, uint256 _durationDays) external nonReentrant whenNotPaused {
         if (
             _durationDays != 7 && _durationDays != 30 && _durationDays != 60 &&
             _durationDays != 90 && _durationDays != 180 && _durationDays != 360
@@ -515,7 +520,7 @@ contract Hordex is HordexStorage {
     // Withdraw all MATURED reserve tranches as USDT (WETH). Tranches unlock at their triggering
     // downline package's 90-day mark; still-locked tranches stay in reserve. To use reserve before
     // it unlocks, buy a package with investFromReserve() instead.
-    function claimReserve() external nonReentrant onlyRegistered {
+    function claimReserve() external nonReentrant onlyRegistered whenNotPaused {
         uint256 amount = _consumeMaturedReserve(msg.sender);
         if (amount == 0) revert NothingToClaim();
         userCommissionsEarned[msg.sender] += amount;   // now delivered to wallet (cap already charged)
@@ -524,15 +529,15 @@ contract Hordex is HordexStorage {
     }
 
     // ── Staking reward claims ─────────────────────────────────────────────────
-    function claimStakingReward() external nonReentrant onlyRegistered {
+    function claimStakingReward() external nonReentrant onlyRegistered whenNotPaused {
         _callFacet(abi.encodeCall(HordexFacet.claimStakingRewardExt, ()));
     }
-    function claimStakingRewardForLock(uint256 _lockIndex) external nonReentrant onlyRegistered {
+    function claimStakingRewardForLock(uint256 _lockIndex) external nonReentrant onlyRegistered whenNotPaused {
         _callFacet(abi.encodeCall(HordexFacet.claimStakingRewardForLockExt, (_lockIndex)));
     }
 
     // ── ROI claims ────────────────────────────────────────────────────────────
-    function claimAllROI() external nonReentrant onlyRegistered {
+    function claimAllROI() external nonReentrant onlyRegistered whenNotPaused {
         _callROI(abi.encodeCall(HordexROIFacet.settleAllStreamsExt, (msg.sender)));
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
@@ -572,7 +577,7 @@ contract Hordex is HordexStorage {
     }
 
     function claimROIFromStream(address investor, uint256 lockIndex, uint8 level)
-        external nonReentrant onlyRegistered
+        external nonReentrant onlyRegistered whenNotPaused
     {
         uint256 pendingBefore = _roiPendingETH[msg.sender];
         _callROI(abi.encodeCall(HordexROIFacet.settleStreamExt, (investor, lockIndex, level)));
@@ -613,7 +618,7 @@ contract Hordex is HordexStorage {
 
     // Claims whatever has accumulated in _roiPendingETH[msg.sender] without settling
     // any additional streams. Use after one or more settleROIStreams() calls.
-    function claimPendingROI() external nonReentrant onlyRegistered {
+    function claimPendingROI() external nonReentrant onlyRegistered whenNotPaused {
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
         uint256 rawCap = _getRawAvailableCap(msg.sender);
@@ -687,6 +692,13 @@ contract Hordex is HordexStorage {
         if (streakLevel >= 4) revert InvalidStreakLevel();
         stakingRates[durationIdx][tierIdx][streakLevel] = rate;
     }
+    // Emergency halt. While paused, new entries (invest / register / restake), swaps, and
+    // reward/ROI/reserve claims revert with Paused(); LP exit (claimLP / removeLP / removeLPDirect)
+    // and owner admin stay enabled so users can always withdraw principal.
+    function setPaused(bool _p) external onlyOwner {
+        _paused = _p;
+        emit PausedSet(_p);
+    }
     function withdrawETH(uint256 amount) external onlyOwner nonReentrant {
         uint256 bal = address(this).balance;
         uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
@@ -695,8 +707,13 @@ contract Hordex is HordexStorage {
         if (!ok) revert ETHWithdrawFailed();
     }
     function withdrawToken(address _token, uint256 amount) external onlyOwner nonReentrant {
-        uint256 bal    = IERC20(_token).balanceOf(address(this));
-        uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
+        uint256 bal = IERC20(_token).balanceOf(address(this));
+        // User LP is held in custody keyed by pair address in _totalLockedLP and is NOT the
+        // owner's to withdraw — carve it out so only the genuinely free balance is withdrawable.
+        // (_totalLockedLP is 0 for any non-LP token, so this is a no-op there.)
+        uint256 locked = _totalLockedLP[_token];
+        uint256 free   = bal > locked ? bal - locked : 0;
+        uint256 toSend = amount == 0 ? free : (amount > free ? free : amount);
         if (toSend == 0) revert NoTokensToWithdraw();
         if (!IERC20(_token).transfer(owner, toSend)) revert TokenWithdrawFailed();
     }
@@ -713,7 +730,7 @@ contract Hordex is HordexStorage {
     // filled and the unspent USDT is refunded (see calcHybridBuy).
     uint256 private constant SWAP_SLIPPAGE_BPS = 200; // pool leg capped at 2% slippage
 
-    function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant {
+    function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant whenNotPaused {
         if (_usdtIn == 0) revert MustSendUSDT();
         // Only platform-registered, live tokens may be traded through the contract — prevents
         // arbitrary tokens from polluting _tradeHistory and keeps recorded trades meaningful.
@@ -769,7 +786,7 @@ contract Hordex is HordexStorage {
         }));
     }
 
-    function swapSell(address _token, uint256 _tokensIn, uint256 _minUsdtOut) external nonReentrant {
+    function swapSell(address _token, uint256 _tokensIn, uint256 _minUsdtOut) external nonReentrant whenNotPaused {
         if (_tokensIn == 0) revert MustSpecifyTokenAmount();
         // Must be a platform-registered token (delisted tokens are still allowed here so holders
         // can always exit a position that was later removed).

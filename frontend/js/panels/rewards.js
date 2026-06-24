@@ -427,7 +427,7 @@ async function buyPackageFromReserve(usdtAmount) {
 
   _txBegin();
   try {
-    const wei = ethers.utils.parseEther(String(usdtAmount));
+    const wei = parseUSDT(String(usdtAmount));
     const _c  = contract.connect(signer);
     toast(`Buying a $${usdtAmount} package from reserve…`, 'info');
     const gasLimit = await gasLimitWithBuffer(_c, 'investFromReserve', [tokenAddr, wei], 30);
@@ -766,7 +766,7 @@ function _rwStartCapFastPoll() {
         loadRwROI(true);
       } else if (freshCommStats && !isPaused) {
         // Cap not paused on-chain. Check if a previously exhausted or lock-expired state resolved.
-        const freshActiveCap = parseFloat(ethers.utils.formatEther(freshCommStats[3]));
+        const freshActiveCap = usdtToFloat(freshCommStats[3]);
         if (_rwROIRetained && freshActiveCap > 0) {
           // Re-invested while retained: a new active lock created cap → retention cleared on-chain.
           loadRwROI(true);
@@ -810,13 +810,13 @@ function _rwComputeLiveUsdt(now) {
     const ut   = Number(lock.unlockTime);
     const la   = Number(lock.lockedAt) || (ut - 60);
     const dur  = Math.max(ut - la, 60);
-    const eth  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+    const eth  = usdtToFloat(lock.ethInvested);
     const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
     const rwEth   = ratePPM > 0 ? eth * ratePPM / 1_000_000 : 0;
     const elapsed     = Math.min(dur, Math.max(0, now - la));
     const isActive    = elapsed < dur && !lock.removed;
     const earnedEth   = dur > 0 ? rwEth * elapsed / dur : 0;
-    const claimedEth   = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH   || ethers.BigNumber.from(0)));
+    const claimedEth   = usdtToFloat(lock.rewardClaimedETH   || ethers.BigNumber.from(0));
     const tokensAcc    = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated  || ethers.BigNumber.from(0)));
     const totalClaimed = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
     const priceEth     = _rwStakingPrices[i] || 0;
@@ -896,8 +896,8 @@ function _rwRefSorted() {
   return [..._rwRefAllEvents].sort((a, b) => {
     let va, vb;
     if (_rwRefSortKey === 'amount') {
-      va = parseFloat(ethers.utils.formatEther(a.args.amount)) * (a._missed ? -1 : 1);
-      vb = parseFloat(ethers.utils.formatEther(b.args.amount)) * (b._missed ? -1 : 1);
+      va = usdtToFloat(a.args.amount) * (a._missed ? -1 : 1);
+      vb = usdtToFloat(b.args.amount) * (b._missed ? -1 : 1);
     } else if (_rwRefSortKey === 'level') {
       va = Number(a.args.level);
       vb = Number(b.args.level);
@@ -938,7 +938,7 @@ function _rwRefHistHtml() {
     const from        = ev.args.from;
     const fromDisplay = (typeof _labelCache !== 'undefined' && _labelCache.get(from.toLowerCase())) || from;
     const fromShort   = fromDisplay.length > 12 ? fromDisplay.slice(0, 12) + '…' : fromDisplay;
-    const amt     = parseFloat(ethers.utils.formatEther(ev.args.amount));
+    const amt     = usdtToFloat(ev.args.amount);
     const level   = Number(ev.args.level);
     const ratePct = (RATES[level - 1] || 0) / 500;
     const txUrl   = ev.transactionHash ? `${NET.explorer}/tx/${ev.transactionHash}` : null;
@@ -1104,9 +1104,9 @@ async function _rwAppendCommission(ev, from, amount, level) {
       contract.getROIData(walletAddress).catch(() => null),
     ]);
     if (stats) {
-      const freshRaw      = parseFloat(ethers.utils.formatEther(stats.remainingCap));  // commStats[3] = activeCap
-      const freshLive     = roiDataRefresh ? parseFloat(ethers.utils.formatEther(roiDataRefresh.liveETH))    : 0;
-      const freshPending  = roiDataRefresh ? parseFloat(ethers.utils.formatEther(roiDataRefresh.pendingETH)) : 0;
+      const freshRaw      = usdtToFloat(stats.remainingCap);  // commStats[3] = activeCap
+      const freshLive     = roiDataRefresh ? usdtToFloat(roiDataRefresh.liveETH)    : 0;
+      const freshPending  = roiDataRefresh ? usdtToFloat(roiDataRefresh.pendingETH) : 0;
       const freshEffective = Math.max(0, freshRaw - freshLive - freshPending);
 
       // Update ROI ticker's cap so AVAILABLE CAP display shrinks immediately when a
@@ -1115,7 +1115,7 @@ async function _rwAppendCommission(ev, from, amount, level) {
       if (!_rwROICapPaused && _rwROIActiveCapETH < Infinity) {
         _rwROIActiveCapETH    = freshRaw;  // activeCap (non-expired locks)
         // commStats[2] = totalCap = activeCap + pausedCap
-        _rwROIAvailableCapETH = parseFloat(ethers.utils.formatEther(stats.totalCap));
+        _rwROIAvailableCapETH = usdtToFloat(stats.totalCap);
       }
       if (roiDataRefresh) {
         _rwROIPendingETH = freshPending;
@@ -1124,7 +1124,7 @@ async function _rwAppendCommission(ev, from, amount, level) {
       const earnedEl     = document.querySelector('#rwRefContent [data-field="earned"]');
       const remainingEl  = document.querySelector('#rwRefContent [data-field="remaining"]');
       const noteEl       = document.querySelector('#rwRefContent [data-field="remaining-note"]');
-      if (earnedEl)    earnedEl.textContent = fmtUSDT(parseFloat(ethers.utils.formatEther(stats.earned)), {decimals: 3});
+      if (earnedEl)    earnedEl.textContent = fmtUSDT(usdtToFloat(stats.earned), {decimals: 3});
       if (remainingEl) remainingEl.textContent = fmtUSDT(freshEffective);
       if (noteEl) {
         if (freshLive > 0.000001) {
@@ -1184,16 +1184,16 @@ async function loadRwReferral() {
     const roiDataRef = _r[4] ?? null;
     // Referral eligibility (new model): a flat $25 active self-stake unlocks ALL 10 referral levels.
     const refSelfStakeUSDT = eligRaw ? Number(eligRaw.selfStakeUSDT ?? eligRaw[0]) : 0;
-    const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
+    const minInvETH   = usdtToFloat(minInvRaw);
     const minInvLabel = minInvETH > 0 ? `≥ ${fmtUSDT(minInvETH,{noEth:true})} each` : 'any active investment';
 
-    const earned    = parseFloat(ethers.utils.formatEther(commStats.earned));
-    const remaining = parseFloat(ethers.utils.formatEther(commStats.remainingCap));
+    const earned    = usdtToFloat(commStats.earned);
+    const remaining = usdtToFloat(commStats.remainingCap);
     // Effective cap for new referral commissions = raw remaining − live ROI already accruing.
     // Mirrors _getAvailableCap in HordexStorage (raw − pending − live): ROI is counted as
     // earned the moment it accrues, reducing the cap available to referrals immediately.
-    const liveROIRef      = roiDataRef ? parseFloat(ethers.utils.formatEther(roiDataRef.liveETH)) : 0;
-    const pendingROIRef   = roiDataRef ? parseFloat(ethers.utils.formatEther(roiDataRef.pendingETH)) : 0;
+    const liveROIRef      = roiDataRef ? usdtToFloat(roiDataRef.liveETH) : 0;
+    const pendingROIRef   = roiDataRef ? usdtToFloat(roiDataRef.pendingETH) : 0;
     const effectiveCapRef = Math.max(0, remaining - liveROIRef - pendingROIRef);
 
     // Normalise on-chain CommissionRecord — no block fetches needed (ts is stored on-chain)
@@ -1213,7 +1213,7 @@ async function loadRwReferral() {
 
     // Render immediately — missed card shows loading dots
     el.innerHTML = `
-      <div class="rw-stat-grid-3">
+      <div class="rw-stat-grid-2">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">TOTAL EARNED</div>
           <div data-field="earned" style="font-size:18px;color:#4ade80;font-family:var(--font-display);">${fmtUSDT(earned, {decimals: 3})}</div>
@@ -1221,10 +1221,6 @@ async function loadRwReferral() {
         <div id="rwRefMissedCard" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
           <div id="rwRefMissedLabel" style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">MISSED</div>
           <div id="rwRefMissedVal" style="font-size:18px;font-family:var(--font-display);color:var(--muted);"><span class="ld"><span></span><span></span><span></span></span></div>
-        </div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;">
-          <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">ELIGIBLE UP TO</div>
-          <div style="font-size:18px;font-family:var(--font-display);color:${maxEligibleLevel === 10 ? '#4ade80' : maxEligibleLevel > 0 ? 'var(--cream)' : 'var(--muted)'};">${maxEligibleLevel > 0 ? 'Level ' + maxEligibleLevel : '—'}${maxEligibleLevel === 10 ? ' · MAX' : ''}</div>
         </div>
       </div>
       <div id="rwRefMissedWarn"></div>
@@ -1256,7 +1252,7 @@ async function loadRwReferral() {
         const lb = await provider.getBlockNumber().catch(() => 0);
         const missedResult = await _computeMissedWei(getFromBlock(lb))
           .catch(() => ({ total: ethers.BigNumber.from(0), entries: [] }));
-        const missed = parseFloat(ethers.utils.formatEther(missedResult.total));
+        const missed = usdtToFloat(missedResult.total);
 
         // Update missed stat card
         const missedCard  = document.getElementById('rwRefMissedCard');
@@ -1349,7 +1345,7 @@ async function loadRwStaking(silent = false) {
     // Staking rewards are paid in platformToken valued at the on-chain TWAP (not spot), so the
     // claimable token count must convert pending ETH at the TWAP to match what's received.
     _rwStakingPayoutPrice = 0;
-    try { _rwStakingPayoutPrice = parseFloat(ethers.utils.formatEther(await contract.getTWAPPrice())); } catch(_) {}
+    try { _rwStakingPayoutPrice = usdtToFloat(await contract.getTWAPPrice()); } catch(_) {}
     _rwStakingTokenSyms = lpLocks.map(l => tokenMeta.get(l.token.toLowerCase()) || 'HORDEX');
     _rwStakingFirstSym  = _rwStakingTokenSyms[0] || 'HORDEX';
 
@@ -1369,8 +1365,8 @@ async function loadRwStaking(silent = false) {
       const lockDurSecs = unlockTime > lockedAt ? unlockTime - lockedAt : 60;
       const tokenSym    = tokenMeta.get(lock.token.toLowerCase()) || 'HORDEX';
       const priceEth    = _rwStakingPrices[i] || 0;
-      const ethInvested = parseFloat(ethers.utils.formatEther(lock.ethInvested));
-      const rewardClaimedETH  = parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH  || ethers.BigNumber.from(0)));
+      const ethInvested = usdtToFloat(lock.ethInvested);
+      const rewardClaimedETH  = usdtToFloat(lock.rewardClaimedETH  || ethers.BigNumber.from(0));
       const tokensAccumulated = parseFloat(ethers.utils.formatEther(lock.tokensAccumulated || ethers.BigNumber.from(0)));
       const totalClaimed      = parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed || ethers.BigNumber.from(0)));
       const elapsed           = Math.min(lockDurSecs, Math.max(0, now - lockedAt));
@@ -1568,10 +1564,10 @@ async function loadRwROI(silent = false) {
     const reserveTranches = _r[7] ?? [];
 
     // Referral-commission RESERVE (held over-0.5× commission). Cached so the modal + cap chip read it.
-    _rwReserveTotalETH     = reserveStats ? parseFloat(ethers.utils.formatEther(reserveStats.total ?? reserveStats[0])) : 0;
-    _rwReserveClaimableETH = reserveStats ? parseFloat(ethers.utils.formatEther(reserveStats.claimable ?? reserveStats[1])) : 0;
+    _rwReserveTotalETH     = reserveStats ? usdtToFloat(reserveStats.total ?? reserveStats[0]) : 0;
+    _rwReserveClaimableETH = reserveStats ? usdtToFloat(reserveStats.claimable ?? reserveStats[1]) : 0;
     _rwReserveTranches     = (reserveTranches || []).map(t => ({
-      amount:     parseFloat(ethers.utils.formatEther(t.amount ?? t[0])),
+      amount:     usdtToFloat(t.amount ?? t[0]),
       unlockTime: Number(t.unlockTime ?? t[1]),
     }));
 
@@ -1586,11 +1582,11 @@ async function loadRwROI(silent = false) {
     // earned before a lock naturally expired stays claimable.
     _rwROIAvailableCapETH = _rwROICapPaused
       ? 0
-      : (commStats ? parseFloat(ethers.utils.formatEther(commStats[2])) : Infinity);
+      : (commStats ? usdtToFloat(commStats[2]) : Infinity);
     // commStats[3] = activeCap (non-expired locks only) — mirrors contract's _getRawAvailableCap.
     // Used for real-time mid-session exhaustion detection in the ticker so yellow stops and red
     // starts the moment liveETH+pendingETH reaches this value, without waiting for the 30s poll.
-    _rwROIActiveCapETH = commStats ? parseFloat(ethers.utils.formatEther(commStats[3])) : Infinity;
+    _rwROIActiveCapETH = commStats ? usdtToFloat(commStats[3]) : Infinity;
     _rwROILockExpired  = !_rwROICapPaused && _rwROIActiveCapETH === 0
                          && _rwROIAvailableCapETH > 0 && _rwROIAvailableCapETH < Infinity;
 
@@ -1603,8 +1599,8 @@ async function loadRwROI(silent = false) {
 
     const streams = activeStreams || [];
 
-    const liveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
-    const pendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
+    const liveETH    = roiData ? usdtToFloat(roiData.liveETH)    : 0;
+    const pendingETH = roiData ? usdtToFloat(roiData.pendingETH) : 0;
     // When cap is paused, the contract returns liveETH = 0 (post-exhaustion accrual is blocked).
     // Guard here as a safety net against stale data: only include liveETH when NOT paused.
     let baseETH      = _rwROICapPaused ? pendingETH : (liveETH + pendingETH);
@@ -1612,7 +1608,7 @@ async function loadRwROI(silent = false) {
       (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.tokensAmount)), 0
     );
     const lifetimeClaimedETH = (roiClaimRecords || []).reduce(
-      (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.ethEquivalent)), 0
+      (sum, r) => sum + usdtToFloat(r.ethEquivalent), 0
     );
     _rwROILifetimeClaimedETH = lifetimeClaimedETH;
 
@@ -1629,7 +1625,7 @@ async function loadRwROI(silent = false) {
       } catch(_) {}
       try {
         const tp = await contract.getTWAPPrice();   // ETH per token, 1e18
-        tokenPrice = parseFloat(ethers.utils.formatEther(tp));
+        tokenPrice = usdtToFloat(tp);
       } catch(_) {}
       if (!(tokenPrice > 0)) tokenPrice = spotPriceEth;   // fallback: TWAP stale/unavailable
       try { const t = await contract.getToken(platformToken); if (t.symbol) tokenSym = t.symbol; } catch(_) {}
@@ -1715,7 +1711,7 @@ async function loadRwROI(silent = false) {
         const lockedAt   = Number(lock.lockedAt);
         const lockDur    = unlockTime - lockedAt;
         if (lockDur <= 0) continue;
-        const ethInv   = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+        const ethInv   = usdtToFloat(lock.ethInvested);
         const ratePPM  = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
         const roiRate  = ROI_CONTRACT_RATES[Number(ref.level)] || 0;
         const streamRate = (!_rwROICapPaused && effNow < unlockTime && ratePPM > 0 && roiRate > 0)
@@ -1725,22 +1721,22 @@ async function loadRwROI(silent = false) {
         const streamKey      = `${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${Number(ref.level)}`;
         const streamInfo     = streamInfoMap.get(streamKey);
         const roiPaidRaw     = streamInfo ? streamInfo.roiPaidETH : ethers.BigNumber.from(0);
-        const roiPaidETH     = parseFloat(ethers.utils.formatEther(roiPaidRaw));
+        const roiPaidETH     = usdtToFloat(roiPaidRaw);
         const roiPaidNonZero = roiPaidRaw.gt(0);
         const recSince       = streamInfo ? Number(streamInfo.recipientSince) : lockedAt;
 
         // historicalPaidETH / historicalMissedETH: cumulative across all previous restake periods.
         const histPaidRaw = streamInfo && streamInfo.historicalPaidETH
           ? streamInfo.historicalPaidETH : ethers.BigNumber.from(0);
-        const histPaidETH = parseFloat(ethers.utils.formatEther(histPaidRaw));
+        const histPaidETH = usdtToFloat(histPaidRaw);
         const histMissedRaw = streamInfo && streamInfo.historicalMissedETH
           ? streamInfo.historicalMissedETH : ethers.BigNumber.from(0);
-        const histMissedETH = parseFloat(ethers.utils.formatEther(histMissedRaw));
+        const histMissedETH = usdtToFloat(histMissedRaw);
         // Carried-over HELD: over-cap held preserved on-chain across a natural-expiry restake
         // (recoverable once cap regains). Static — adds to the stream's HELD total.
         const heldCarryRaw = streamInfo && streamInfo.heldCarryETH
           ? streamInfo.heldCarryETH : ethers.BigNumber.from(0);
-        const heldCarryETH = parseFloat(ethers.utils.formatEther(heldCarryRaw));
+        const heldCarryETH = usdtToFloat(heldCarryRaw);
 
         // Accrual since last settlement (from recipientSince to now).
         // When A's lock expired naturally, bound accrual at the expiry time so the gap period
@@ -1958,32 +1954,32 @@ async function loadRwROI(silent = false) {
         if (_rwROIRetained) {
           _cbTxt = 'RETAINED'; _cbColor = '#a78bfa';
           _cbBg = 'rgba(167,139,250,0.10)'; _cbBorder = 'rgba(167,139,250,0.3)';
-          _caAmt = `<div id="rwROICapAmt" style="font-size:16px;font-family:var(--font-display);color:#a78bfa;margin:6px 0 2px;">$${(baseETH * USDT_PER_ETH).toFixed(2)}</div>`;
+          _caAmt = `<div id="rwROICapAmt" style="font-size:21px;font-family:var(--font-display);color:#a78bfa;margin:6px 0 2px;">$${(baseETH * USDT_PER_ETH).toFixed(2)}</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">earned ROI preserved · claim anytime</div>`;
         } else if (_rwROICapPaused) {
           _cbTxt = 'CAP PAUSED'; _cbColor = '#ef4444';
           _cbBg = 'rgba(239,68,68,0.10)'; _cbBorder = 'rgba(239,68,68,0.3)';
-          _caAmt = `<div style="font-size:16px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">—</div>`;
+          _caAmt = `<div style="font-size:21px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">—</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">invest or restake to restore</div>`;
         } else if (_rwROILockExpired) {
           _cbTxt = 'LOCK EXPIRED'; _cbColor = '#f97316';
           _cbBg = 'rgba(249,115,22,0.10)'; _cbBorder = 'rgba(249,115,22,0.3)';
-          _caAmt = `<div id="rwROICapAmt" style="font-size:16px;font-family:var(--font-display);color:#f97316;margin:6px 0 2px;">$0.00</div>`;
+          _caAmt = `<div id="rwROICapAmt" style="font-size:21px;font-family:var(--font-display);color:#f97316;margin:6px 0 2px;">$0.00</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">restake to reactivate</div>`;
         } else if (_rwROIActiveCapETH === 0) {
           _cbTxt = 'NO CAP'; _cbColor = '#ef4444';
           _cbBg = 'rgba(239,68,68,0.10)'; _cbBorder = 'rgba(239,68,68,0.3)';
-          _caAmt = `<div style="font-size:16px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">$0.00</div>`;
+          _caAmt = `<div style="font-size:21px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">$0.00</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">invest to earn a cap</div>`;
         } else if (_initLiveCap <= 0) {
           _cbTxt = 'EXHAUSTED'; _cbColor = '#ef4444';
           _cbBg = 'rgba(239,68,68,0.10)'; _cbBorder = 'rgba(239,68,68,0.3)';
-          _caAmt = `<div id="rwROICapAmt" style="font-size:16px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">$0.00</div>`;
+          _caAmt = `<div id="rwROICapAmt" style="font-size:21px;font-family:var(--font-display);color:#ef4444;margin:6px 0 2px;">$0.00</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">claim ROI to restore accrual</div>`;
         } else {
           _cbTxt = 'ACTIVE'; _cbColor = '#4ade80';
           _cbBg = 'rgba(74,222,128,0.10)'; _cbBorder = 'rgba(74,222,128,0.3)';
-          _caAmt = `<div id="rwROICapAmt" style="font-size:16px;font-family:var(--font-display);color:#4ade80;margin:6px 0 2px;">$${(_initLiveCap * USDT_PER_ETH).toFixed(2)}</div>`;
+          _caAmt = `<div id="rwROICapAmt" style="font-size:21px;font-family:var(--font-display);color:#4ade80;margin:6px 0 2px;">$${(_initLiveCap * USDT_PER_ETH).toFixed(2)}</div>`;
           _caSub = `<div style="font-size:10px;color:var(--muted);">live · decreases as ROI accrues</div>`;
         }
         // Reserve chip — held over-0.5× referral commission. Sits at the right of AVAILABLE CAP and
@@ -2197,7 +2193,7 @@ async function loadRwLPFees(silent = false) {
       const pool        = poolCache.get(key);
       const td          = tokenMeta.get(key) || { symbol: lock.token, meta: {} };
       const logoSrc     = td.meta && td.meta.logo ? `<img src="${td.meta.logo}" style="width:100%;height:100%;object-fit:contain;"/>` : '⬡';
-      const ethInvested = parseFloat(ethers.utils.formatEther(lock.ethInvested || ethers.BigNumber.from(0)));
+      const ethInvested = usdtToFloat(lock.ethInvested || ethers.BigNumber.from(0));
       const isClaimed   = lock.claimed;
       const isRemoved   = lock.removed;
       const currentETH  = pool && !isRemoved ? _dashComputeLPValue(lock.lpAmount, pool.resETH, pool.totalLPSupply) : 0;

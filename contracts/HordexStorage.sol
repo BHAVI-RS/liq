@@ -224,8 +224,6 @@ abstract contract HordexStorage {
     uint32[10] internal businessGate;          // inert: no longer gates eligibility
     mapping(address => uint256) internal _teamBusinessUSDT;
 
-    uint256 private constant _USDT_PER_ETH = 1;
-
     // Active self-stake (WETH wei) = sum of ethInvested across the user's non-removed, non-expired
     // locks. This is the per-event 1× wallet cap for referral commissions (HordexFacet) — the band
     // above it (up to 5×) is routed to the reserve instead of being paid out immediately.
@@ -241,7 +239,7 @@ abstract contract HordexStorage {
 
     // Active self-stake (USDT) = the wei sum above, converted 1:1.
     function _activeSelfStakeUSDT(address _user) internal view returns (uint256) {
-        return _activeSelfStakeWei(_user) * _USDT_PER_ETH / 1e18;
+        return _activeSelfStakeWei(_user) / USDT_ONE;
     }
 
     // ROI eligibility: whether `_user` currently qualifies to RECEIVE an ROI stream at 0-indexed
@@ -563,6 +561,13 @@ abstract contract HordexStorage {
     // does NOT charge cap again. Appended at the end of storage so existing slots are unchanged.
     mapping(address => ReserveTranche[]) internal _reserveTranches;
     mapping(address => uint256)          internal _reserveTotalWei; // O(1) sum of all tranche amounts
+
+    // ── Emergency pause (owner-settable; see Hordex.setPaused / whenNotPaused) ──────────────
+    // When true, new entries (invest / register / restake), swaps, and reward/ROI/reserve claims
+    // are halted. LP exit (claimLP / removeLP / removeLPDirect) is intentionally left enabled so
+    // users can always withdraw principal. Appended at the END of storage so existing slots are
+    // unchanged (defaults to false).
+    bool internal _paused;
 
     // Append a new reserve tranche (net amount, already after the 5% cut) and bump the running total.
     function _pushReserveTranche(address _user, uint256 _netAmount, uint64 _unlockTime) internal {

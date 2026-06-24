@@ -8,7 +8,7 @@ const PACKAGES = {
 const PKG_CAT_RGB = {
   basic:         [234, 179,   8],  // yellow
   elite:         [ 74, 222, 128],  // green
-  institutional: [167, 139, 250],  // purple
+  institutional: [255,   0, 122],  // Uniswap pink (#FF007A)
 };
 const PKG_CATS = ['basic', 'elite', 'institutional'];
 let _activePkgCat     = 'basic';
@@ -58,37 +58,27 @@ function renderPkgGrid() {
   if (!grid) return;
   grid.innerHTML = '';
 
-  const pkgs         = PACKAGES[_activePkgCat];
-  const count        = pkgs.length;
-  const [r, g, b]    = PKG_CAT_RGB[_activePkgCat];
-  const minColour    = PKG_COLOUR_FROM[_activePkgCat] ?? 0;
-  const [oMin, oMax] = PKG_OPACITY_RANGE[_activePkgCat];
-
-  const colouredPkgs = pkgs.filter(u => u >= minColour);
-  const clrCount     = colouredPkgs.length;
+  const pkgs      = PACKAGES[_activePkgCat];
+  const count     = pkgs.length;
+  const [r, g, b] = PKG_CAT_RGB[_activePkgCat];
 
   grid.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
 
+  // Low-intensity tier background; neutral border (no coloured borders).
+  const NEUTRAL = 'var(--border)';
+  const HILITE  = 'rgba(255,255,255,0.3)';
+  const bgClr   = `rgba(${r},${g},${b},0.10)`;
+  const bgSel   = `rgba(${r},${g},${b},0.18)`;
+
   pkgs.forEach((usdt) => {
     const isSelected = usdt === _selectedPkgUSD;
-    const useColour  = usdt >= minColour;
-    const clrIdx     = colouredPkgs.indexOf(usdt);
-    const ratio      = clrCount <= 1 ? 1 : clrIdx / (clrCount - 1);
-
-    const opacity   = useColour ? oMin + ratio * (oMax - oMin) : undefined;
-    const borderClr = useColour ? `rgba(${r},${g},${b},${opacity.toFixed(2)})` : 'var(--border)';
-    const hoverClr  = useColour ? `rgba(${r},${g},${b},${Math.min(opacity + 0.2, 1).toFixed(2)})` : 'rgba(255,255,255,0.3)';
-
-    const ethAmt  = fmtNum(usdt / USDT_PER_ETH);
-    const usdtFmt = usdt.toLocaleString('en-US');
+    const usdtFmt    = usdt.toLocaleString('en-US');
 
     const card = document.createElement('div');
     card.className = 'pkg-card' + (isSelected ? ' selected' : '');
-    card.style.borderColor = isSelected ? hoverClr : borderClr;
-    card.style.background  = 'var(--bg)';
-    if (isSelected && useColour) {
-      card.style.boxShadow = `0 0 0 1px rgba(${r},${g},${b},${Math.min(opacity + 0.1, 1).toFixed(2)}), 0 0 14px rgba(${r},${g},${b},0.45), 0 0 30px rgba(${r},${g},${b},0.18)`;
-    } else if (isSelected) {
+    card.style.borderColor = isSelected ? HILITE : NEUTRAL;
+    card.style.background  = isSelected ? bgSel : bgClr;
+    if (isSelected) {
       card.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.2), 0 0 10px rgba(255,255,255,0.12), 0 0 22px rgba(255,255,255,0.06)';
     }
 
@@ -96,8 +86,8 @@ function renderPkgGrid() {
       <div class="pkg-card-usd">${usdtFmt} USDT</div>
     `;
 
-    card.addEventListener('mouseenter', () => { card.style.borderColor = hoverClr; });
-    card.addEventListener('mouseleave', () => { card.style.borderColor = isSelected ? hoverClr : borderClr; });
+    card.addEventListener('mouseenter', () => { card.style.borderColor = HILITE; });
+    card.addEventListener('mouseleave', () => { card.style.borderColor = isSelected ? HILITE : NEUTRAL; });
     card.onclick = () => selectPackage(usdt);
     grid.appendChild(card);
   });
@@ -113,7 +103,7 @@ function selectPackage(usdt) {
 window._investPreviewData = null;
 
 async function computeInvestPreview() {
-  const tokenAddr = document.getElementById('investTokenSelect').value;
+  const tokenAddr = document.getElementById('investTokenSelect').value || _selectedInvestAddr;
   const ethAmtStr = document.getElementById('investAmount').value;
   const ethAmt    = parseFloat(ethAmtStr);
   const previewEl = document.getElementById('investTokenPreview');
@@ -137,7 +127,7 @@ async function computeInvestPreview() {
   if (stakingPct) stakingPct.textContent = '';
 
   try {
-    const totalWei = ethers.utils.parseEther(ethAmtStr);
+    const totalWei = parseUSDT(ethAmtStr);
     const A60max = totalWei.div(2).mul(60).div(100);  // max 30% for pool buy
     const A40eth = totalWei.div(2).mul(40).div(100);  // fixed 20% for commissions
 
@@ -216,7 +206,8 @@ async function computeInvestPreview() {
 
 async function showInvestConfirmModal() {
   if (!requireConnected()) return;
-  const tokenAddr = document.getElementById('investTokenSelect').value;
+  // Fall back to the selected-token state if the hidden <select> value didn't stick
+  const tokenAddr = document.getElementById('investTokenSelect').value || _selectedInvestAddr;
   if (!tokenAddr) { toast('Select a token first', 'warn'); return; }
   const ethAmtStr = document.getElementById('investAmount').value;
   const ethAmt = parseFloat(ethAmtStr);
@@ -236,7 +227,7 @@ async function showInvestConfirmModal() {
   const fmtU    = n => fmtNum(n);
 
   try {
-    const totalWei     = ethers.utils.parseEther(ethAmtStr);
+    const totalWei     = parseUSDT(ethAmtStr);
     const A60max       = totalWei.div(2).mul(60).div(100);  // max 30% for pool buy
     const A40eth       = totalWei.div(2).mul(40).div(100);  // fixed 20% for commissions
     const liquidityETH = totalWei.div(2);
@@ -299,7 +290,7 @@ async function showInvestConfirmModal() {
 
     const poolTokensF     = parseFloat(ethers.utils.formatUnits(poolTokensBN, dec));
     const platformTokensF = parseFloat(ethers.utils.formatUnits(platformTokensBN, dec));
-    const excessUSDT      = parseFloat(ethers.utils.formatEther(excessBN)) * USDT_PER_ETH;
+    const excessUSDT      = usdtToFloat(excessBN) * USDT_PER_ETH;
     const poolCapped      = excessBN.gt(0);
     const totalTokensF    = poolTokensF + platformTokensF;
 
@@ -378,7 +369,7 @@ function confirmInvest() {
 async function invest() {
   if (!requireConnected()) return;
 
-  const tokenAddr = document.getElementById('investTokenSelect').value;
+  const tokenAddr = document.getElementById('investTokenSelect').value || _selectedInvestAddr;
   if (!tokenAddr) { toast('Select a token first', 'warn'); return; }
 
   const ethAmtStr = document.getElementById('investAmount').value;
@@ -404,7 +395,7 @@ function _showReserveChoiceModal(tokenAddr, ethAmtStr, reserveWei) {
   if (existing) existing.remove();
 
   const pkg        = parseFloat(ethAmtStr);
-  const reserve    = parseFloat(ethers.utils.formatEther(reserveWei)) * USDT_PER_ETH;
+  const reserve    = usdtToFloat(reserveWei) * USDT_PER_ETH;
   const fromRes    = Math.min(reserve, pkg);
   const fromWallet = Math.max(0, pkg - reserve);
   const breakdown  = fromWallet > 0
@@ -443,7 +434,7 @@ async function _executeInvest(tokenAddr, ethAmtStr, useReserve) {
   if (!requireConnected()) return;
   _txBegin();
   try {
-    const totalWei  = ethers.utils.parseEther(ethAmtStr);
+    const totalWei  = parseUSDT(ethAmtStr);
     const usdtAddr  = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
     const usdtAbi   = ['function approve(address spender, uint256 amount) external returns (bool)'];
     const usdtToken = new ethers.Contract(usdtAddr, usdtAbi, signer);
@@ -551,6 +542,14 @@ async function loadInvestTokens() {
     try { featuredAddr = (await contract.featuredToken()).toLowerCase(); } catch(_) {}
     if (myGen !== _loadInvestTokensGen) return;
 
+    // Always feature the Hordex platform token when no featured token is set on-chain
+    // (or it's the zero address), provided it's among the active investable tokens.
+    if ((!featuredAddr || featuredAddr === ethers.constants.AddressZero) &&
+        typeof TOKEN_ADDRESS === 'string') {
+      const _hx = TOKEN_ADDRESS.toLowerCase();
+      if (activeAddrs.some(a => a.toLowerCase() === _hx)) featuredAddr = _hx;
+    }
+
     const featuredIdx = activeAddrs.findIndex(a => a.toLowerCase() === featuredAddr);
     if (featuredIdx > 0) {
       activeAddrs.unshift(activeAddrs.splice(featuredIdx, 1)[0]);
@@ -613,15 +612,13 @@ async function loadInvestTokens() {
       `;
       if (!isInProgress) {
         div.onclick = () => {
-          if (window.innerWidth <= 768) {
-            openTokenDetail(addr);
-          } else {
-            _setSelectedInvestToken(addr);
-            const card = document.getElementById('provideLiquidityCard');
-            if (card) {
-              card.style.display = '';
-              setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-            }
+          // Select the token directly (both desktop and mobile) and reveal packages.
+          // Details remain available via the explicit "SHOW DETAILS" badge.
+          _setSelectedInvestToken(addr);
+          const card = document.getElementById('provideLiquidityCard');
+          if (card) {
+            card.style.display = '';
+            setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
           }
         };
       }
@@ -799,14 +796,10 @@ window.fetchEthPrice          = fetchEthPrice;
 window._investStartPoll       = _investStartPoll;
 window._investStopPoll        = _investStopPoll;
 window.switchPkgCat           = switchPkgCat;
+// Terms text removed — keep the box empty and hidden.
 document.addEventListener('DOMContentLoaded', () => {
   const box = document.getElementById('investTermsBox');
-  if (!box) return;
-  box.innerHTML =
-    `✅ By investing, you acknowledge that the generated LP tokens will be locked in the Hordex Smart Contract at ` +
-    `<span style="color:var(--gold);word-break:break-all;">${CONTRACT_ADDRESS}</span> ` +
-    `(<span style="color:var(--muted);">${CHAIN_NAME}</span>) ` +
-    `for default period of 90 days.`;
+  if (box) { box.innerHTML = ''; box.style.display = 'none'; }
 });
 
 window.renderPkgGrid          = renderPkgGrid;

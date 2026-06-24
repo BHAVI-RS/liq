@@ -6,11 +6,11 @@
   <title>Hordex — Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-  <script src="contract-config.js?v=1782186590395"></script>
-  <link rel="stylesheet" href="css/base.css?v=3"/>
+  <script src="contract-config.js?v=1782269792421"></script>
+  <link rel="stylesheet" href="css/base.css?v=5"/>
   <link rel="stylesheet" href="css/nav.css?v=3"/>
-  <link rel="stylesheet" href="css/components.css?v=3"/>
-  <link rel="stylesheet" href="css/dashboard.css?v=3"/>
+  <link rel="stylesheet" href="css/components.css?v=14"/>
+  <link rel="stylesheet" href="css/dashboard.css?v=6"/>
   <link rel="stylesheet" href="css/landing.css?v=3"/>
 </head>
 <body>
@@ -388,7 +388,7 @@
     <div id="dashStatsRow" style="display:none;">
       <!-- Row 1: My Wealth + Team Wealth -->
       <div class="dash-stat-card" id="dashCard-pnl">
-        <div class="dash-stat-label">My Wealth</div>
+        <div class="dash-stat-label">MY WEALTH</div>
         <div id="dashPnL" class="dash-stat-val">—</div>
         <div id="dashPnLPct" class="dash-stat-sub"></div>
       </div>
@@ -521,8 +521,8 @@
         <!-- package cards grid -->
         <div id="pkgGrid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px;"></div>
 
-        <!-- terms -->
-        <div id="investTermsBox" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px 16px;font-size:11px;line-height:1.75;color:var(--muted);"></div>
+        <!-- terms (removed) -->
+        <div id="investTermsBox" style="display:none;"></div>
       </div>
 
       <!-- hidden fields read by invest() -->
@@ -594,8 +594,9 @@
             <div class="field">
               <label style="display:flex;justify-content:space-between;align-items:center;">
                 <span>USDT to spend</span>
-                <span id="poolBuyUsdtBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;text-transform:none;letter-spacing:0;" onclick="poolBuyMax()">
-                  BAL: <span id="poolBuyUsdtBal">—</span> USDT &nbsp;MAX
+                <span id="poolBuyUsdtBalLabel" style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);text-transform:none;letter-spacing:0;">
+                  BAL: <span id="poolBuyUsdtBal">—</span> USDT
+                  <button type="button" onclick="poolBuyMax()" style="background:var(--surface);border:1px solid var(--border);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;cursor:pointer;">MAX</button>
                 </span>
               </label>
               <input id="poolBuyUSDT" type="number" min="0" step="0.01" placeholder="0.00"
@@ -620,8 +621,9 @@
             <div class="field">
               <label style="display:flex;justify-content:space-between;align-items:center;">
                 <span>Tokens to sell</span>
-                <span id="poolSellBalLabel" style="font-size:10px;color:var(--muted);cursor:pointer;text-transform:none;letter-spacing:0;" onclick="poolSellMax()">
-                  BAL: <span id="poolSellBal">—</span> &nbsp;MAX
+                <span id="poolSellBalLabel" style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);text-transform:none;letter-spacing:0;">
+                  BAL: <span id="poolSellBal">—</span>
+                  <button type="button" onclick="poolSellMax()" style="background:var(--surface);border:1px solid var(--border);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:4px;cursor:pointer;">MAX</button>
                 </span>
               </label>
               <input id="poolSellAmt" type="number" min="0" step="1" placeholder="0"
@@ -1122,17 +1124,17 @@
 
 <!-- JS — loaded in dependency order -->
 <script src="js/session.js?v=3"></script>
-<script src="js/utils.js?v=5"></script>
-<script src="js/panels/dashboard.js?v=6"></script>
-<script src="js/panels/investments.js?v=4"></script>
-<script src="js/panels/invest.js?v=3"></script>
-<script src="js/panels/pool.js?v=4"></script>
-<script src="js/panels/genealogy.js?v=3"></script>
-<script src="js/panels/rewards.js?v=14"></script>
+<script src="js/utils.js?v=6"></script>
+<script src="js/panels/dashboard.js?v=7"></script>
+<script src="js/panels/investments.js?v=8"></script>
+<script src="js/panels/invest.js?v=12"></script>
+<script src="js/panels/pool.js?v=6"></script>
+<script src="js/panels/genealogy.js?v=5"></script>
+<script src="js/panels/rewards.js?v=16"></script>
 <script src="js/panels/myinfo.js?v=3"></script>
-<script src="js/panels/history.js?v=4"></script>
+<script src="js/panels/history.js?v=2"></script>
 <script src="js/panels/owner.js?v=3"></script>
-<script src="js/app.js?v=3"></script>
+<script src="js/app.js?v=5"></script>
 
 </body>
 </html>

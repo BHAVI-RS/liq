@@ -24,6 +24,14 @@
 
 html { zoom: 1.1; }
 
+/* Mobile: zoom content +10% on top of the base. Scoped to the page-content
+   containers (not <html>) so that position:fixed overlays/modals — which are
+   direct children of <body> — are NOT pushed by the extra zoom and stay
+   correctly positioned. Compounds with the html 1.1 => ~1.21 for content. */
+@media (max-width: 768px) {
+  #mobileNav, header, main, footer { zoom: 1.1; }
+}
+
 body {
   background: var(--bg);
   color: var(--cream);

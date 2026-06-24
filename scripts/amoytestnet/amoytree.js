@@ -1,13 +1,12 @@
 // Deploy Hordex contracts (incl. a fresh Uniswap V2 factory + router) using the
 // pre-deployed HDX token, seed the pool, warm up TWAP (identical to justdeploy.js
-// PHASES 1-4), then build a SINGLE 15-account referral CHAIN and invest.
+// PHASES 1-4), then build a SINGLE 15-account referral CHAIN. REGISTRATION ONLY —
+// no account invests; the script stops once the chain is registered.
 //
 // Referral chain (acc[0] is the auto-registered deployer/owner):
-//   acc[0] → acc[1] → acc[2] → … → acc[12] → acc[13] → acc[14] → acc[15]
+//   acc[0] → acc[1] → acc[2] → … → acc[13] → acc[14] → acc[15]
 //   (each account refers the next one)
-//   • acc[1..12]  : each invests $25  (so every upline is staked BEFORE its downline
-//                   invests → eligible for the flat-$25 referral gate)
-//   • acc[13..15] : registered only — no investment
+//   • acc[1..15] : registered only — no investment
 //
 // USAGE:
 //   npx hardhat run scripts/amoytestnet/amoytree.js --network polygonAmoy
@@ -27,7 +26,6 @@ const HDX_TO_LIQUIDITY     = hre.ethers.parseEther("10000000"); // 10 M HDX
 const SEED_USDT            = hre.ethers.parseEther("1");        // 1 USDT
 const SEED_TOKENS          = hre.ethers.parseEther("1");        // 1 HDX  → price = 1 USDT
 const REGISTRATION_FEE     = hre.ethers.parseEther("1");        // 1 USDT legitimacy check per account
-const INVEST_AMOUNT        = hre.ethers.parseEther("25");       // $25 package per investing account
 const TWAP_WAIT_SECS       = 31;       // must exceed TWAP_PERIOD (30 s) so the 2nd obs lands
 
 const FUND_AMOUNT    = hre.ethers.parseEther("0.5");  // POL for gas (register + invest)
@@ -35,10 +33,7 @@ const FUND_THRESHOLD = hre.ethers.parseEther("0.4");
 
 // Single linear chain: acc[i] is referred by acc[i-1].
 const TOTAL_ACCOUNTS = 16;   // acc[0] (deployer) + acc[1..15]
-const CHAIN_LEN      = 15;   // accounts created/registered: acc[1..15]
-const INVEST_UPTO    = 12;   // acc[1..12] each invest $25; acc[13..15] register only
-// Per-account invest amount (0 = register only).
-const investAmountFor = (i) => (i >= 1 && i <= INVEST_UPTO) ? INVEST_AMOUNT : 0n;
+const CHAIN_LEN      = 15;   // accounts created/registered: acc[1..15] (registration only)
 
 const TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -151,12 +146,9 @@ async function main() {
   if (hdxBal < HDX_TO_LIQUIDITY) {
     console.error(`❌  deployer needs ≥ 10,000,000 HDX (has ${hre.ethers.formatEther(hdxBal)})`); process.exit(1);
   }
-  // Deployer must cover: pool seed + 1 USDT registration fee per account + every $25 invest.
-  let _totalInvest = 0n;
-  for (let i = 1; i <= CHAIN_LEN; i++) _totalInvest += investAmountFor(i);
+  // Deployer must cover: pool seed + 1 USDT registration fee per account (no invests).
   const MIN_USDT = SEED_USDT
-    + REGISTRATION_FEE * BigInt(CHAIN_LEN)
-    + _totalInvest;
+    + REGISTRATION_FEE * BigInt(CHAIN_LEN);
   if (usdtBal < MIN_USDT) {
     console.error(`❌  deployer needs ≥ ${hre.ethers.formatEther(MIN_USDT)} USDT (has ${hre.ethers.formatEther(usdtBal)})`); process.exit(1);
   }
@@ -376,13 +368,13 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
     } else {
       console.log(`  acc[${i}]  ${signers[i].address}  →  ${hre.ethers.formatEther(bal)} POL (sufficient, skipped)`);
     }
-    // USDT: 1 registration fee + this account's invest amount (0 for acc[13..15])
-    const needUsdt   = REGISTRATION_FEE + investAmountFor(i);
+    // USDT: 1 registration fee only (registration-only run — no invest)
+    const needUsdt   = REGISTRATION_FEE;
     const usdtBalSub = await usdtCt.balanceOf(signers[i].address);
     if (usdtBalSub < needUsdt) {
       const topUp = needUsdt - usdtBalSub;
       await mine(() => usdtCt.transfer(signers[i].address, topUp, TX_OVERRIDES));
-      console.log(`  acc[${i}]  →  sent ${hre.ethers.formatEther(topUp)} USDT (fee${investAmountFor(i) > 0n ? " + invest" : ""}) ✓`);
+      console.log(`  acc[${i}]  →  sent ${hre.ethers.formatEther(topUp)} USDT (registration fee) ✓`);
     } else {
       console.log(`  acc[${i}]  →  already has ≥ ${hre.ethers.formatEther(needUsdt)} USDT (skipped)`);
     }
@@ -400,20 +392,6 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
     console.log(`  acc[${i}] registered under acc[${referrer}] ✓`);
   }
 
-  // ── PHASE 7: Invest $25 from acc[1..12] (acc[13..15] register only) ─────────
-  // Ascending order so every upline already holds its $25 self-stake when its direct
-  // downline invests → it passes the flat-$25 referral gate and earns the commission.
-  console.log("\n" + sep()); console.log("  PHASE 7 — INVEST ($25 → acc[1.." + INVEST_UPTO + "])"); console.log(sep());
-  for (let i = 1; i <= CHAIN_LEN; i++) {
-    const amount = investAmountFor(i);
-    if (amount === 0n) { console.log(`  acc[${i}] — no investment (register only)`); continue; }
-    const usdtN = new hre.ethers.Contract(DEPLOYED_USDT, TOKEN_ABI, signers[i]);
-    await mine(() => usdtN.approve(liquidityAddress, amount, TX_OVERRIDES));
-    const liqN = new hre.ethers.Contract(liquidityAddress, artifact.abi, signers[i]);
-    await mine(() => liqN.invest(PLATFORM_TOKEN, amount, TX_OVERRIDES));
-    console.log(`  acc[${i}] invested ${hre.ethers.formatEther(amount)} USDT ✓`);
-  }
-
   // ── Done ──────────────────────────────────────────────────────────────────
   console.log("\n" + sep("═"));
   console.log("  DONE");
@@ -423,8 +401,7 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
   console.log(`  Deploy block: ${deployBlock}`);
   console.log(`  TWAP        : ready`);
   console.log(`  Chain       : acc[0]→acc[1]→…→acc[${CHAIN_LEN}] (each refers the next)`);
-  console.log(`  Invested    : $25 each from acc[1..${INVEST_UPTO}]`);
-  console.log(`  Register-only: acc[${INVEST_UPTO + 1}..${CHAIN_LEN}]`);
+  console.log(`  Registered  : acc[1..${CHAIN_LEN}] (registration only — no invests)`);
   console.log(sep("═") + "\n");
 }
 

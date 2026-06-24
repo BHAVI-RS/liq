@@ -13,8 +13,8 @@
 // so it never goes stale (TWAP_MAX_STALE) between invests:
 //   TWAP_SINGLE=1 npx hardhat run scripts/polygon/twap.js --network polygon
 //
-// Override the gap between observations (must EXCEED the contract's TWAP period; default 31s):
-//   TWAP_WAIT_SECS=400 npx hardhat run scripts/polygon/twap.js --network polygon
+// Override the gap between observations (must EXCEED the contract's TWAP period; default 920s):
+//   TWAP_WAIT_SECS=920 npx hardhat run scripts/polygon/twap.js --network polygon
 
 const hre  = require("hardhat");
 const fs   = require("fs");
@@ -28,7 +28,7 @@ const ABI = [
   "function getTWAPPrice() view returns (uint256)",
 ];
 
-const TWAP_WAIT_SECS = parseInt(process.env.TWAP_WAIT_SECS || "31", 10); // > TWAP_PERIOD (30 s)
+const TWAP_WAIT_SECS = parseInt(process.env.TWAP_WAIT_SECS || "920", 10); // > TWAP_PERIOD (15 min = 900 s)
 const SINGLE         = process.env.TWAP_SINGLE === "1";
 
 // Fees auto-estimate from the network by default; override via env if a tx gets stuck.

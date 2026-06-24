@@ -1,4 +1,4 @@
-let _activeHistTab = 'invest';
+let _activeHistTab = 'rewards';
 
 function switchHistoryTab(name) {
   _activeHistTab = name;
@@ -49,7 +49,7 @@ function _buildHistoryItemFromRecord(rec, symCache) {
   const lpTokens  = rec.lpTokens;
   const ts        = rec.ts.toNumber ? rec.ts.toNumber() : Number(rec.ts);
   const date      = String(ts);
-  const ethRaw    = parseFloat(ethers.utils.formatEther(ethAmount));
+  const ethRaw    = usdtToFloat(ethAmount);
   const ethFmt    = fmtNum(ethRaw * USDT_PER_ETH);
   const lpFmt     = fmtNum(parseFloat(ethers.utils.formatEther(lpTokens)));
   const sym       = (symCache && symCache[tokenAddr.toLowerCase()]) || tokenAddr.slice(0, 8) + '…';
@@ -98,7 +98,7 @@ async function _buildHistoryItem(ev) {
   const block = await provider.getBlock(blockNum);
   const date  = String(block.timestamp);
 
-  const ethRaw  = parseFloat(ethers.utils.formatEther(ethAmount));
+  const ethRaw  = usdtToFloat(ethAmount);
   const ethFmt  = fmtNum(ethRaw * USDT_PER_ETH);
   const lpFmt   = fmtNum(parseFloat(ethers.utils.formatEther(lpTokens)));
 
@@ -292,8 +292,8 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
     resMid = { eth: resBefore.eth.add(A60), token: resBefore.token.sub(swapTokensOut) };
 
   const fE = bn => bn ? fmtNum(parseFloat(ethers.utils.formatEther(bn))) : '—';
-  const fU  = bn => bn ? fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT' : '—';
-  const fU3 = bn => bn ? fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT' : '—';
+  const fU  = bn => bn ? fmtNum(usdtToFloat(bn) * USDT_PER_ETH) + ' USDT' : '—';
+  const fU3 = bn => bn ? fmtNum(usdtToFloat(bn) * USDT_PER_ETH) + ' USDT' : '—';
   const fT = bn => {
     if (!bn) return '—';
     const n = parseFloat(ethers.utils.formatUnits(bn, tokenDecimals));
@@ -301,14 +301,14 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
   };
   const fPrice = res => {
     if (!res || res.eth.isZero()) return '—';
-    const p = (parseFloat(ethers.utils.formatEther(res.eth)) * USDT_PER_ETH)
+    const p = (usdtToFloat(res.eth) * USDT_PER_ETH)
             / parseFloat(ethers.utils.formatUnits(res.token, tokenDecimals));
     return fmtNum(p) + ' USDT/' + tokenSymbol;
   };
 
   let effectiveSwapPrice = '—';
   if (swapTokensOut && !A60.isZero()) {
-    const p = (parseFloat(ethers.utils.formatEther(A60)) * USDT_PER_ETH)
+    const p = (usdtToFloat(A60) * USDT_PER_ETH)
             / parseFloat(ethers.utils.formatUnits(swapTokensOut, tokenDecimals));
     effectiveSwapPrice = fmtNum(p) + ' USDT/' + tokenSymbol;
   }
@@ -360,8 +360,8 @@ async function _buildHistoryDetail(txHash, blockNum, tokenAddr, ethAmount, lpTok
             ? `<div style="color:var(--muted);font-size:11px;font-family:var(--font-mono);padding:8px 0;">${txHash ? 'No commission events found in this transaction.' : 'No referrers found in the referral chain for this wallet.'}</div>`
             : refEvents.map(ev => {
                 const short = ev.recipient;
-                const poolFloat = parseFloat(ethers.utils.formatEther(A40));
-                const amtFloat  = parseFloat(ethers.utils.formatEther(ev.amount));
+                const poolFloat = usdtToFloat(A40);
+                const amtFloat  = usdtToFloat(ev.amount);
                 const pctOfPool = poolFloat > 0 ? amtFloat / poolFloat * 100 : 0;
                 const rateLabel = pctOfPool > 0
                   ? pctOfPool.toFixed(pctOfPool >= 1 ? 1 : 2).replace(/\.?0+$/, '') + '% of pool'
@@ -411,7 +411,7 @@ async function loadPoolHistory() {
       return tb - ta;
     });
 
-    const fEU = bn => fmtNum(parseFloat(ethers.utils.formatEther(bn)) * USDT_PER_ETH) + ' USDT';
+    const fEU = bn => fmtNum(usdtToFloat(bn) * USDT_PER_ETH) + ' USDT';
 
     el.innerHTML = sorted.map(e => {
       const ts   = e.ts.toNumber ? e.ts.toNumber() : Number(e.ts);
@@ -454,14 +454,14 @@ async function loadRewardHistory() {
     const stakingRows = (claims || []).map(ev => ({
       ts:     ev.ts.toNumber ? ev.ts.toNumber() : Number(ev.ts),
       tokens: fEth(ev.tokensAmount),
-      ethEq:  fEth(ev.ethEquivalent),
+      ethEq:  usdtToFloat(ev.ethEquivalent),
       type:   'staking',
     }));
 
     const roiRows = (roiClaims || []).map(ev => ({
       ts:     ev.ts.toNumber ? ev.ts.toNumber() : Number(ev.ts),
       tokens: fEth(ev.tokensAmount),
-      ethEq:  fEth(ev.ethEquivalent),
+      ethEq:  usdtToFloat(ev.ethEquivalent),
       type:   'roi',
     }));
 

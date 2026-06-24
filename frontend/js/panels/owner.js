@@ -334,7 +334,7 @@ async function loadOwnerStats() {
   try {
     const [totalUsersBN, totalInvestedWei] = await contract.getPlatformStats();
     const totalUsers        = totalUsersBN.toNumber();
-    const totalInvestedETH  = parseFloat(ethers.utils.formatEther(totalInvestedWei));
+    const totalInvestedETH  = usdtToFloat(totalInvestedWei);
     const totalInvestedUSDT = totalInvestedETH * USDT_PER_ETH;
 
     const tokenAddrs = await contract.getRegisteredTokens();
@@ -551,7 +551,7 @@ async function ownerAddLiquidity() {
   const btn = document.getElementById('ownerAddLiqBtn');
   btn.disabled = true; btn.textContent = 'Processing…';
   try {
-    const usdtWei = ethers.utils.parseEther(usdtVal.toFixed(18));
+    const usdtWei = parseUSDT(usdtVal.toFixed(6)); // USDT base units (6 decimals)
     let tokenWei;
 
     if (_ownerLiqIsNewPool) {
@@ -644,7 +644,7 @@ async function _ownerUpdateRemoveEstimate(lpWei) {
     const estTok = rawTok.mul(lpWei).div(totalSupply);
     const estETH = rawETH.mul(lpWei).div(totalSupply);
     document.getElementById('ownerRemoveEstETH').textContent =
-      (parseFloat(ethers.utils.formatEther(estETH)) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
+      (usdtToFloat(estETH) * USDT_PER_ETH).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' USDT';
     document.getElementById('ownerRemoveEstToken').textContent =
       fmtNum(parseFloat(ethers.utils.formatUnits(estTok, _ownerRem_TokenDec))) + ' ' + _ownerRem_TokenSym;
   } catch(_) {}

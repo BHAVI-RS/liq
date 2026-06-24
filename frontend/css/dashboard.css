@@ -154,6 +154,8 @@
 .dis-timer-val {
   font-family: var(--font-display); font-size: 16px; color: var(--gold); letter-spacing: 1px;
 }
+/* Unlocks-timer variant of the rewards-claimed cell is mobile-only (see media query) */
+.dis-label-unlocks, .dis-val-unlocks { display: none; }
 
 /* Show more toggle */
 .dash-inv-toggle {
@@ -379,7 +381,7 @@
     padding: 10px 15px;
   }
   .dis-col-action .dis-label { margin-bottom: 0; white-space: nowrap; }
-  .dis-timer-val { font-size: 15px; }
+  .dis-timer-val { font-size: 17px; }
 
   /* Staking section: hide label and header reward; show reward inline next to bar */
   .dis-sl-label { display: none; }
@@ -396,6 +398,18 @@
 
   /* Dashboard stat cards: hide sub-text except referral and staking */
   .dash-stat-card:not(#dashCard-referral):not(#dashCard-staking) .dash-stat-sub { display: none; }
+
+  /* Staking card: hide the "period complete · claim in rewards" hint on mobile */
+  #dashCard-staking .dash-stat-sub.is-period-complete { display: none; }
+
+  /* $25/$50 packages: show UNLOCKS IN timer in place of REWARDS CLAIMED */
+  .dis-col-rewards-small .dis-label-rewards,
+  .dis-col-rewards-small .dis-val-rewards { display: none; }
+  .dis-col-rewards-small .dis-label-unlocks { display: block; }
+  .dis-col-rewards-small .dis-val-unlocks { display: block; }
+  /* …and hide the duplicate action-row timer for those cards (timer now lives
+     in the rewards column). The action col here only holds the countdown. */
+  .dis-col-rewards-small ~ .dis-col-action { display: none; }
 
   /* Unlocked + claimable: stake and claim side by side in one row */
   .inv-unlocked-claim .dis-col-action {

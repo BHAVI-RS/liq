@@ -127,8 +127,8 @@ async function _loadDashTeamWealth() {
       for (let _i = 0; _i < _chunk.length; _i++) {
         paramsList.push(_wps[_i] || null);
         roiList.push(
-          parseFloat(ethers.utils.formatEther(_live[_i] || 0)) +
-          parseFloat(ethers.utils.formatEther(_pend[_i] || 0))
+          usdtToFloat(_live[_i] || 0) +
+          usdtToFloat(_pend[_i] || 0)
         );
       }
     }
@@ -291,12 +291,12 @@ function _dashStartStakingTicker() {
       const ut           = Number(lock.unlockTime);
       const la           = Number(lock.lockedAt) || (ut - 60);
       const dur          = Math.max(ut - la, 60);
-      const eth          = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+      const eth          = usdtToFloat(lock.ethInvested);
       const elapsed      = Math.min(dur, Math.max(0, now - la));
       const ratePPM_tick = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
       const rwEth_tick   = ratePPM_tick > 0 ? eth * ratePPM_tick / 1_000_000 : 0;
       const earnedETH      = dur > 0 ? rwEth_tick * elapsed / dur : 0;
-      const claimedEth_i   = lock.rewardClaimedETH    ? parseFloat(ethers.utils.formatEther(lock.rewardClaimedETH))    : 0;
+      const claimedEth_i   = lock.rewardClaimedETH    ? usdtToFloat(lock.rewardClaimedETH)    : 0;
       const pendingETH_i   = Math.max(0, earnedETH - claimedEth_i);
       const tokensAcc_i    = lock.tokensAccumulated   ? parseFloat(ethers.utils.formatEther(lock.tokensAccumulated))   : 0;
       const totalClaimed_i = lock.totalTokensClaimed  ? parseFloat(ethers.utils.formatEther(lock.totalTokensClaimed))  : 0;
@@ -428,7 +428,7 @@ async function _dashPrewarmPoolPrices(tokenAddrs) {
         const rawToken = meta.isToken0 ? r0 : r1;
         const rawETH   = meta.isToken0 ? r1 : r0;
         const resToken = parseFloat(ethers.utils.formatUnits(rawToken, meta.decimals));
-        const resETH   = parseFloat(ethers.utils.formatEther(rawETH));
+        const resETH   = usdtToFloat(rawETH);
         const priceEth = resToken > 0 ? resETH / resToken : 0;
         _poolPriceCache.set(a, {
           data: { priceEth, resETH, resToken, totalLPSupply: totalSup, pairAddr: meta.pairAddr },
@@ -464,7 +464,7 @@ async function _dashGetPoolPrice(tokenAddr) {
     } catch(_) {}
 
     const resToken = parseFloat(ethers.utils.formatUnits(rawToken, dec));
-    const resETH   = parseFloat(ethers.utils.formatEther(rawETH));
+    const resETH   = usdtToFloat(rawETH);
     const priceEth = resToken > 0 ? resETH / resToken : 0;
 
     const result = { priceEth, resETH, resToken, totalLPSupply: totalSupply, pairAddr };
@@ -558,13 +558,13 @@ async function fetchGraphData() {
 
     const invPts = investEvents.map(ev => ({
       time:      blockMap.get(ev.blockNumber) || 0,
-      ethAmount: parseFloat(ethers.utils.formatEther(ev.args.ethAmount)),
+      ethAmount: usdtToFloat(ev.args.ethAmount),
       lpTokens:  parseFloat(ethers.utils.formatEther(ev.args.lpTokens))
     })).filter(p => p.time > 0).sort((a, b) => a.time - b.time);
 
     const refPts = refEvents.map(ev => ({
       time:   blockMap.get(ev.blockNumber) || 0,
-      amount: parseFloat(ethers.utils.formatEther(ev.args.amount))
+      amount: usdtToFloat(ev.args.amount)
     })).filter(p => p.time > 0).sort((a, b) => a.time - b.time);
 
     let lpPricePerToken = 0;
@@ -1114,12 +1114,12 @@ async function loadDashboard(silent = false) {
     cachedQueryFilter(contract.filters.StakingRewardClaimed(walletAddress), 'StakingRewardClaimed', _fromBlock)
       .then(evs => {
         _dashStakingEventsBase = evs.reduce((s, ev) => {
-          try { return s + parseFloat(ethers.utils.formatEther(ev.args.ethEquivalent)); } catch(_) { return s; }
+          try { return s + usdtToFloat(ev.args.ethEquivalent); } catch(_) { return s; }
         }, 0);
       })
       .catch(() => {});
 
-    const refEarningsETH = commStats ? parseFloat(ethers.utils.formatEther(commStats.earned)) : 0;
+    const refEarningsETH = commStats ? usdtToFloat(commStats.earned) : 0;
     // Cap state assigned after _effNow is established below.
     let capETH = 0, capRemETH = 0, pausedCapETH = 0, adminPausedCapETH = 0, isEligible = false, isPaused = false, hasAdminPausedCap = false;
 
@@ -1170,10 +1170,10 @@ async function loadDashboard(silent = false) {
           _lPausedCap = _lPausedCap.add(_capLeft);
         }
       }
-      capETH           = parseFloat(ethers.utils.formatEther(_lActiveCap.add(_lPausedCap)));
-      capRemETH        = parseFloat(ethers.utils.formatEther(_lActiveCap));
-      pausedCapETH     = parseFloat(ethers.utils.formatEther(_lPausedCap));
-      adminPausedCapETH = parseFloat(ethers.utils.formatEther(_lAdminPausedCap));
+      capETH           = usdtToFloat(_lActiveCap.add(_lPausedCap));
+      capRemETH        = usdtToFloat(_lActiveCap);
+      pausedCapETH     = usdtToFloat(_lPausedCap);
+      adminPausedCapETH = usdtToFloat(_lAdminPausedCap);
       isEligible       = _lActiveCap.gt(0);
       isPaused         = !isEligible && _lPausedCap.gt(0);
       hasAdminPausedCap = _lAdminPausedCap.gt(0);
@@ -1190,7 +1190,7 @@ async function loadDashboard(silent = false) {
       }));
 
       for (const lock of lpLocks) {
-        totalInvestedETH += parseFloat(ethers.utils.formatEther(lock.ethInvested));
+        totalInvestedETH += usdtToFloat(lock.ethInvested);
         if (!lock.claimed && !lock.removed && Number(lock.unlockTime) > _effNow) {
           activeLocks++;
           totalLPTokens += parseFloat(ethers.utils.formatEther(lock.lpAmount));
@@ -1225,12 +1225,12 @@ async function loadDashboard(silent = false) {
       const _ut         = Number(_l.unlockTime);
       const _la         = Number(_l.lockedAt) || (_ut - 60);
       const _dur        = Math.max(_ut - _la, 60);
-      const _eth        = parseFloat(ethers.utils.formatEther(_l.ethInvested));
+      const _eth        = usdtToFloat(_l.ethInvested);
       const _el2        = Math.min(_dur, Math.max(0, _effNow - _la));
       const _ratePPM    = _l.rewardRatePPM ? _l.rewardRatePPM.toNumber() : 0;
       const _rwEth      = _ratePPM > 0 ? _eth * _ratePPM / 1_000_000 : 0;
       const _earnedETH  = _dur > 0 ? _rwEth * _el2 / _dur : 0;
-      const _claimedETH = _l.rewardClaimedETH  ? parseFloat(ethers.utils.formatEther(_l.rewardClaimedETH))  : 0;
+      const _claimedETH = _l.rewardClaimedETH  ? usdtToFloat(_l.rewardClaimedETH)  : 0;
       const _pendingETH = Math.max(0, _earnedETH - _claimedETH);
       const _tokAcc     = _l.tokensAccumulated  ? parseFloat(ethers.utils.formatEther(_l.tokensAccumulated))  : 0;
       const _totClaimed = _l.totalTokensClaimed ? parseFloat(ethers.utils.formatEther(_l.totalTokensClaimed)) : 0;
@@ -1249,11 +1249,11 @@ async function loadDashboard(silent = false) {
     document.getElementById('dashTotalInvested').innerHTML     = fmtUSDT(totalInvestedETH, {decimals:2});
     document.getElementById('dashTotalInvestedUSD').innerHTML  = '';
     // ── ROI commissions ── compute first so totalROIAccruedETH is available for wealth calc
-    const roiLiveETH    = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH))    : 0;
-    const roiPendingETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.pendingETH)) : 0;
+    const roiLiveETH    = roiData ? usdtToFloat(roiData.liveETH)    : 0;
+    const roiPendingETH = roiData ? usdtToFloat(roiData.pendingETH) : 0;
     const roiBaseETH    = roiLiveETH + roiPendingETH;
     const roiLifetimeClaimedETH = (roiClaimRecords || []).reduce(
-      (sum, r) => sum + parseFloat(ethers.utils.formatEther(r.ethEquivalent)), 0
+      (sum, r) => sum + usdtToFloat(r.ethEquivalent), 0
     );
     const totalROIAccruedETH = roiLifetimeClaimedETH + roiBaseETH;
     _dashROIBaseETH    = totalROIAccruedETH;
@@ -1311,7 +1311,7 @@ async function loadDashboard(silent = false) {
             if (_effNowCapture >= unlockTime) continue;
             const lockDur = unlockTime - lockedAt;
             if (lockDur <= 0) continue;
-            const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+            const ethInv  = usdtToFloat(lock.ethInvested);
             const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
             if (ratePPM === 0) continue;
             const commRate = ROI_RATES[Number(ref.level)] || 0;
@@ -1347,9 +1347,13 @@ async function loadDashboard(silent = false) {
       }
     }
     const stakingSubEl = document.querySelector('#dashCard-staking .dash-stat-sub');
-    if (stakingSubEl) stakingSubEl.textContent = _initAnyActive
-      ? 'accumulating'
-      : lpLocks.length ? 'period complete · claim in rewards' : 'no active staking';
+    if (stakingSubEl) {
+      const _isPeriodComplete = !_initAnyActive && lpLocks.length > 0;
+      stakingSubEl.classList.toggle('is-period-complete', _isPeriodComplete);
+      stakingSubEl.textContent = _initAnyActive
+        ? 'accumulating'
+        : lpLocks.length ? 'period complete · claim in rewards' : 'no active staking';
+    }
     _dashStartStakingTicker();
     const refLabelEl = document.querySelector('#dashCard-referral .dash-stat-label');
     if (refLabelEl) refLabelEl.innerHTML = `REFERRAL EARNINGS ${eligBadge} <span class="dash-stat-chart-hint">→</span>`;
@@ -1365,7 +1369,7 @@ async function loadDashboard(silent = false) {
       // accrual). Falls back to the local reconstruction only if the getter is unavailable —
       // note the reconstruction under-counts ROI at exhaustion (liveETH=0), which this fixes.
       const _effCapRef = (availCapRaw != null)
-        ? parseFloat(ethers.utils.formatEther(availCapRaw))
+        ? usdtToFloat(availCapRaw)
         : Math.max(0, capRemETH - roiLiveETH - roiPendingETH);
       _dashEffCapRefBase  = _effCapRef;
       _dashCapRawAtLoad   = capRemETH;
@@ -1650,7 +1654,7 @@ async function _refreshDashDirectRefStats() {
       const addr = card.id.slice('drefCard_'.length);
       const r    = byAddr.get(addr);
       if (!r) continue;
-      const invested  = parseFloat(ethers.utils.formatEther(r.totalInvested));
+      const invested  = usdtToFloat(r.totalInvested);
       const dirCount  = Number(r.directRefCount);
       const capState  = r.remainingCap.gt(0) ? 'eligible'
                       : r.totalCap.gt(0)     ? 'paused'
@@ -1695,7 +1699,7 @@ async function _loadDashDirectRefs(force = false) {
 
     listEl.innerHTML = batch.map(r => {
       const addr      = r.addr;
-      const invested  = parseFloat(ethers.utils.formatEther(r.totalInvested));
+      const invested  = usdtToFloat(r.totalInvested);
       const dirCount  = Number(r.directRefCount);
       const label     = _labelCache.get(addr.toLowerCase()) || '';
       const display   = label || addr;
@@ -1740,14 +1744,14 @@ async function _unlockLabels() {
 async function _computeMissedETHForAddr(addr) {
   try {
     const missed = await contract.totalMissedCommissions(addr);
-    return parseFloat(ethers.utils.formatEther(missed));
+    return usdtToFloat(missed);
   } catch (_) { return 0; }
 }
 
 async function _refreshRefPopupStats(addr) {
   try {
     const investedRaw = await contract.userTotalInvested(addr).catch(() => ethers.BigNumber.from(0));
-    const totalInv = parseFloat(ethers.utils.formatEther(investedRaw));
+    const totalInv = usdtToFloat(investedRaw);
     const invEl = document.getElementById('refPopInvestedVal');
     if (invEl) invEl.innerHTML = totalInv > 0 ? fmtUSDT(totalInv, {decimals:2}) : '0';
 
@@ -1786,21 +1790,21 @@ function _computeWealthFromParams(params) {
   const now = _dashStakingTickBase > 0
     ? _dashStakingTickBase + Math.max(0, _w - _dashStakingTickWall)
     : _w;
-  const refEarningsETH = parseFloat(ethers.utils.formatEther(params.refEarnings));
-  const tokenPriceEth  = parseFloat(ethers.utils.formatEther(params.platformTokenPriceEth));
+  const refEarningsETH = usdtToFloat(params.refEarnings);
+  const tokenPriceEth  = usdtToFloat(params.platformTokenPriceEth);
   const defaultLockDur = params.lpLockDuration ? Number(params.lpLockDuration) : 90;
 
   let totalInvestedETH = 0, totalCurrentLP = 0, stakingETH = 0;
 
   for (const lock of params.locks) {
-    const ethInv = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+    const ethInv = usdtToFloat(lock.ethInvested);
     totalInvestedETH += ethInv;
 
     if (!lock.removed) {
       // LP value using on-chain reserves fetched by getWealthParams
       const lpAmt      = parseFloat(ethers.utils.formatEther(lock.lpAmount));
       const totalLPSup = parseFloat(ethers.utils.formatEther(lock.totalLPSupply));
-      const resETH     = parseFloat(ethers.utils.formatEther(lock.reserveETH));
+      const resETH     = usdtToFloat(lock.reserveETH);
       if (totalLPSup > 0 && lpAmt > 0) totalCurrentLP += (lpAmt / totalLPSup) * resETH * 2;
 
       // Staking with wall-clock elapsed from contract's lockedAt (doesn't freeze on Hardhat)
@@ -1912,7 +1916,7 @@ async function openRefPopup(addr) {
 
     _refPopupWealthParams = wealthParams;
     const wealthETH = _computeWealthFromParams(wealthParams);
-    const totalInv  = parseFloat(ethers.utils.formatEther(investedRaw));
+    const totalInv  = usdtToFloat(investedRaw);
 
     _refPopupCurrentAddr = addr;
 
@@ -1987,11 +1991,11 @@ function showPausedLocksPopup(event) {
   const rows = pausedLocks.map(l => {
     const addr     = l.token;
     const short    = addr.slice(0, 6) + '…' + addr.slice(-4);
-    const ethInv   = parseFloat(ethers.utils.formatEther(l.ethInvested));
+    const ethInv   = usdtToFloat(l.ethInvested);
     const capMax   = l.ethInvested.mul(5);
     const capUsed  = l.commissionsCapUsed || ethers.BigNumber.from(0);
     const capLeft  = capMax.gt(capUsed) ? capMax.sub(capUsed) : ethers.BigNumber.from(0);
-    const capLeftE = parseFloat(ethers.utils.formatEther(capLeft));
+    const capLeftE = usdtToFloat(capLeft);
     return `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
       <div style="font-size:10px;color:#94a3b8;">Pair <span style="color:#e2e8f0;">${short}</span></div>
       <div style="font-size:10px;color:#94a3b8;margin-top:3px;">Invested <span style="color:#fde68a;">$${fmtNum(ethInv * USDT_PER_ETH)}</span> &nbsp;&middot;&nbsp; Cap left <span style="color:#4ade80;">$${fmtNum(capLeftE * USDT_PER_ETH)}</span></div>
@@ -2084,7 +2088,7 @@ async function showDashROILevelPopup() {
       contract.provider.getBlock('latest').catch(() => null),
     ]);
     if (!document.getElementById('dashROILevelOverlay')) return; // closed while loading
-    const liveETH = roiData ? parseFloat(ethers.utils.formatEther(roiData.liveETH)) : 0;
+    const liveETH = roiData ? usdtToFloat(roiData.liveETH) : 0;
     const wallNow = Math.floor(Date.now() / 1000);
     const effNow  = Math.max(blk ? blk.timestamp : wallNow, wallNow);
 
@@ -2114,12 +2118,12 @@ async function showDashROILevelPopup() {
         const lockedAt   = Number(lock.lockedAt);
         const lockDur    = unlockTime - lockedAt;
         if (lockDur <= 0) continue;
-        const ethInv  = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+        const ethInv  = usdtToFloat(lock.ethInvested);
         const ratePPM = lock.rewardRatePPM ? lock.rewardRatePPM.toNumber() : 0;
         const roiRate = ROI_RATES_CONTRACT[lvl] || 0;
         const info    = infoMap.get(`${ref.investor.toLowerCase()}:${Number(ref.lockIndex)}:${lvl}`);
-        const roiPaid = info ? parseFloat(ethers.utils.formatEther(info.roiPaidETH)) : 0;
-        const histPaid= info && info.historicalPaidETH ? parseFloat(ethers.utils.formatEther(info.historicalPaidETH)) : 0;
+        const roiPaid = info ? usdtToFloat(info.roiPaidETH) : 0;
+        const histPaid= info && info.historicalPaidETH ? usdtToFloat(info.historicalPaidETH) : 0;
         const recSince= info ? Number(info.recipientSince) : lockedAt;
         const recTs   = Math.max(lockedAt, recSince);
         const streamRate = (liveETH > 0 && effNow < unlockTime && ratePPM > 0 && roiRate > 0)

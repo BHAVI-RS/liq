@@ -14,17 +14,16 @@ const _capturedRefParam = (function() {
 //   • mainnet → scripts/polygon/mdeploy.js   --network polygon
 //   • amoy    → scripts/amoytestnet/inithdx.js --network polygonAmoy
 // ════════════════════════════════════════════════════════════════════════════
-/* ───── POLYGON MAINNET ─────
+// ───── POLYGON MAINNET ─────
 const NET = {
   chainId: 137, chainIdHex: '0x89', name: 'polygon', label: 'POLYGON',
   chainName: 'Polygon',
-  rpcUrls:  ['https://polygon-rpc.com'],
+  rpcUrls:  ['https://polygon-bor-rpc.publicnode.com'],
   explorer: 'https://polygonscan.com',
   readRpc:  'https://polygon-bor-rpc.publicnode.com',
   logsRpc:  'https://polygon-bor-rpc.publicnode.com',
 };
-*/
-// ───── POLYGON AMOY (TESTNET) ─────
+/* ───── POLYGON AMOY (TESTNET) ─────
 const NET = {
   chainId: 80002, chainIdHex: '0x13882', name: 'polygon-amoy', label: 'AMOY',
   chainName: 'Polygon Amoy',
@@ -35,6 +34,7 @@ const NET = {
   // ranges, so log-based reads (pool trade history) go here instead.
   logsRpc:  'https://polygon-amoy-bor-rpc.publicnode.com',
 };
+*/
 
 // Dedicated read-only RPC — bypasses the wallet relay so all view calls are fast.
 // Transactions still go through the wallet signer; only eth_call goes here.
@@ -100,7 +100,7 @@ async function checkMissedCommissions() {
     const { total: missedWei } = await _computeMissedWei();
     if (missedWei.isZero()) return;
 
-    const totalETH   = parseFloat(ethers.utils.formatEther(missedWei));
+    const totalETH   = usdtToFloat(missedWei);
     const usdtTotal  = ethToUSDT(totalETH).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
     document.getElementById('missedCommText').innerHTML =
@@ -214,7 +214,7 @@ async function ensureCorrectNetwork(eth) {
         return true;
       } catch(_) {}
     }
-    toast('Please switch your wallet to ' + NET.chainName + ' (chain ID ' + NET.chainId + ').', 'error');
+    toast('Hordex runs on ' + NET.chainName + ' only. Please switch your wallet to ' + NET.chainName + ' (chain ID ' + NET.chainId + ') to continue.', 'error');
     return false;
   }
 }
@@ -235,7 +235,9 @@ function registerEthereumListeners(eth) {
   eth.on('chainChanged', (chainIdHex) => {
     updateNetPill(chainIdHex);
     if (parseInt(chainIdHex, 16) !== REQUIRED_CHAIN_ID) {
-      toast('Wrong network — please switch back to ' + NET.chainName + '.', 'error');
+      // This app supports Polygon mainnet only — leaving it drops back to the
+      // connect screen rather than leaving a dashboard on an unsupported network.
+      _revertToLanding('Hordex runs on ' + NET.chainName + ' only. Switch your wallet back to ' + NET.chainName + ', then reconnect.', 'error');
       return;
     }
     if (_txInFlight === 0 && App.walletAddress) {
@@ -534,17 +536,17 @@ let _landingStatsPollInterval = null;
 function _computeWealthLanding(params) {
   if (!params || !params.locks) return { wealth: 0, staking: 0 };
   const now = Math.floor(Date.now() / 1000);
-  const refEarningsETH = parseFloat(ethers.utils.formatEther(params.refEarnings));
-  const tokenPriceEth  = parseFloat(ethers.utils.formatEther(params.platformTokenPriceEth));
+  const refEarningsETH = usdtToFloat(params.refEarnings);
+  const tokenPriceEth  = usdtToFloat(params.platformTokenPriceEth);
   const defaultLockDur = params.lpLockDuration ? Number(params.lpLockDuration) : 7776000;
   let totalInvestedETH = 0, totalCurrentLP = 0, stakingETH = 0;
   for (const lock of params.locks) {
-    const ethInv = parseFloat(ethers.utils.formatEther(lock.ethInvested));
+    const ethInv = usdtToFloat(lock.ethInvested);
     totalInvestedETH += ethInv;
     if (!lock.removed) {
       const lpAmt      = parseFloat(ethers.utils.formatEther(lock.lpAmount));
       const totalLPSup = parseFloat(ethers.utils.formatEther(lock.totalLPSupply));
-      const resETH     = parseFloat(ethers.utils.formatEther(lock.reserveETH));
+      const resETH     = usdtToFloat(lock.reserveETH);
       if (totalLPSup > 0 && lpAmt > 0) totalCurrentLP += (lpAmt / totalLPSup) * resETH * 2;
       const lockedAt   = Number(lock.lockedAt);
       const unlockTime = Number(lock.unlockTime);
@@ -585,8 +587,8 @@ async function loadLandingStats() {
   try {
     const platformStats = await readContract.getPlatformStats();
     const totalUsers    = Number(platformStats._totalUsers);
-    const totalETH      = parseFloat(ethers.utils.formatEther(platformStats._totalEthInvested));
-    const stakingETH    = parseFloat(ethers.utils.formatEther(platformStats._totalStakingRewardsPaidETH));
+    const totalETH      = usdtToFloat(platformStats._totalEthInvested);
+    const stakingETH    = usdtToFloat(platformStats._totalStakingRewardsPaidETH);
 
     const partial = {
       totalUsers:     totalUsers.toLocaleString(),
@@ -673,39 +675,54 @@ window.addEventListener('load', async () => {
   const savedWallet = localStorage.getItem('hordex_wallet');
   if (!savedWallet) return;
 
-  // ── Step 1: Optimistic restore ──
-  App.walletAddress = savedWallet;
-  const shortAddr = savedWallet.slice(0,6) + '...' + savedWallet.slice(-4);
-  document.getElementById('connectBtn').textContent = shortAddr;
-  document.getElementById('connectBtn').classList.add('connected');
-  document.getElementById('walletAddr').textContent = savedWallet;
-  document.getElementById('walletDropdownAddr').textContent = savedWallet;
-  document.getElementById('walletBar').classList.add('show');
-  const _overlay = document.getElementById('landingOverlay');
-  _overlay.classList.add('hidden');
-  setTimeout(() => { _overlay.style.display = 'none'; }, 500);
-  document.querySelector('.tabs').classList.add('visible');
-  document.querySelector('main').classList.add('visible');
-
-  // ── Step 2: Background verification ──
+  // Verify the saved session BEFORE revealing the dashboard. We never show the
+  // dashboard for an unconnected/expired wallet (no "RECONNECT" dashboard state),
+  // and we only restore on Polygon mainnet — the only network this app supports.
+  // Both checks (eth_accounts, eth_chainId) are silent and prompt-free.
   try {
     eth.autoRefreshOnNetworkChange = false;
-    App.walletProvider = new ethers.providers.Web3Provider(eth);
-    App.provider       = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
-    const accounts = await eth.request({ method: 'eth_accounts' });
 
+    const accounts = await eth.request({ method: 'eth_accounts' });
     if (!accounts || accounts.length === 0 ||
         accounts[0].toLowerCase() !== savedWallet.toLowerCase()) {
+      // Wallet locked or a different account is active — stay on the landing screen.
       App.walletAddress = null;
       App.signer = null;
-      document.getElementById('connectBtn').textContent = 'RECONNECT';
-      document.getElementById('connectBtn').classList.remove('connected');
-      toast('Wallet session expired — please reconnect.', 'info');
+      localStorage.removeItem('hordex_wallet');
       return;
     }
 
-    App.signer = App.walletProvider.getSigner();
-    updateNetPill(await eth.request({ method: 'eth_chainId' }));
+    const chainHex = await eth.request({ method: 'eth_chainId' });
+    if (parseInt(chainHex, 16) !== REQUIRED_CHAIN_ID) {
+      // Wrong network — do NOT restore the dashboard. Keep the landing screen up and
+      // ask the user to switch; connecting will then prompt the network switch.
+      App.walletAddress = null;
+      App.signer = null;
+      updateNetPill(chainHex);
+      toast('Hordex runs on ' + NET.chainName + ' only — switch your wallet to ' + NET.chainName + ', then connect.', 'error');
+      return;
+    }
+
+    // Verified: connected account + Polygon mainnet. Now restore the session and
+    // reveal the dashboard.
+    App.walletAddress  = savedWallet;
+    App.walletProvider = new ethers.providers.Web3Provider(eth);
+    App.provider       = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
+    App.signer         = App.walletProvider.getSigner();
+
+    const shortAddr = savedWallet.slice(0,6) + '...' + savedWallet.slice(-4);
+    document.getElementById('connectBtn').textContent = shortAddr;
+    document.getElementById('connectBtn').classList.add('connected');
+    document.getElementById('walletAddr').textContent = savedWallet;
+    document.getElementById('walletDropdownAddr').textContent = savedWallet;
+    document.getElementById('walletBar').classList.add('show');
+    updateNetPill(chainHex);
+
+    const _overlay = document.getElementById('landingOverlay');
+    _overlay.classList.add('hidden');
+    setTimeout(() => { _overlay.style.display = 'none'; }, 500);
+    document.querySelector('.tabs').classList.add('visible');
+    document.querySelector('main').classList.add('visible');
 
     if (contractAddress) await initContract();
 
@@ -718,6 +735,9 @@ window.addEventListener('load', async () => {
     registerEthereumListeners(eth);
   } catch(e) {
     console.warn('Background wallet verify failed:', e.message);
+    // On any failure, never leave the dashboard up for an unconnected wallet.
+    App.walletAddress = null;
+    App.signer = null;
   }
 });
 
@@ -775,6 +795,41 @@ function closeMobileNav() {
 function mobileNavSwitch(name) {
   if (window.innerWidth <= 768) closeMobileNav();
   switchTabByName(name);
+}
+
+// Return the UI to the landing/connect screen without the full logout side effects
+// of disconnectWallet (no "logged out" flag, keeps the remembered wallet so the user
+// can reconnect in one click). Used when a session can't be honoured on this app —
+// e.g. the wallet left Polygon mainnet — so the dashboard is never shown while the
+// app is on an unsupported network.
+function _revertToLanding(msg, type) {
+  _stopChainListeners();
+  App.walletAddress  = null;
+  App.signer         = null;
+  App.contract       = null;
+  App.provider       = null;
+  App.walletProvider = null;
+
+  const btn = document.getElementById('connectBtn');
+  btn.textContent = 'CONNECT WALLET';
+  btn.classList.remove('connected');
+
+  document.getElementById('walletBar').classList.remove('show');
+  document.getElementById('walletDropdown').classList.remove('open');
+  document.getElementById('ownerTab').style.display = 'none';
+  document.getElementById('mobileOwnerTab').style.display = 'none';
+  _resetTabLoaded();
+
+  document.getElementById('landingConnectScreen').style.display = 'block';
+  document.getElementById('landingNewUserScreen').style.display = 'none';
+  const overlay = document.getElementById('landingOverlay');
+  overlay.style.display = 'flex';
+  setTimeout(() => overlay.classList.remove('hidden'), 10);
+
+  document.querySelector('.tabs').classList.remove('visible');
+  document.querySelector('main').classList.remove('visible');
+
+  if (msg) toast(msg, type || 'error');
 }
 
 function disconnectWallet() {
@@ -881,10 +936,10 @@ async function _onLoginCheckInvestments() {
     } else if (locked.length > 0) {
       const soonest  = locked.reduce((mn, l) => Math.min(mn, Number(l.unlockTime)), Infinity);
       const secsLeft = Math.max(0, soonest - effectiveNow);
-      const m = Math.floor(secsLeft / 60), s = secsLeft % 60;
+      const days = Math.max(1, Math.ceil(secsLeft / LP_DAY_SCALE));
       toast(
         `${locked.length} active LP lock${locked.length > 1 ? 's' : ''}. ` +
-        `Next unlock in ${m > 0 ? m + 'm ' : ''}${s}s.`,
+        `Next unlock in ${days} day${days > 1 ? 's' : ''}.`,
         'info'
       );
     }
@@ -964,7 +1019,7 @@ async function registerNewUser() {
     const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
     const usdtAbi  = ['function approve(address spender, uint256 amount) external returns (bool)'];
     const usdtToken = new ethers.Contract(usdtAddr, usdtAbi, App.signer);
-    const regFee    = ethers.utils.parseEther('1'); // 1 USDT legitimacy check fee
+    const regFee    = parseUSDT('1'); // 1 USDT legitimacy check fee (USDT_ONE = 1e6)
     btn.textContent = 'Approving 1 USDT...';
     const approveTx = await usdtToken.approve(CONTRACT_ADDRESS, regFee, _GAS);
     btn.textContent = 'Waiting for approval...';
@@ -1193,7 +1248,7 @@ function _prefetchAllTabs() {
   // History — defer furthest to avoid RPC contention
   setTimeout(() => {
     if (!ok() || _tabLoaded.has('history')) return;
-    if (window.switchHistoryTab) window.switchHistoryTab('invest');
+    if (window.switchHistoryTab) window.switchHistoryTab('rewards');
   }, 13000);
 }
 
@@ -1261,7 +1316,7 @@ function _startChainListeners() {
     contract.on(contract.filters.CommissionPaid(addr),
       (_recipient, _from, amount, level, ev) => {
         try {
-          const eth  = parseFloat(ethers.utils.formatEther(amount));
+          const eth  = usdtToFloat(amount);
           const usdt = ethToUSDT(eth);
           toast(`+${usdt.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT commission · L${Number(level)}`, 'success');
         } catch (_) {}

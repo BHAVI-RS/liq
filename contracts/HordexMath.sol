@@ -15,13 +15,12 @@ interface IUniV2FactoryMin {
 }
 
 library HordexMath {
-    uint256 private constant USDT_PER_ETH    = 1;
-    // LP_LOCK_DURATION comes from HordexTypes.sol (shared SECONDS_PER_DAY switch).
+    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
 
     function getTierIndex(uint32[12] memory tiers, uint256 ethInvestedWei)
         public pure returns (uint256 best)
     {
-        uint256 usdtAmt  = ethInvestedWei * USDT_PER_ETH / 1e18;
+        uint256 usdtAmt  = ethInvestedWei / USDT_ONE;
         uint256 t0       = tiers[0];
         uint256 bestDiff = usdtAmt >= t0 ? usdtAmt - t0 : t0 - usdtAmt;
         for (uint256 i = 1; i < 12; ) {

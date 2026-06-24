@@ -1,11 +1,12 @@
-// Deploy the Hordex Hordex contracts to Polygon mainnet, then write the deployed
-// addresses into contract-config.js (root + frontend). Deploy-only — it does NOT seed
-// the pool, register the token, warm up TWAP, fund wallets, or invest. Those are
-// separate, owner-driven steps you run afterwards.
+// Deploy the Hordex contracts to Polygon mainnet, write the deployed addresses into
+// contract-config.js (root + frontend), then set up the token + pool and warm up the
+// TWAP (PHASES 3-4, ported from scripts/amoytestnet/amoytree.js). It does NOT fund
+// sub-wallets, register a referral chain, or invest — those remain manual/owner steps.
 //
 // Pre-deployed inputs (already live on Polygon mainnet — NOT deployed here):
 //   • Platform token : 0xCD575ebAEb4f5DC4E84CA324D936C37e8538cFBf
-//   • USDT           : 0x03bE0af806A80FBF368526266aD789254A956c24  (pool base token)
+//   • USDT           : 0x1606E781D32C591Ea45841133D384eEcdF2c52C7  (TestUSDT, 6 decimals — pool base token, for mainnet testing)
+//                      (canonical Polygon USDT is 0xc2132D05D31c914a87C6611C10748AEb04B58e8F — swap back for real launch)
 //   • Uniswap V2      : official Polygon factory + router02 (see below)
 //
 // What it deploys:
@@ -15,17 +16,22 @@
 //   4. HordexROIFacet
 //   5. Hordex              (main contract, linked to HordexMath)
 //   6. HordexViewFacet     (linked + wired via setViewFacet)
-//   …then rewrites contract-config.js (root + frontend) and bumps the HTML cache-bust.
+//   …then rewrites contract-config.js (root + frontend) and bumps the HTML cache-bust,
+//   then PHASE 3 (transfer HDX inventory → addToken → seedPool) and PHASE 4 (warm TWAP).
 //
 // USAGE:
 //   npx hardhat run scripts/polygon/mdeploy.js --network polygon
 //
 // REQUIREMENTS:
 //   • PRIVATE_KEY in .env  (64 hex chars, the deployer / contract owner)
-//   • Deployer holds enough POL for gas (a few POL is plenty for deploy-only)
-//   • Optional fee tuning if you hit "transaction underpriced":
+//   • Deployer holds enough POL for gas (a few POL is plenty)
+//   • Deployer holds the HDX inventory (default 10,000,000 HDX) + the seed USDT
+//     (default 1 USDT) — both are sent to the contract during PHASE 3
+//   • Optional overrides:
+//       HDX_INVENTORY=10000000   SEED_HDX=1   SEED_USDT=1   (human units)
+//       TWAP_WAIT_SECS=930       (must exceed TWAP_PERIOD; 900s/15min in prod config)
 //       POLYGON_MAX_FEE_GWEI=200  POLYGON_PRIORITY_GWEI=40
-//     (left unset → fees are auto-estimated from the network)
+//     (left unset → defaults applied; fees auto-estimated from the network)
 
 const hre  = require("hardhat");
 const fs   = require("fs");
@@ -38,7 +44,26 @@ const UNI_FACTORY  = "0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C";
 
 // ── Pre-deployed tokens on Polygon mainnet ─────────────────────────────────────
 const PLATFORM_TOKEN = "0xCD575ebAEb4f5DC4E84CA324D936C37e8538cFBf";
-const USDT           = "0x03bE0af806A80FBF368526266aD789254A956c24"; // pool base token ("_weth")
+const USDT           = "0x1606E781D32C591Ea45841133D384eEcdF2c52C7"; // TestUSDT, 6 decimals (pool base token "_weth") — mainnet testing
+                                                                     // real Polygon USDT: 0xc2132D05D31c914a87C6611C10748AEb04B58e8F (swap back for real launch)
+
+// ── PHASE 3 token-setup amounts (human units; token decimals queried on-chain) ─
+// Sent to the Hordex contract, then seedPool() establishes the starting price.
+//   inventory = HDX moved into the contract (rewards + swap inventory + LP supply)
+//   seed      = SEED_HDX : SEED_USDT  →  starting price (1 : 1 = 1 USDT per HDX)
+const HDX_INVENTORY_STR = process.env.HDX_INVENTORY || "10000000"; // 10 M HDX
+const SEED_HDX_STR      = process.env.SEED_HDX      || "1";        // 1 HDX
+const SEED_USDT_STR     = process.env.SEED_USDT     || "1";        // 1 USDT
+// TWAP warm-up: the 2nd observation must land > TWAP_PERIOD after the 1st. Production
+// TWAP_PERIOD = 15 min (900 s); if you flipped to testing config (30 s) set this to 31.
+const TWAP_WAIT_SECS    = Number(process.env.TWAP_WAIT_SECS || 930);
+
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+  "function transfer(address,uint256) returns (bool)",
+  "function approve(address,uint256) returns (bool)",
+];
 
 // ── Gas overrides ──────────────────────────────────────────────────────────────
 // Fee fields are omitted by default so ethers auto-estimates EIP-1559 fees from the
@@ -79,6 +104,22 @@ async function mine(txFn, maxRetries = 6) {
   throw new Error("mine(): exceeded retries");
 }
 
+// Block until the chain clock has advanced TWAP_WAIT_SECS past the first observation,
+// so the second updateTWAP() records a distinct observation spaced past TWAP_PERIOD.
+async function waitForTwap(provider, firstTimestamp) {
+  const target = firstTimestamp + TWAP_WAIT_SECS;
+  while (true) {
+    try {
+      const block = await provider.getBlock("latest");
+      if (block.timestamp >= target) break;
+      const rem = target - block.timestamp;
+      process.stdout.write(`\r  TWAP warm-up: ${String(Math.floor(rem / 60)).padStart(2, "0")}:${String(rem % 60).padStart(2, "0")} remaining…`);
+    } catch (_) {}
+    await sleep(2000);
+  }
+  process.stdout.write("\r  TWAP warm-up: complete!                             \n");
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   // Safety: this script is mainnet-only — refuse to run anywhere else.
@@ -111,6 +152,26 @@ async function main() {
   console.log(`  POL balance : ${hre.ethers.formatEther(bal)} POL`);
   if (bal < hre.ethers.parseEther("1")) {
     console.error("❌  deployer needs ≥ 1 POL for gas"); process.exit(1);
+  }
+
+  // ── Token handles + decimal-aware amounts + balance checks (fail fast) ──────
+  const hdxCt  = new hre.ethers.Contract(PLATFORM_TOKEN, ERC20_ABI, deployer);
+  const usdtCt = new hre.ethers.Contract(USDT, ERC20_ABI, deployer);
+  const hdxDec  = Number(await hdxCt.decimals());
+  const usdtDec = Number(await usdtCt.decimals());
+  const HDX_TO_LIQUIDITY = hre.ethers.parseUnits(HDX_INVENTORY_STR, hdxDec);
+  const SEED_TOKENS      = hre.ethers.parseUnits(SEED_HDX_STR, hdxDec);
+  const SEED_USDT        = hre.ethers.parseUnits(SEED_USDT_STR, usdtDec);
+
+  const hdxBal  = await hdxCt.balanceOf(deployer.address);
+  const usdtBal = await usdtCt.balanceOf(deployer.address);
+  console.log(`  HDX  balance: ${hre.ethers.formatUnits(hdxBal, hdxDec)} HDX  (need ${HDX_INVENTORY_STR}, ${hdxDec}-dec)`);
+  console.log(`  USDT balance: ${hre.ethers.formatUnits(usdtBal, usdtDec)} USDT (need ${SEED_USDT_STR}, ${usdtDec}-dec)`);
+  if (hdxBal < HDX_TO_LIQUIDITY) {
+    console.error(`❌  deployer needs ≥ ${HDX_INVENTORY_STR} HDX for the contract inventory`); process.exit(1);
+  }
+  if (usdtBal < SEED_USDT) {
+    console.error(`❌  deployer needs ≥ ${SEED_USDT_STR} USDT for the pool seed`); process.exit(1);
   }
 
   // ── PHASE 1: Deploy contracts ──────────────────────────────────────────────
@@ -210,17 +271,88 @@ const CONTRACT_ABI = ${JSON.stringify(mergedAbi, null, 2)};
     }
   }
 
+  // ── PHASE 3: Token setup (transfer HDX inventory → addToken → seedPool) ──────
+  console.log("\n" + sep()); console.log("  PHASE 3 — TOKEN SETUP"); console.log(sep());
+
+  // Move HDX inventory into the contract (rewards + swap inventory + LP supply side).
+  await mine(() => hdxCt.transfer(liquidityAddress, HDX_TO_LIQUIDITY, TX_OVERRIDES));
+  console.log(`  ${HDX_INVENTORY_STR} HDX → Hordex ✓`);
+
+  // Register HDX as a tradable token.
+  await mine(() => liq.addToken(PLATFORM_TOKEN, "Hordex Token", "HDX", TX_OVERRIDES));
+  console.log(`  HDX token registered ✓`);
+
+  // Drain any LP the deployer holds in a pre-existing HDX/USDT pair so the seed below
+  // establishes a clean price (the Uniswap pair persists independently of this contract;
+  // on a first-ever deploy there is no pair and this is a no-op).
+  {
+    const _factoryCt = new hre.ethers.Contract(
+      UNI_FACTORY,
+      ["function getPair(address,address) view returns (address)"],
+      deployer
+    );
+    const _pairAddr = await _factoryCt.getPair(PLATFORM_TOKEN, USDT);
+    if (_pairAddr !== hre.ethers.ZeroAddress) {
+      const _pairCt = new hre.ethers.Contract(
+        _pairAddr,
+        ["function balanceOf(address) view returns (uint256)",
+         "function approve(address,uint256) returns (bool)"],
+        deployer
+      );
+      const _lpBal = await _pairCt.balanceOf(deployer.address);
+      if (_lpBal > 0n) {
+        console.log(`  Existing pair found — draining deployer LP (${hre.ethers.formatEther(_lpBal)} LP)…`);
+        await mine(() => _pairCt.approve(UNI_ROUTER, _lpBal, TX_OVERRIDES));
+        const _routerCt = new hre.ethers.Contract(
+          UNI_ROUTER,
+          ["function removeLiquidity(address,address,uint256,uint256,uint256,address,uint256) returns (uint256,uint256)"],
+          deployer
+        );
+        await mine(() => _routerCt.removeLiquidity(
+          PLATFORM_TOKEN, USDT, _lpBal, 0, 0,
+          deployer.address,
+          BigInt(Math.floor(Date.now() / 1000) + 300),
+          TX_OVERRIDES
+        ));
+        console.log(`  Existing LP drained → pair reset ✓`);
+      } else {
+        console.log(`  Pair exists but deployer holds no LP — skipping drain`);
+      }
+    } else {
+      console.log(`  No existing pair — fresh creation`);
+    }
+  }
+
+  // Move the seed USDT into the contract, then seed the pool to set the starting price.
+  await mine(() => usdtCt.transfer(liquidityAddress, SEED_USDT, TX_OVERRIDES));
+  console.log(`  ${SEED_USDT_STR} USDT → Hordex ✓`);
+  await mine(() => liq.seedPool(PLATFORM_TOKEN, SEED_TOKENS, SEED_USDT, TX_OVERRIDES));
+  console.log(`  Pool seeded: ${SEED_HDX_STR} HDX + ${SEED_USDT_STR} USDT  →  1 HDX = ${Number(SEED_USDT_STR) / Number(SEED_HDX_STR)} USDT ✓`);
+
+  // ── PHASE 4: TWAP warm-up (2 observations spaced > TWAP_PERIOD apart) ────────
+  console.log("\n" + sep()); console.log("  PHASE 4 — TWAP WARM-UP"); console.log(sep());
+  const obs0Receipt = await mine(() => liq.updateTWAP(TX_OVERRIDES));
+  await mine(() => liq.updateTokenTWAP(PLATFORM_TOKEN, TX_OVERRIDES));
+  const obs0Block   = await provider.getBlock(obs0Receipt.blockNumber);
+  console.log(`  Observation 0  (block ${obs0Receipt.blockNumber}) ✓`);
+  console.log(`  Waiting ${TWAP_WAIT_SECS}s for the second observation…`);
+  await waitForTwap(provider, obs0Block.timestamp);
+  await mine(() => liq.updateTWAP(TX_OVERRIDES));
+  await mine(() => liq.updateTokenTWAP(PLATFORM_TOKEN, TX_OVERRIDES));
+  console.log("  Observation 1 ✓  —  TWAP ready");
+
   // ── Done ───────────────────────────────────────────────────────────────────
   console.log("\n" + sep("═"));
-  console.log("  DONE — contracts deployed & config updated");
+  console.log("  DONE — deployed · config updated · token set up · pool seeded · TWAP warm");
   console.log(sep("═"));
   console.log(`  Hordex         : ${liquidityAddress}`);
   console.log(`  HordexFacet    : ${facetAddress}`);
   console.log(`  HordexROIFacet : ${roiFacetAddress}`);
   console.log(`  HordexViewFacet: ${viewFacetAddress}`);
-  console.log(`  Deploy block      : ${deployBlock}`);
-  console.log("\n  NOTE: deploy-only. Next (owner) steps, when ready: fund the contract with");
-  console.log("        platform tokens, addToken(), seedPool(), then warm up TWAP (2× updateTWAP).");
+  console.log(`  Deploy block   : ${deployBlock}`);
+  console.log(`  Pool / TWAP    : seeded @ ${Number(SEED_USDT_STR) / Number(SEED_HDX_STR)} USDT/HDX · TWAP ready`);
+  console.log("\n  NOTE: contract is live and tradeable. Remaining steps are yours: top up extra");
+  console.log("        reward inventory if desired, then users approve USDT → register → invest.");
   console.log(sep("═") + "\n");
 }
 

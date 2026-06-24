@@ -69,7 +69,7 @@ async function deployBase() {
 describe("Security probes", function () {
   this.timeout(300000);
 
-  it("owner withdrawToken(pair) can drain user-custodied LP — 'untouchable' invariant NOT enforced", async () => {
+  it("owner withdrawToken(pair) CANNOT drain user-custodied LP — 'untouchable' invariant enforced", async () => {
     const { owner, u1, liq, usdt, hordexAddr, coreAddr, factoryAddr, usdtAddr } = await deployBase();
 
     // u1 invests → LP is custodied in the contract (unclaimed).
@@ -82,26 +82,30 @@ describe("Security probes", function () {
     const custodyBefore = await pairCt.balanceOf(coreAddr);
     assert(custodyBefore > 0n, "contract should hold u1's LP in custody");
 
-    // Owner drains the LP token via the generic withdrawToken.
+    // Owner attempts to drain the LP via the generic withdrawToken. The carve-out (_totalLockedLP)
+    // leaves zero FREE balance, so the call reverts (NoTokensToWithdraw) instead of taking user LP.
     const ownerLpBefore = await pairCt.balanceOf(owner.address);
-    await (await liq.withdrawToken(pair, 0)).wait();
+    let drainReverted = false;
+    try { await (await liq.withdrawToken(pair, 0)).wait(); }
+    catch (_) { drainReverted = true; }
     const ownerLpAfter = await pairCt.balanceOf(owner.address);
     const custodyAfter = await pairCt.balanceOf(coreAddr);
 
     console.log(`      contract LP custody: ${custodyBefore} -> ${custodyAfter}`);
-    console.log(`      owner LP balance: +${ownerLpAfter - ownerLpBefore}`);
-    assert(custodyAfter < custodyBefore, "owner was able to remove custodied LP");
-    assert(ownerLpAfter - ownerLpBefore >= custodyBefore, "owner received the user's LP");
+    console.log(`      owner LP gained: ${ownerLpAfter - ownerLpBefore}  (drain reverted=${drainReverted})`);
+    assert(drainReverted, "owner withdrawToken(pair) must revert — user LP is carved out by _totalLockedLP");
+    assert(custodyAfter === custodyBefore, "user-custodied LP must be untouched");
+    assert(ownerLpAfter === ownerLpBefore, "owner must receive none of the user's LP");
 
-    // Now u1's exit is bricked: contract no longer holds the LP to return.
+    // u1's exit still works: the contract still holds the LP to return.
     await increaseTime(600);
     await (await liq.updateTWAP()).wait();
     await (await liq.updateTokenTWAP(hordexAddr)).wait();
     let removeReverted = false;
     try { await (await liq.connect(u1).removeLPDirect(0)).wait(); }
     catch (_) { removeReverted = true; }
-    console.log(`      u1 removeLPDirect after owner drain reverted=${removeReverted}`);
-    assert(removeReverted, "u1 can no longer recover their LP after owner drained it");
+    console.log(`      u1 removeLPDirect after owner drain attempt reverted=${removeReverted}`);
+    assert(!removeReverted, "u1 can still recover their LP — owner could not drain it");
   });
 
   it("non-owner cannot call admin/withdraw functions", async () => {

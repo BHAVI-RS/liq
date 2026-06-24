@@ -1,7 +1,23 @@
 // ── USDT DISPLAY SYSTEM ──
-// Investments are denominated directly in USDT (18-decimal ERC-20).
-// USDT_PER_ETH = 1 means: 1 unit of base currency = 1 USDT.
+// Investments are denominated directly in USDT.
+// USDT_PER_ETH = 1 means: 1 unit of base currency = 1 USDT (a $-value multiplier, NOT decimals).
 const USDT_PER_ETH = 1;
+
+// ── USDT (base token) decimals ──
+// Polygon USDT (0xc2132D05D31c914a87C6611C10748AEb04B58e8F) has 6 DECIMALS. Every base-token /
+// USDT amount on-chain — ethInvested, commissions, ROI & staking ETH-equivalent, reserve, package
+// amounts, the registration fee — is in these units, so USDT amounts must be parsed/formatted at 6
+// decimals, NOT 18. MUST equal 10**decimals of the deployed base token (= HordexTypes.USDT_ONE).
+// HDX (platform token) and LP amounts stay 18-decimal and keep using parseEther/formatEther; the
+// TWAP price is base-units * 1e18 / token-units, so a raw price is converted to human USDT/token
+// with formatUnits(price, USDT_DECIMALS). If you switch to an 18-decimal base token, set this to 18.
+const USDT_DECIMALS = 6;
+// human USDT amount (string|number) → base-unit BigNumber (for approve / invest / transfer)
+function parseUSDT(amount) { return ethers.utils.parseUnits(String(amount), USDT_DECIMALS); }
+// base-unit USDT BigNumber → human float (for display / math)
+function usdtToFloat(weiBN) { return parseFloat(ethers.utils.formatUnits(weiBN, USDT_DECIMALS)); }
+// base-unit USDT BigNumber → human string (full precision)
+function usdtToStr(weiBN)   { return ethers.utils.formatUnits(weiBN, USDT_DECIMALS); }
 
 // ── Time scaling ──
 // Seconds per "day" — MUST match SECONDS_PER_DAY in contracts/HordexTypes.sol.
@@ -9,7 +25,7 @@ const USDT_PER_ETH = 1;
 //   PRODUCTION = 86400  (real calendar days)
 // Only used to convert a lock's on-chain second-span back into whole days (e.g. the
 // restake streak preview). Change this together with the contract's SECONDS_PER_DAY.
-const LP_DAY_SCALE = 6;
+const LP_DAY_SCALE = 86400;
 
 function ethToUSDT(usdtFloat) {
   return usdtFloat * USDT_PER_ETH;
@@ -46,8 +62,15 @@ function saveMeta(addr, meta) {
   localStorage.setItem(TOKEN_META_KEY, JSON.stringify(all));
 }
 
+// Bundled logo for the Hordex platform token — always use the local mark.
+const HORDEX_TOKEN_LOGO = 'logo/hordex-mark.png';
+
 function getMeta(addr) {
-  return getAllMeta()[addr.toLowerCase()] || {};
+  const meta = getAllMeta()[addr.toLowerCase()] || {};
+  if (typeof TOKEN_ADDRESS === 'string' && addr.toLowerCase() === TOKEN_ADDRESS.toLowerCase()) {
+    return { ...meta, logo: HORDEX_TOKEN_LOGO };
+  }
+  return meta;
 }
 
 // ── POLYGON GAS OVERRIDES ──

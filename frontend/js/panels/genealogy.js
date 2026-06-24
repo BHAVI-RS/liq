@@ -37,7 +37,7 @@ async function fetchGeneTree(addr, depth) {
   const objs = nodes.map(n => ({
     addr:     n.addr,
     children: [],
-    _inv:     parseFloat(ethers.utils.formatEther(n.totalInvested)),
+    _inv:     usdtToFloat(n.totalInvested),
   }));
   for (let i = 1; i < nodes.length; i++) {
     const p = Number(nodes[i].parent);
@@ -278,12 +278,17 @@ async function loadGenealogy() {
     const teamBizUSDT    = eligRaw ? Number(eligRaw.teamBusinessUSDT ?? eligRaw[1]) : 0;
     const roiUnlocked    = eligRaw ? Number(eligRaw.unlockedLevels   ?? eligRaw[2]) : 0;
     const selfGates = gatesRaw ? Array.from(gatesRaw.selfGates ?? gatesRaw[0]).map(Number) : [];
-    const _gate          = (lvl) => selfGates[lvl - 1] ?? 0;
-    const refGate        = selfGates[0] ?? 25;                 // flat referral gate ($25)
+    // Canonical self-stake gate schedule (matches the contract constructor). Used as a
+    // fallback so eligibility is never falsely "unlocked": if the on-chain gate value is
+    // missing or zero, defaulting it to 0 would make `selfStake >= 0` always true and show
+    // every level as unlocked. Falling back to the real threshold keeps gating correct.
+    const DEFAULT_SELF_GATES = [25, 50, 100, 250, 500, 1000, 2500, 5000, 5000, 5000];
+    const _gate          = (lvl) => { const g = Number(selfGates[lvl - 1]); return g > 0 ? g : (DEFAULT_SELF_GATES[lvl - 1] ?? 0); };
+    const refGate        = (() => { const g = Number(selfGates[0]); return g > 0 ? g : 25; })(); // flat referral gate ($25)
     const refUnlockedAll = selfStakeUSDT >= refGate;           // referral: all 10 levels or none
     const refUnlocked    = refUnlockedAll ? 10 : 0;
     const _roiElig       = (lvl) => selfStakeUSDT >= _gate(lvl); // ROI per-level
-    const minInvETH   = parseFloat(ethers.utils.formatEther(minInvRaw));
+    const minInvETH   = usdtToFloat(minInvRaw);
 
     // Investment amounts now arrive with the downline (node._inv) — no per-node RPC calls.
     const allAddrs = _geneCollectAddrs(treeData);
@@ -330,7 +335,7 @@ async function loadGenealogy() {
         lines.push(`+$${fmtNum(Math.max(0, refGate - selfStakeUSDT))} self-stake to unlock <strong style="color:var(--gold);">all 10 referral levels</strong>`);
       }
       if (roiUnlocked >= 10) {
-        lines.push(`<span style="color:#4ade80;">All 10 ROI levels unlocked ✓${refUnlockedAll ? ' · referral fully unlocked ✓' : ''}</span>`);
+        // (no message when all ROI levels are unlocked)
       } else {
         const need = Math.max(0, _gate(roiUnlocked + 1) - selfStakeUSDT);
         lines.push(need > 0
@@ -350,14 +355,6 @@ async function loadGenealogy() {
           <div>
             <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">ROI LEVELS <span style="opacity:0.6;">· per level</span></div>
             <div style="font-family:var(--font-display);font-size:20px;color:var(--gold);">${roiUnlocked} <span style="font-size:12px;color:var(--muted);">/ 10</span></div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">ACTIVE SELF-STAKE</div>
-            <div style="font-family:var(--font-mono);font-size:13px;color:var(--cream);">$${fmtNum(selfStakeUSDT)}</div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px;">TEAM BUSINESS</div>
-            <div style="font-family:var(--font-mono);font-size:13px;color:#4ade80;">$${fmtNum(teamBizUSDT)}</div>
           </div>
         </div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);font-family:var(--font-mono);line-height:1.7;">${nextLine}</div>`;
