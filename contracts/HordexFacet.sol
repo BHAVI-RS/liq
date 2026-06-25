@@ -4,6 +4,18 @@ pragma solidity ^0.8.0;
 import "./HordexStorage.sol";
 import "./HordexMath.sol";
 
+/**
+ * @title  HordexFacet — Investment & Liquidity Engine
+ * @notice Powers investing, staking rewards, and liquidity management for Hordex.
+ *         https://hordex.club
+ *
+ * @dev This module executes within the core platform's shared state and implements the
+ *      participant-facing money flows: investing a stablecoin package, providing liquidity to
+ *      the HDX/USDT pool, accruing and claiming staking rewards, restaking to compound, and
+ *      unlocking liquidity when a position matures. Reward values are derived from an on-chain
+ *      time-weighted average price with sensible slippage and price-deviation safeguards, so
+ *      every payout is fair, predictable, and resistant to short-term price swings.
+ */
 interface IERC20F {
     function balanceOf(address) external view returns (uint256);
     function transfer(address, uint256) external returns (bool);
@@ -24,9 +36,6 @@ interface IPairF {
     function totalSupply() external view returns (uint256);
 }
 
-// DELEGATECALL facet — executes in Hordex.sol's storage context.
-// Immutables embedded here are accessible via delegatecall (they live in this contract's bytecode).
-// All events emitted here appear from Hordex.sol's address (delegatecall context).
 contract HordexFacet is HordexStorage {
 
     address private immutable UNISWAP_ROUTER;
@@ -36,13 +45,11 @@ contract HordexFacet is HordexStorage {
     address private immutable _self;
     address private immutable _deployer;
 
-    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
     uint256 private constant TWAP_PERIOD       = 15 minutes;
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
     uint256 private constant MAX_SLIPPAGE_BPS  = 200;
     uint256 private constant TWAP_GUARD_BPS    = 500;
 
-    // Errors (must match Hordex.sol exactly so revert data is correct)
     error NotDelegatecall();
     error NotDirectCall();
     error NoETHToWithdraw();
@@ -82,9 +89,9 @@ contract HordexFacet is HordexStorage {
     error TokenTWAPStale();
 
     event CommissionPaid(address indexed recipient, address indexed from, uint256 amount, uint256 level);
-    // reason: 0=level-ineligible, 1=no-cap (expired/no lock/wrong token), 2=cap-overflow (partial)
+
     event CommissionMissed(address indexed naturalRecipient, address indexed from, uint256 amount, uint256 level, uint8 reason);
-    // Over-1× commission HELD in reserve (net of 5% cut) until the triggering downline lock unlocks.
+
     event CommissionReserved(address indexed recipient, address indexed from, uint256 amount, uint256 level, uint64 unlockTime);
     event Invested(address indexed user, address indexed token, uint256 ethAmount, uint256 lpTokens);
     event LPRemoved(address indexed user, address indexed token, uint256 lpAmount, uint256 ethReturned, uint256 tokensReturned);
@@ -101,14 +108,10 @@ contract HordexFacet is HordexStorage {
         _deployer       = msg.sender;
     }
 
-    // In delegatecall context address(this) == Hordex.sol != _self → passes.
-    // In a direct call address(this) == this facet == _self → reverts.
     modifier onlyDelegatecall() {
         if (address(this) == _self) revert NotDelegatecall();
         _;
     }
-
-    // ── TWAP ─────────────────────────────────────────────────────────────────
 
     function updateTokenTWAPExt(address _token) external payable onlyDelegatecall {
         _updateTokenTWAP(_token);
@@ -164,8 +167,6 @@ contract HordexFacet is HordexStorage {
         return _tokenTwapPrice[platformToken];
     }
 
-    // ── Commissions ───────────────────────────────────────────────────────────
-
     function distributeCommissionsExt(address _from, uint256 _amount) external payable onlyDelegatecall {
         _distributeReferralCommissions(_from, _amount);
     }
@@ -176,12 +177,12 @@ contract HordexFacet is HordexStorage {
             uint256 deployerCut = amount * 5 / 100;
             toRecipient = amount - deployerCut;
             if (deployerCut > 0) {
-                if (!IERC20F(WETH).transfer(owner, deployerCut)) revert CommissionTransferFailed();
+                if (!_safeTransfer(WETH, owner, deployerCut)) revert CommissionTransferFailed();
             }
         }
-        bool success = IERC20F(WETH).transfer(recipient, toRecipient);
+        bool success = _safeTransfer(WETH, recipient, toRecipient);
         if (!success) {
-            if (!IERC20F(WETH).transfer(owner, toRecipient)) revert CommissionTransferFailed();
+            if (!_safeTransfer(WETH, owner, toRecipient)) revert CommissionTransferFailed();
         } else {
             userCommissionsEarned[recipient] += toRecipient;
             _commissionRecords[recipient].push(CommissionRecord({
@@ -194,15 +195,11 @@ contract HordexFacet is HordexStorage {
         emit CommissionPaid(recipient, from, toRecipient, level);
     }
 
-    // Holds `amount` of an eligible recipient's commission in reserve instead of paying it now.
-    // Takes the same 5% deployer cut as _payCommission, then stores the net as a tranche unlocking
-    // at `unlockTime` (the triggering downline lock's unlockTime). The 5× cap has ALREADY been
-    // charged by the caller for this amount, so no cap change here.
     function _reserveCommission(address recipient, address from, uint256 amount, uint256 level, uint64 unlockTime) internal {
         uint256 deployerCut = amount * 5 / 100;
         uint256 toReserve   = amount - deployerCut;
         if (deployerCut > 0) {
-            if (!IERC20F(WETH).transfer(owner, deployerCut)) revert CommissionTransferFailed();
+            if (!_safeTransfer(WETH, owner, deployerCut)) revert CommissionTransferFailed();
         }
         if (toReserve > 0) {
             _pushReserveTranche(recipient, toReserve, unlockTime);
@@ -211,7 +208,7 @@ contract HordexFacet is HordexStorage {
     }
 
     function _distributeReferralCommissions(address _from, uint256 _amount) internal {
-        // Pre-build the 10-hop ancestor chain so that level i pays the fixed depth-(i+1) referrer.
+
         address[10] memory chain;
         {
             address c = users[_from].referrer;
@@ -223,9 +220,6 @@ contract HordexFacet is HordexStorage {
             }
         }
 
-        // Unlock time for any reserve created by this distribution = the TRIGGERING downline lock's
-        // unlockTime (its 90-day window). investExt has already appended this lock, so it is _from's
-        // last lock. Guarded for the (unreachable from invest) empty-lock case.
         uint64 trancheUnlock;
         {
             LPLock[] storage fl = userLPLocks[_from];
@@ -234,14 +228,6 @@ contract HordexFacet is HordexStorage {
                 : uint64(block.timestamp + LP_LOCK_DURATION);
         }
 
-        // Each level's commission is paid ONLY to the natural ancestor at that exact depth, and only
-        // to the extent that ancestor is (a) registered, (b) self-stake eligible for the level, and
-        // (c) within their 5× commission cap. The eligible, within-cap amount is split per event:
-        // the first 0.5× of the ancestor's active self-stake is paid to their WALLET immediately; the
-        // band above 0.5× (up to 5×) is HELD in their RESERVE (see _reserveCommission). Anything above
-        // the 5× cap — plus empty-slot / ineligible levels — is routed to the DEPLOYER (owner). The
-        // natural recipient's over-5× shortfall is still recorded as a missed commission for display
-        // (reason 0/1/2). Owner is the catch-all sink and is uncapped.
         for (uint256 i = 0; i < 10; ) {
             uint256 toDistribute = (_amount * referralCommissionRates[i]) / 10000;
             if (toDistribute == 0) { unchecked { i++; } continue; }
@@ -250,17 +236,16 @@ contract HordexFacet is HordexStorage {
             uint256 paidToNatural = 0;
 
             if (naturalRecipient == owner) {
-                // Owner sits at this depth: it absorbs the whole level directly (uncapped, not "missed").
+
                 _payCommission(owner, _from, toDistribute, i + 1);
                 paidToNatural = toDistribute;
             } else if (naturalRecipient != address(0) && users[naturalRecipient].isRegistered &&
                        _eligibleForReferralLevel(naturalRecipient, uint8(i))) {
-                uint256 cap   = _getCommissionCap(naturalRecipient); // committed 5× cap (O(locks))
+                uint256 cap   = _getCommissionCap(naturalRecipient);
                 uint256 toPay = toDistribute < cap ? toDistribute : cap;
                 if (toPay > 0) {
-                    _chargeCap(naturalRecipient, toPay);            // charge the whole within-5× amount
-                    // Per-event wallet cap = HALF the recipient's CURRENT active self-stake (WETH wei).
-                    // Up to 0.5× is paid to wallet now; the over-0.5× remainder (still within 5×) is held.
+                    _chargeCap(naturalRecipient, toPay);
+
                     uint256 walletCap     = _activeSelfStakeWei(naturalRecipient) / 2;
                     uint256 walletPortion = toPay < walletCap ? toPay : walletCap;
                     if (walletPortion > 0) {
@@ -270,18 +255,15 @@ contract HordexFacet is HordexStorage {
                     if (reservePortion > 0) {
                         _reserveCommission(naturalRecipient, _from, reservePortion, i + 1, trancheUnlock);
                     }
-                    paidToNatural = toPay;   // wallet + reserve are both "delivered" (not missed)
+                    paidToNatural = toPay;
                 }
             }
 
-            // Everything the natural ancestor did not take goes to the deployer (owner) wallet.
             uint256 toOwner = toDistribute - paidToNatural;
             if (toOwner > 0) {
                 _payCommission(owner, _from, toOwner, i + 1);
             }
 
-            // Missed accounting for a registered NON-OWNER natural recipient that took less than its
-            // full level. reason 2 = partial cap-overflow, 0 = level-ineligible, 1 = no cap.
             if (naturalRecipient != address(0) && users[naturalRecipient].isRegistered &&
                     naturalRecipient != owner && paidToNatural < toDistribute) {
                 uint256 missedAmt = toDistribute - paidToNatural;
@@ -304,11 +286,6 @@ contract HordexFacet is HordexStorage {
         }
     }
 
-    // ── Staking reward ────────────────────────────────────────────────────────
-
-    // Attribute claimed staking tokens to a lock's CURRENT (latest) period so the
-    // Lock History modal shows the exact per-period claimed amount. No-op if the lock
-    // predates period tracking (no records) or nothing was claimed.
     function _recordPeriodClaim(address _user, uint256 _lockIndex, uint256 _tokens) internal {
         if (_tokens == 0) return;
         LockPeriod[] storage periods = _lockPeriods[_user][_lockIndex];
@@ -325,10 +302,6 @@ contract HordexFacet is HordexStorage {
         LPLock storage lock = userLPLocks[_user][_lockIndex];
         if (lock.removed) return;
 
-        // Refresh the platform-token TWAP first. A stale price would value the reward at zero,
-        // and the old code advanced rewardClaimedETH BEFORE checking price/balance — so a stale
-        // TWAP (or an underfunded contract) silently marked the reward claimed while paying 0
-        // tokens. Updating here removes the common (stale-price) cause of that forfeiture.
         _updateTokenTWAP(platformToken);
 
         uint256 pendingETH = HordexMath.calcPendingRewardETH(
@@ -342,18 +315,14 @@ contract HordexFacet is HordexStorage {
 
         if (total == 0) return;
         uint256 available = IERC20F(platformToken).balanceOf(address(this));
-        // Cannot cover the reward right now: skip WITHOUT advancing the claimed accounting, so the
-        // reward is never marked claimed-but-unpaid. (Removal still proceeds; no funds are lost to
-        // a false "claimed" state.)
+
         if (available < total) return;
 
-        // Advance accounting only once payment is guaranteed. Mark the ETH portion claimed only
-        // when it was actually converted to tokens (price > 0).
         if (newTokens > 0) lock.rewardClaimedETH += pendingETH;
         lock.tokensAccumulated = 0;
         lock.totalTokensClaimed += total;
         _recordPeriodClaim(_user, _lockIndex, total);
-        if (!IERC20F(platformToken).transfer(_user, total)) revert StakingRewardTransferFailed();
+        if (!_safeTransfer(platformToken, _user, total)) revert StakingRewardTransferFailed();
         emit StakingRewardClaimed(_user, total, pendingETH);
     }
 
@@ -390,7 +359,7 @@ contract HordexFacet is HordexStorage {
         if (totalTokens == 0) revert NothingToClaim();
         if (IERC20F(platformToken).balanceOf(address(this)) < totalTokens) revert InsufficientTokenBalance();
         totalStakingRewardsPaidETH += totalPendingETH;
-        if (!IERC20F(platformToken).transfer(msg.sender, totalTokens)) revert TokenTransferFailed();
+        if (!_safeTransfer(platformToken, msg.sender, totalTokens)) revert TokenTransferFailed();
         _claimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(totalTokens),
             ethEquivalent: uint128(totalPendingETH),
@@ -410,7 +379,7 @@ contract HordexFacet is HordexStorage {
         if (IERC20F(platformToken).balanceOf(address(this)) < tokensToSend) revert InsufficientTokenBalance();
         _recordPeriodClaim(msg.sender, _lockIndex, tokensToSend);
         totalStakingRewardsPaidETH += pendingETH;
-        if (!IERC20F(platformToken).transfer(msg.sender, tokensToSend)) revert TokenTransferFailed();
+        if (!_safeTransfer(platformToken, msg.sender, tokensToSend)) revert TokenTransferFailed();
         _claimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(tokensToSend),
             ethEquivalent: uint128(pendingETH),
@@ -419,13 +388,11 @@ contract HordexFacet is HordexStorage {
         emit StakingRewardClaimed(msg.sender, tokensToSend, pendingETH);
     }
 
-    // ── invest ────────────────────────────────────────────────────────────────
-
     function investExt(address _token, uint256 rewardPPM, uint256 T) external onlyDelegatecall {
         uint256 A      = T / 2;
         uint256 B      = T - A;
-        uint256 A60max = (A * 60) / 100;  // max 30% of T for pool buy
-        uint256 A40eth = A - A60max;       // fixed 20% of T (referral commission source)
+        uint256 A60max = (A * 60) / 100;
+        uint256 A40eth = A - A60max;
 
         address pair = IFactoryF(UNISWAP_FACTORY).getPair(_token, WETH);
         if (pair == address(0)) revert PoolNotFound();
@@ -459,7 +426,7 @@ contract HordexFacet is HordexStorage {
         uint256 poolBuyTokens = 0;
         if (A60actual > 0) {
             address[] memory path = new address[](2);
-            path[0] = WETH;   // USDT
+            path[0] = WETH;
             path[1] = _token;
 
             uint256 balanceBefore = IERC20F(_token).balanceOf(address(this));
@@ -524,11 +491,7 @@ contract HordexFacet is HordexStorage {
             tokensAccumulated:  0,
             totalTokensClaimed: 0,
             rewardRatePPM:      rewardPPM,
-            // Per-duration streak counters. The invest lock is always 90-day at base (level 0),
-            // so the 90-day slot (index 3) starts at 1 — its base period is already consumed, and
-            // the FIRST 90-day restake reads streak level 1. Every other duration starts virgin (0),
-            // so its first restake lands on base and builds from there. Counters persist across
-            // duration switches (each duration keeps its own streak); see restakeLPExt.
+
             restakeCounts:      [uint8(0), 0, 0, 1, 0, 0],
             streakBaseEth:      T,
             commissionsCapUsed: 0
@@ -536,7 +499,6 @@ contract HordexFacet is HordexStorage {
 
         _totalLockedLP[pair] += lpReceived;
 
-        // Open the initial lock period for the Lock History modal (one slot).
         _lockPeriods[msg.sender][userLPLocks[msg.sender].length - 1].push(LockPeriod({
             start:   uint64(block.timestamp),
             end:     uint64(block.timestamp + LP_LOCK_DURATION),
@@ -564,8 +526,6 @@ contract HordexFacet is HordexStorage {
             [sIdx];
     }
 
-    // ── removeLPCore ──────────────────────────────────────────────────────────
-
     function removeLPCoreExt(uint256 _lockIndex, bool direct) external payable onlyDelegatecall {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
         if (direct) {
@@ -588,23 +548,16 @@ contract HordexFacet is HordexStorage {
         if (userTotalInvested[msg.sender] >= ethInvested) {
             userTotalInvested[msg.sender] -= ethInvested;
         }
-        // Reconcile the referrer's active count against the user's new qualification state.
-        // Idempotent + clamped: if the user was never counted (e.g. minDirectReferralInvestment
-        // was lowered after they invested below the bar), this is a safe no-op instead of an
-        // underflow — so removeLP can never revert on a desynced count.
+
         _syncReferralCount(msg.sender);
 
-        // Preserve already-earned ROI on a full exit: if removing this lock leaves the user with
-        // NO remaining cap-bearing lock, retain its leftover 5x cap as a frozen budget (bounded at
-        // the lock's expiry via _roiRetainedAt). Earned ROI then stays claimable (claimAll /
-        // per-stream) and resumes cleanly on re-invest. No loop here — settlement stays lazy.
         if (_roiRetainedAt[msg.sender] == 0 && _getRawAvailableCapInclExpired(msg.sender) == 0) {
             uint256 cap5     = ethInvested * 5;
             uint256 retained = cap5 > lock.commissionsCapUsed ? cap5 - lock.commissionsCapUsed : 0;
             if (retained > 0) {
                 _roiRetainedCap[msg.sender] = retained;
                 _roiRetainedAt[msg.sender]  = uint64(lock.unlockTime);
-                _capPausedAt[msg.sender]    = 0; // ensure the inclExpired settlement path is used
+                _capPausedAt[msg.sender]    = 0;
             }
         }
 
@@ -612,10 +565,10 @@ contract HordexFacet is HordexStorage {
         if (pair == address(0)) revert PoolNotFound();
 
         if (direct) {
-            // LP is still inside the contract — decrement custody counter before removal
+
             if (_totalLockedLP[pair] >= lpAmount) _totalLockedLP[pair] -= lpAmount;
         } else {
-            if (!IERC20F(pair).transferFrom(msg.sender, address(this), lpAmount)) revert LPPullFailed();
+            if (!_safeTransferFrom(pair, msg.sender, address(this), lpAmount)) revert LPPullFailed();
         }
         IERC20F(pair).approve(UNISWAP_ROUTER, lpAmount);
 
@@ -637,14 +590,14 @@ contract HordexFacet is HordexStorage {
         if (tokensReturned > 0) {
             uint256 tokenFee    = tokensReturned * 5 / 100;
             uint256 tokensToUser = tokensReturned - tokenFee;
-            if (!IERC20F(lock.token).transfer(msg.sender, tokensToUser)) revert TokenReturnFailed();
-            if (tokenFee > 0) IERC20F(lock.token).transfer(owner, tokenFee);
+            if (!_safeTransfer(lock.token, msg.sender, tokensToUser)) revert TokenReturnFailed();
+            if (tokenFee > 0) _safeTransfer(lock.token, owner, tokenFee);
         }
         if (usdtReturned > 0) {
             uint256 usdtFee    = usdtReturned * 5 / 100;
             uint256 usdtToUser = usdtReturned - usdtFee;
-            if (!IERC20F(WETH).transfer(msg.sender, usdtToUser)) revert ETHReturnFailed();
-            if (usdtFee > 0) IERC20F(WETH).transfer(owner, usdtFee);
+            if (!_safeTransfer(WETH, msg.sender, usdtToUser)) revert ETHReturnFailed();
+            if (usdtFee > 0) _safeTransfer(WETH, owner, usdtFee);
         }
 
         _lpEventRecords[msg.sender].push(LPEventRecord({
@@ -657,8 +610,6 @@ contract HordexFacet is HordexStorage {
 
         emit LPRemoved(msg.sender, lock.token, lpAmount, usdtReturned, tokensReturned);
     }
-
-    // ── restakeLP ─────────────────────────────────────────────────────────────
 
     function restakeLPExt(uint256 _lockIndex, uint256 _durationDays) external payable onlyDelegatecall {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
@@ -687,28 +638,15 @@ contract HordexFacet is HordexStorage {
             lock.streakBaseEth = lock.ethInvested;
         }
 
-        // Per-duration PERSISTENT streak: each duration keeps its own counter and is only ever
-        // touched for the duration being restaked INTO — switching durations never resets another
-        // duration's streak. restakeCounts[dIdx] is the number of periods already started in that
-        // duration (the 90-day slot is seeded to 1 at invest, see investExt). The level for THIS
-        // period is min(count, 3): 0 (base) on a duration's first-ever period, climbing by one on
-        // each subsequent restake into the same duration, capped at 3. So 90d→30d→90d continues the
-        // 90d streak instead of vanishing.
         uint256 cnt  = lock.restakeCounts[dIdx];
         uint256 sIdx = cnt > 3 ? 3 : cnt;
-        if (cnt < 4) lock.restakeCounts[dIdx] = uint8(cnt + 1); // bound the counter (level saturates at 3)
-
-        // Cap is a lifetime 5× per principal: restaking neither restores already-consumed
-        // cap nor grants a new cap period. commissionsCapUsed is left untouched here so any
-        // unused cap carries forward into the re-locked window and consumed cap stays consumed.
-        // New cap is only ever gained via invest() (which appends a fresh lock).
+        if (cnt < 4) lock.restakeCounts[dIdx] = uint8(cnt + 1);
 
         lock.lockedAt         = block.timestamp;
         lock.unlockTime       = block.timestamp + _durationDays * SECONDS_PER_DAY;
         lock.rewardClaimedETH = 0;
         lock.rewardRatePPM    = _getRewardRatePPM(lock.ethInvested, _durationDays, sIdx);
 
-        // Open a new lock period for the Lock History modal (one slot per restake).
         _lockPeriods[msg.sender][_lockIndex].push(LockPeriod({
             start:   uint64(block.timestamp),
             end:     uint64(lock.unlockTime),
@@ -718,13 +656,9 @@ contract HordexFacet is HordexStorage {
         emit LPRestaked(msg.sender, lock.token, lock.lpAmount, lock.unlockTime, _durationDays);
     }
 
-    // ── Helpers for Hordex.sol ─────────────────────────────────────────────
-
     function getAvailableCapExt(address _user) external view returns (uint256) {
         return _getAvailableCap(_user);
     }
-
-    // ── Emergency rescue (direct calls only, deployer only) ───────────────────
 
     function rescueETH() external {
         if (address(this) != _self) revert NotDirectCall();
@@ -741,7 +675,7 @@ contract HordexFacet is HordexStorage {
         uint256 bal = IERC20F(_token).balanceOf(address(this));
         uint256 toSend = amount == 0 ? bal : (amount > bal ? bal : amount);
         if (toSend == 0) revert NoTokensToWithdraw();
-        if (!IERC20F(_token).transfer(_deployer, toSend)) revert TokenWithdrawFailed();
+        if (!_safeTransfer(_token, _deployer, toSend)) revert TokenWithdrawFailed();
     }
 
     receive() external payable {}

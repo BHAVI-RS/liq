@@ -357,6 +357,22 @@ function toast(msg, type='info') {
   setTimeout(() => { div.style.opacity='0'; div.style.transition='opacity 0.5s'; setTimeout(()=>div.remove(), 500); }, 4000);
 }
 
+// ── CACHED BLOCK NUMBER ──
+// provider.getBlockNumber() is called by every log scan and several pollers. Polygon
+// produces a block ~every 2s, so caching the value for a few seconds avoids dozens of
+// redundant eth_blockNumber RPCs per tab visit without ever returning a stale-enough
+// number to miss events (the next scan still covers any gap).
+let _blockNumCache = { value: 0, ts: 0 };
+async function getCachedBlockNumber(prov) {
+  const p = prov || (typeof provider !== 'undefined' ? provider : null);
+  if (!p) return 0;
+  if (Date.now() - _blockNumCache.ts < 8000 && _blockNumCache.value > 0) return _blockNumCache.value;
+  const bn = await p.getBlockNumber();
+  _blockNumCache = { value: bn, ts: Date.now() };
+  return bn;
+}
+window.getCachedBlockNumber = getCachedBlockNumber;
+
 function getFromBlock(latestBlock) {
   return (typeof DEPLOY_BLOCK !== 'undefined' && DEPLOY_BLOCK > 0)
     ? DEPLOY_BLOCK
@@ -371,7 +387,7 @@ function getFromBlock(latestBlock) {
 async function queryFilterBatched(contractInstance, filterOrEvent, fromBlock, toBlock, batchSize = 200) {
   // Resolve 'latest' to a concrete block number so we know the range size.
   let to = (toBlock === 'latest' || toBlock === undefined)
-    ? (await provider.getBlockNumber().catch(() => fromBlock + batchSize))
+    ? (await getCachedBlockNumber(contractInstance.provider).catch(() => fromBlock + batchSize))
     : toBlock;
 
   if (to <= fromBlock) return [];
@@ -396,7 +412,7 @@ async function queryFilterBatched(contractInstance, filterOrEvent, fromBlock, to
 // Same but for provider.getLogs (used in _computeMissedWei / history).
 async function getLogsBatched(filter, fromBlock, toBlock, batchSize = 100) {
   let to = (toBlock === 'latest' || toBlock === undefined)
-    ? (await provider.getBlockNumber().catch(() => fromBlock + batchSize))
+    ? (await getCachedBlockNumber().catch(() => fromBlock + batchSize))
     : toBlock;
 
   if (to <= fromBlock) return [];

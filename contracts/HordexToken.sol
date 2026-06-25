@@ -1,6 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+/**
+ * @title  HordexToken (HDX)
+ * @notice Native utility token of the Hordex platform — https://hordex.club
+ *
+ * @dev Hordex is a DeFi staking, liquidity, and referral platform on Polygon. Participants
+ *      provide stablecoin liquidity into time-locked positions and earn rewards, with HDX as
+ *      the reward asset and the backbone of the platform's HDX/USDT liquidity pool. Within
+ *      the ecosystem HDX is used to:
+ *        - reward stakers and referrers, valued fairly via an on-chain time-weighted price;
+ *        - seed and deepen the HDX/USDT pool the platform provides liquidity into; and
+ *        - serve as the asset traded through the platform's built-in swap.
+ *
+ *      HDX is a clean, standard ERC-20 (transfer / approve / transferFrom / burn) for maximum
+ *      wallet and exchange compatibility, with lightweight ownership controls and token-rescue
+ *      helpers for safe administration. Ownership can be transferred to a multisig or
+ *      permanently renounced.
+ *
+ *      Name: Hordex · Symbol: HDX · Decimals: 18 · Network: Polygon (chainId 137)
+ *      Website: https://hordex.club
+ */
 interface IERC20Rescue {
     function balanceOf(address) external view returns (uint256);
     function transfer(address, uint256) external returns (bool);
@@ -9,19 +29,27 @@ interface IERC20Rescue {
 contract HordexToken {
 
     string public name;
+
     string public symbol;
+
     uint8 public decimals = 18;
+
     uint256 public totalSupply;
 
     address public owner;
 
     mapping(address => uint256) public balanceOf;
+
     mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
+
     event Approval(address indexed owner, address indexed spender, uint256 value);
     event Minted(address indexed to, uint256 amount);
+
     event Burned(address indexed from, uint256 amount);
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not the owner");
@@ -30,12 +58,11 @@ contract HordexToken {
 
     constructor(string memory _name, string memory _symbol, uint256 _initialSupply) {
         owner = msg.sender;
+        emit OwnershipTransferred(address(0), msg.sender);
         name = _name;
         symbol = _symbol;
         _mint(msg.sender, _initialSupply * 10 ** decimals);
     }
-
-    // ── ERC-20 CORE ──
 
     function transfer(address _to, uint256 _value) external returns (bool) {
         require(_to != address(0), "Invalid address");
@@ -63,8 +90,6 @@ contract HordexToken {
         return true;
     }
 
-    // ── MINT & BURN ──
-
     function mint(address _to, uint256 _amount) external onlyOwner {
         require(_to != address(0), "Invalid address");
         _mint(_to, _amount);
@@ -83,6 +108,17 @@ contract HordexToken {
         balanceOf[_to] += _amount;
         emit Transfer(address(0), _to, _amount);
         emit Minted(_to, _amount);
+    }
+
+    function transferOwnership(address _newOwner) external onlyOwner {
+        require(_newOwner != address(0), "New owner is zero address");
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
+    function renounceOwnership() external onlyOwner {
+        emit OwnershipTransferred(owner, address(0));
+        owner = address(0);
     }
 
     function rescueToken(address _token, uint256 amount) external onlyOwner {

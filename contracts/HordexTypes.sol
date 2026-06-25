@@ -1,28 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// ── Time scaling: the SINGLE switch between testing and production ────────────
-// Seconds per "day" applied to every lock / staking / ROI duration in the protocol.
-//   TESTING    = 6      (1 day = 6 s — fast-forward for local & testnet runs)
-//   PRODUCTION = 86400  (real calendar days)
-// Change ONLY this one line to flip the whole system's timing. Every duration below
-// (and in the contracts that import this file) derives from it, so nothing else needs
-// touching. NOTE: keep the frontend's LP_DAY_SCALE in sync with this value.
+/*
+ * HordexTypes — Shared Data Definitions
+ *
+ * Common constants and data structures used across the entire Hordex platform.
+ * https://hordex.club
+ *
+ * Hordex is a transparent, fully on-chain DeFi platform on Polygon where participants
+ * provide liquidity, stake, and earn rewards. This file is the single source of truth
+ * for the platform's shared types and configuration so every component speaks the same
+ * language and stays perfectly in sync:
+ *        - SECONDS_PER_DAY / LP_LOCK_DURATION : the time basis for staking and reward cycles.
+ *        - USDT_ONE                            : the stablecoin unit of account for packages,
+ *                                                tiers, and team-business totals.
+ *        - Structs (User, LPLock, ROIStream, history records, …) : richly indexed on-chain
+ *          records that let the interface render a complete, verifiable view of every
+ *          position, reward, and referral directly from chain state.
+ */
 uint256 constant SECONDS_PER_DAY = 86400;
 
-// Default LP / ROI lock window = 90 days, expressed in the scaled unit above.
 uint256 constant LP_LOCK_DURATION = 90 * SECONDS_PER_DAY;
 
-// ── USDT decimal scale: ONE USDT in the base ("_weth"/USDT) token's smallest unit ──
-// This is the unit of account for the registration fee, package amounts, tier /
-// eligibility ($) thresholds, and team-business roll-ups. It MUST equal 10**decimals
-// of the deployed base token:
-//   • Polygon USDT (0xc2132D05D31c914a87C6611C10748AEb04B58e8F) → 6 decimals → 1e6
-//   • an 18-decimal stablecoin / mock                            → 1e18
-// Like SECONDS_PER_DAY above, this is the ONE line to flip per environment. Every $ ↔
-// base-unit conversion in the contracts derives from it. NOTE: token-conversion math
-// (rewards/ROI priced via the TWAP) is decimal-agnostic and intentionally does NOT use
-// this — only true dollar conversions do. Keep the frontend's USDT decimals in sync.
 uint256 constant USDT_ONE = 1e6;
 
 struct User {
@@ -43,21 +42,21 @@ struct Token {
 }
 
 struct LPLock {
-    address token;              // slot 0: 20 bytes
-    bool claimed;               //         +1 byte
-    bool removed;               //         +1 byte
-    bool capPaused;             //         +1 byte  (23 bytes total, slot 0)
-    uint256 lpAmount;           // slot 1
-    uint256 unlockTime;         // slot 2
-    uint256 ethInvested;        // slot 3
-    uint256 lockedAt;           // slot 4
-    uint256 rewardClaimedETH;   // slot 5
-    uint256 tokensAccumulated;  // slot 6
-    uint256 totalTokensClaimed; // slot 7
-    uint256 rewardRatePPM;      // slot 8
-    uint8[6] restakeCounts;     // slot 9  (6 bytes — was 6 full slots)
-    uint256 streakBaseEth;      // slot 10
-    uint256 commissionsCapUsed; // slot 11
+    address token;
+    bool claimed;
+    bool removed;
+    bool capPaused;
+    uint256 lpAmount;
+    uint256 unlockTime;
+    uint256 ethInvested;
+    uint256 lockedAt;
+    uint256 rewardClaimedETH;
+    uint256 tokensAccumulated;
+    uint256 totalTokensClaimed;
+    uint256 rewardRatePPM;
+    uint8[6] restakeCounts;
+    uint256 streakBaseEth;
+    uint256 commissionsCapUsed;
 }
 
 struct TwapObs {
@@ -84,123 +83,97 @@ struct WealthParams {
     WealthLockParam[]  locks;
 }
 
-// On-chain price snapshot written by seedPool() and invest() for frontend charting.
-// Avoids unreliable eth_getLogs on public RPCs.
 struct PriceSnap {
-    uint64  ts;       // block.timestamp
-    uint112 resETH;   // WETH reserve after the operation
-    uint112 resToken; // token reserve after the operation
+    uint64  ts;
+    uint112 resETH;
+    uint112 resToken;
 }
 
-// On-chain trade snapshot written by invest() for frontend trade history.
 struct TradeSnap {
     uint64  ts;
-    bool    isBuy;   // always true for invest() swaps
-    uint128 ethAmt;  // ETH spent in the swap
-    uint128 tokAmt;  // tokens received from the swap
+    bool    isBuy;
+    uint128 ethAmt;
+    uint128 tokAmt;
 }
 
-// On-chain commission record (avoids unreliable eth_getLogs on Amoy RPC).
 struct CommissionRecord {
-    address from;     // slot 0: 160 bits
-    uint64  ts;       //         +64  = 224 bits
-    uint8   level;    //         +8   = 232 bits
-    uint128 amount;   // slot 1: 128 bits
+    address from;
+    uint64  ts;
+    uint8   level;
+    uint128 amount;
 }
 
-// On-chain missed-commission record — reason: 0=level-ineligible, 1=no-cap, 2=cap-overflow.
 struct MissedRecord {
-    address from;     // slot 0: 160 bits
-    uint64  ts;       //         +64  = 224 bits
-    uint8   level;    //         +8   = 232 bits
-    uint8   reason;   //         +8   = 240 bits
-    uint128 amount;   // slot 1: 128 bits
+    address from;
+    uint64  ts;
+    uint8   level;
+    uint8   reason;
+    uint128 amount;
 }
 
-// On-chain invest record for frontend history tab.
 struct InvestRecord {
-    address token;         // slot 0: 160 bits
-    uint64  ts;            //         +64  = 224 bits
-    uint128 ethAmount;     // slot 1: 128 bits
-    uint128 lpTokens;      //         +128 = 256 bits
-    uint128 poolBuyTokens; // slot 2: tokens bought from pool (A60 swap leg)
-    uint128 totalTokens;   //         +128 = 256 bits  (poolBuyTokens + platform supply → sent to addLiquidityETH)
+    address token;
+    uint64  ts;
+    uint128 ethAmount;
+    uint128 lpTokens;
+    uint128 poolBuyTokens;
+    uint128 totalTokens;
 }
 
-// On-chain staking claim record for frontend history tab.
 struct ClaimRecord {
-    uint128 tokensAmount;   // slot 0: 128 bits
-    uint128 ethEquivalent;  //         +128 = 256 bits
-    uint64  ts;             // slot 1: 64 bits
+    uint128 tokensAmount;
+    uint128 ethEquivalent;
+    uint64  ts;
 }
 
-// Per-lock period record (one for the initial lock, one per restake) for the
-// frontend Lock History modal. Packs into a single storage slot (64+64+128 bits).
-// claimed = platform-token staking reward claimed while this period was current.
 struct LockPeriod {
-    uint64  start;   // lockedAt when the period opened
-    uint64  end;     // unlockTime for the period
-    uint128 claimed; // staking-reward tokens claimed during this period
+    uint64  start;
+    uint64  end;
+    uint128 claimed;
 }
 
-// On-chain LP event record (claim or remove) for frontend history tab.
 struct LPEventRecord {
-    address token;      // slot 0: 160 bits
-    uint64  ts;         //         +64  = 224 bits
-    bool    isClaim;    //         +8   = 232 bits
-    uint128 lpAmount;   // slot 1: 128 bits
-    uint128 ethReturned;//         +128 = 256 bits
+    address token;
+    uint64  ts;
+    bool    isClaim;
+    uint128 lpAmount;
+    uint128 ethReturned;
 }
 
-// ROI commission stream — one per level per LP lock.
 struct ROIStream {
-    address recipient;           // who is currently accumulating this stream
-    uint64  recipientSince;      // timestamp when current recipient started
-    bool    ended;               // true once the underlying lock is removed
-    uint128 roiPaidETH;          // ETH-equiv settled in the CURRENT lock period
-    uint128 capETH;              // cap for the CURRENT period = ethInvested * commissionRate / 10_000
-    uint128 historicalPaidETH;   // cumulative ETH-equiv paid across ALL previous periods (restakes)
-    uint128 historicalMissedETH; // cumulative ROI missed (cap-blocked) across ALL previous periods
-    uint128 heldCarryETH;        // over-cap HELD preserved across a natural-expiry restake when the
-                                 // pre-expiry held exceeded the fresh cap — settled first once cap regains
+    address recipient;
+    uint64  recipientSince;
+    bool    ended;
+    uint128 roiPaidETH;
+    uint128 capETH;
+    uint128 historicalPaidETH;
+    uint128 historicalMissedETH;
+    uint128 heldCarryETH;
+
 }
 
-// Pointer stored in _activeROIStreams / _skippedROIStreams per address.
 struct StreamRef {
     address investor;
     uint64  lockIndex;
     uint8   level;
 }
 
-// A held referral-commission "reserve" chunk. Created when a single downline investment pays an
-// eligible upline MORE than its per-event 1× wallet cap (active self-stake): the over-1× band (up
-// to the 5× cap) is held here instead of paid out immediately. Net of the 5% deployer cut. Locked
-// until `unlockTime` (the TRIGGERING downline package's 90-day unlock), then claimable; spendable
-// on a new package at any time before then. Packs into a single storage slot (128 + 64 bits).
 struct ReserveTranche {
-    uint128 amount;     // net reserved WETH wei (after the 5% cut)
-    uint64  unlockTime; // claimable at/after this time (= triggering downline lock's unlockTime)
+    uint128 amount;
+    uint64  unlockTime;
 }
 
-// Compact per-referral info for the dashboard's Direct Referral Performance section.
-// Returned by getDirectRefsInfo() to replace N×3 individual RPC calls with one batch call.
 struct DirectRefInfo {
     address addr;
     uint256 totalInvested;
     uint256 directRefCount;
-    uint256 remainingCap;   // activeCap: cap from locks still within unlock window
-    uint256 totalCap;       // activeCap + pausedCap
+    uint256 remainingCap;
+    uint256 totalCap;
 }
 
-// Flattened downline node returned by getDownline().
-// Lets the frontend rebuild the whole referral tree (genealogy + team stats) from a
-// single RPC call instead of one getReferrals()/userTotalInvested() call per member.
-// parent is the index (in the returned array) of this node's referrer; the root node
-// is at index 0 with parent == 0 and depth == 0. Children are reconstructed client-side
-// by grouping nodes under their parent index.
 struct DownlineNode {
     address addr;
-    uint32  parent;        // index into the returned array
-    uint32  depth;         // 0 = root, 1 = direct referral, …
-    uint256 totalInvested; // userTotalInvested[addr]
+    uint32  parent;
+    uint32  depth;
+    uint256 totalInvested;
 }

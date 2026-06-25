@@ -186,15 +186,31 @@ function _setStatText(id, value) {
 async function _refreshPoolData() {
   const panel = document.getElementById('panel-pool');
   if (!panel || !panel.classList.contains('active')) { _stopPoolPolling(); return; }
+  if (document.hidden) return; // skip the poll while the tab is backgrounded
   const tokenAddr = window._poolSelectedToken;
   const pairAddr  = window._poolSelectedPair;
   if (!tokenAddr || !pairAddr || pairAddr === ethers.constants.AddressZero) return;
   try {
-    const pair = getPairContract(pairAddr);
-    const [[r0, r1], supply] = await Promise.all([pair.getReserves(), pair.totalSupply()]);
     const isToken0 = window._poolIsToken0;
     const dec      = window._poolTokenDecimals;
     const sym      = window._poolTokenSymbol;
+    const usdtAddr = typeof USDT_ADDRESS !== 'undefined' ? USDT_ADDRESS : WETH_ADDRESS;
+
+    // One multicall fetches reserves + LP supply + both balances + price history
+    // (was 6 separate eth_call round-trips across 4 contracts every poll cycle).
+    const mc = getMulticall();
+    const calls = [
+      { target: pairAddr,   allowFailure: true, callData: _PAIR_IFACE.encodeFunctionData('getReserves', []) },
+      { target: pairAddr,   allowFailure: true, callData: _PAIR_IFACE.encodeFunctionData('totalSupply', []) },
+      { target: tokenAddr,  allowFailure: true, callData: _ERC20_IFACE.encodeFunctionData('balanceOf', [walletAddress]) },
+      { target: usdtAddr,   allowFailure: true, callData: _ERC20_IFACE.encodeFunctionData('balanceOf', [walletAddress]) },
+      { target: contract.address, allowFailure: true, callData: contract.interface.encodeFunctionData('getPriceHistory', [tokenAddr]) },
+    ];
+    const res = await mc.aggregate3(calls);
+    if (!res[0].success) return;
+    const [r0, r1] = _PAIR_IFACE.decodeFunctionResult('getReserves', res[0].returnData);
+    const supply   = res[1].success ? _PAIR_IFACE.decodeFunctionResult('totalSupply', res[1].returnData)[0] : ethers.constants.Zero;
+
     const resToken = isToken0 ? r0 : r1;
     const resETH   = isToken0 ? r1 : r0;
     window._poolReserveToken = resToken;
@@ -214,9 +230,30 @@ async function _refreshPoolData() {
     _setStatText('poolStat-usdtres',  fmtNum(resETHF * USDT_PER_ETH) + ' USDT');
     _setStatText('poolStat-lpsupply', fmtNum(supplyF) + ' HDEX-LP');
     _updatePoolRateDisplay(priceUSDT, sym);
-    updateBalances(tokenAddr, dec);
+
+    // Balances from the same multicall — no extra RPC.
+    if (res[2].success || res[3].success) {
+      try {
+        const tokenF = res[2].success ? parseFloat(ethers.utils.formatUnits(_ERC20_IFACE.decodeFunctionResult('balanceOf', res[2].returnData)[0], dec)) : window._poolUserTokenBal;
+        const usdtF  = res[3].success ? usdtToFloat(_ERC20_IFACE.decodeFunctionResult('balanceOf', res[3].returnData)[0]) : window._poolUserUsdtBal;
+        const sellEl = document.getElementById('poolSellBal');
+        const buyEl  = document.getElementById('poolBuyUsdtBal');
+        if (sellEl) sellEl.textContent = fmtNum(tokenF);
+        if (buyEl)  buyEl.textContent  = fmtNum(usdtF);
+        window._poolUserUsdtBal  = usdtF;
+        window._poolUserTokenBal = tokenF;
+      } catch(_) {}
+    }
+
+    // Price chart from the same multicall's getPriceHistory + the reserves we already have.
+    if (res[4].success) {
+      try {
+        const snapHistory = contract.interface.decodeFunctionResult('getPriceHistory', res[4].returnData)[0];
+        _renderChartFromSnapshots(snapHistory, isToken0, dec, r0, r1);
+      } catch(_) {}
+    }
+
     loadTradeHistory(pairAddr, isToken0, dec, sym, true);
-    _updateChartData(pairAddr, isToken0, dec);
   } catch(_) {}
 }
 
@@ -230,7 +267,15 @@ async function _updateChartData(pairAddr, isToken0, dec) {
       contract.getPriceHistory(tokenAddr),
       pair.getReserves(),
     ]);
+    _renderChartFromSnapshots(snapHistory, isToken0, dec, r0, r1);
+  } catch(_) {}
+}
 
+// Builds chart points from on-chain price snapshots + the live reserves and renders.
+// Shared by the initial load (_updateChartData) and the polling path (_refreshPoolData),
+// so the poll reuses reserves it already fetched instead of re-reading them.
+function _renderChartFromSnapshots(snapHistory, isToken0, dec, r0, r1) {
+  try {
     const points = [];
 
     for (const snap of snapHistory) {
@@ -283,7 +328,7 @@ function _updateHeaderPrice(priceUSDT) {
 function _startPoolPolling() {
   _stopPoolPolling();
   _poolRefreshCount = 0;
-  window._poolPollInterval = setInterval(_refreshPoolData, 5000);
+  window._poolPollInterval = setInterval(_refreshPoolData, 30000);
 }
 
 function getRouter()           { return new ethers.Contract(DEX_ROUTER,  ROUTER_ABI,  signer);   }
@@ -364,8 +409,8 @@ async function loadPoolPanel() {
       list.appendChild(div);
     }
 
-    // Live-update prices in the list every 5 s
-    window._poolListInterval = setInterval(_refreshListPrices, 5000);
+    // Live-update prices in the list every 30 s
+    window._poolListInterval = setInterval(_refreshListPrices, 30000);
   } catch(e) {
     list.innerHTML = '<div class="empty-state">Failed to load pools.</div>';
     toast('Pool load error: ' + (e.errorName || e.reason || e?.error?.message || e.message), 'error');
@@ -574,14 +619,63 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
 
     // Read the actual Uniswap V2 Swap events for this pair — reflects every on-chain trade for the
     // token (platform-routed pool swaps AND direct DEX trades), not just contract-recorded ones.
-    // The main read RPC (Alchemy free tier) caps eth_getLogs at 10 blocks, so log queries go through
-    // a dedicated public node (getLogsProvider) that allows ~10k-block ranges. Walk backward in
-    // chunks, stop once we have enough recent trades; per-chunk errors just skip that chunk.
+    // Walk backward in chunks, stop once we have enough recent trades; per-chunk errors skip that chunk.
     const logsP = (typeof getLogsProvider === 'function' && getLogsProvider()) || provider;
-    const latest     = await logsP.getBlockNumber();
+    const latest     = await getCachedBlockNumber(logsP);
     const CHUNK      = 9000;   // stay within the public node's 10k-block getLogs limit
-    const MAX_CHUNKS = 5;      // scan back at most ~45k blocks per refresh
+    const MAX_CHUNKS = 5;      // scan back at most ~45k blocks on a full (cold) scan
 
+    // Decode one Swap log into a {isBuy, rec} or null.
+    const decode = (log) => {
+      const [a0In, a1In, a0Out, a1Out] = ethers.utils.defaultAbiCoder.decode(
+        ['uint256', 'uint256', 'uint256', 'uint256'], log.data
+      );
+      const tokOut = isToken0 ? a0Out : a1Out;
+      const tokIn  = isToken0 ? a0In  : a1In;
+      const ethIn  = isToken0 ? a1In  : a0In;
+      const ethOut = isToken0 ? a1Out : a0Out;
+      if (tokOut.gt(0)) {
+        const tokF = parseFloat(ethers.utils.formatUnits(tokOut, dec));
+        if (tokF <= 0) return null;
+        const usdtAmt = ethToUSDT(usdtToFloat(ethIn));
+        return { isBuy: true, rec: { tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF } };
+      }
+      if (tokIn.gt(0)) {
+        const tokF = parseFloat(ethers.utils.formatUnits(tokIn, dec));
+        if (tokF <= 0) return null;
+        const usdtAmt = ethToUSDT(usdtToFloat(ethOut));
+        return { isBuy: false, rec: { tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF } };
+      }
+      return null;
+    };
+
+    const scan = window._poolTradeScan;
+    const sameP = scan && scan.pair === pairAddr;
+
+    // Incremental path: same pair already scanned → only fetch the few new blocks since the last
+    // scan (one tiny getLogs) and prepend. Avoids re-scanning ~45k blocks every poll cycle.
+    if (silent && sameP && scan.lastLatest > 0 && latest >= scan.lastLatest) {
+      if (latest === scan.lastLatest) { _renderTradeHistory(tokenSymbol); return; } // no new blocks
+      let buys = scan.buys.slice(), sells = scan.sells.slice();
+      const newLogs = await logsP.getLogs({
+        address: pairAddr, topics: [SWAP_TOPIC], fromBlock: scan.lastLatest + 1, toBlock: latest
+      }).catch(() => null);
+      if (newLogs && newLogs.length) {
+        for (let i = newLogs.length - 1; i >= 0; i--) {   // newest-first
+          const d = decode(newLogs[i]);
+          if (!d) continue;
+          if (d.isBuy) buys.unshift(d.rec); else sells.unshift(d.rec);
+        }
+        buys = buys.slice(0, 5); sells = sells.slice(0, 5);
+      }
+      window._poolTradeScan = { pair: pairAddr, lastLatest: latest, buys, sells };
+      window._poolTradeBuys  = buys;
+      window._poolTradeSells = sells;
+      _renderTradeHistory(tokenSymbol);
+      return;
+    }
+
+    // Cold path: walk backward until we have 5 buys + 5 sells (or hit the scan limit).
     const buys = [], sells = [];
     let end = latest, scanned = 0;
     while (end > 0 && scanned < MAX_CHUNKS && (buys.length < 5 || sells.length < 5)) {
@@ -591,34 +685,18 @@ async function loadTradeHistory(pairAddr, isToken0, dec, tokenSymbol, silent = f
       }).catch(() => null);
       if (batch && batch.length) {
         for (let i = batch.length - 1; i >= 0; i--) {   // newest-first within the chunk
-          const [a0In, a1In, a0Out, a1Out] = ethers.utils.defaultAbiCoder.decode(
-            ['uint256', 'uint256', 'uint256', 'uint256'], batch[i].data
-          );
-          const tokOut = isToken0 ? a0Out : a1Out;
-          const tokIn  = isToken0 ? a0In  : a1In;
-          const ethIn  = isToken0 ? a1In  : a0In;
-          const ethOut = isToken0 ? a1Out : a0Out;
-          if (tokOut.gt(0)) {                       // token left the pool → BUY
-            if (buys.length >= 5) continue;
-            const tokF = parseFloat(ethers.utils.formatUnits(tokOut, dec));
-            if (tokF <= 0) continue;
-            const usdtAmt = ethToUSDT(usdtToFloat(ethIn));
-            buys.push({ tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF });
-          } else if (tokIn.gt(0)) {                 // token entered the pool → SELL
-            if (sells.length >= 5) continue;
-            const tokF = parseFloat(ethers.utils.formatUnits(tokIn, dec));
-            if (tokF <= 0) continue;
-            const usdtAmt = ethToUSDT(usdtToFloat(ethOut));
-            sells.push({ tokenAmt: tokF, usdtAmt, price: usdtAmt / tokF });
-          }
+          const d = decode(batch[i]);
+          if (!d) continue;
+          if (d.isBuy) { if (buys.length < 5) buys.push(d.rec); }
+          else         { if (sells.length < 5) sells.push(d.rec); }
           if (buys.length >= 5 && sells.length >= 5) break;
         }
       }
       end = start - 1;
       scanned++;
     }
-    console.log('[trades] uniswap swaps — buys:', buys.length, 'sells:', sells.length);
 
+    window._poolTradeScan  = { pair: pairAddr, lastLatest: latest, buys: buys.slice(0, 5), sells: sells.slice(0, 5) };
     window._poolTradeBuys  = buys.slice(0, 5);
     window._poolTradeSells = sells.slice(0, 5);
     _renderTradeHistory(tokenSymbol);

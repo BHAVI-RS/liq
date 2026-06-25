@@ -1,0 +1,13 @@
+{
+  "network": "polygon",
+  "chainId": 137,
+  "deployedAt": "2026-06-25T01:42:30.369Z",
+  "deployer": "0xBBc0989CC1830348e0f0946EE52e247F5044fd15",
+  "tokenAddress": "0x88070EAf52AaE3E6fe16Ed70Ad16d82161958F19",
+  "constructorArguments": [
+    "Hordex",
+    "HDX",
+    "100000000"
+  ],
+  "deployBlock": 89097837
+}

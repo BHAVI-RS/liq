@@ -4,6 +4,14 @@ pragma solidity ^0.8.0;
 import "./HordexTypes.sol";
 import "./HordexMath.sol";
 
+/**
+ * @title  HordexViewLib — View Computation Library
+ * @notice Shared computation helpers for Hordex's read-only views. https://hordex.club
+ *
+ * @dev Lightweight, pure helpers that summarize a participant's positions and rewards from a
+ *      snapshot of on-chain state. Used by the platform's analytics layer to present clear,
+ *      accurate portfolio and reward information drawn directly from verifiable chain data.
+ */
 interface IUniV2PairView {
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function token0() external view returns (address);
@@ -16,8 +24,6 @@ interface IUniV2FactoryView {
 
 library HordexViewLib {
 
-    // Computes per-user staking reward summary from a memory snapshot of their locks.
-    // Called by Hordex.getStakingReward after copying storage → memory.
     function computeStakingReward(
         LPLock[] memory locks,
         uint256 price
@@ -41,19 +47,17 @@ library HordexViewLib {
         }
     }
 
-    // Computes commission cap summary from a memory snapshot of the user's locks.
-    // timestamp is passed in (block.timestamp) so this function stays pure.
     function computeCommissionStats(
         LPLock[] memory locks,
         uint256 earned,
         uint256 totalInvested,
         uint256 timestamp
     ) public pure returns (
-        uint256,            // earned
-        uint256,            // missed (reserved, always 0)
+        uint256,
+        uint256,
         uint256 totalCap,
         uint256 remainingCap,
-        uint256             // active = totalInvested
+        uint256
     ) {
         uint256 activeCap;
         uint256 pausedCap;
@@ -76,8 +80,6 @@ library HordexViewLib {
         return (earned, 0, activeCap + pausedCap, activeCap, totalInvested);
     }
 
-    // Assembles the WealthParams struct from a memory snapshot of locks + on-chain price/pool data.
-    // Called by Hordex.getWealthParams after copying storage → memory.
     function computeWealthParams(
         LPLock[] memory locks,
         uint256 refEarnings,

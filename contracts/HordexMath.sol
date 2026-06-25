@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./HordexTypes.sol"; // for the shared SECONDS_PER_DAY / LP_LOCK_DURATION constants
+import "./HordexTypes.sol";
 
+/**
+ * @title  HordexMath — Reward & Pricing Math
+ * @notice Shared math library for the Hordex platform. https://hordex.club
+ *
+ * @dev Pure, reusable helpers that keep Hordex's reward and pricing calculations precise,
+ *      consistent, and gas-efficient everywhere they are used: tier and duration selection,
+ *      staking-reward accrual, and on-chain time-weighted average pricing. Centralizing this
+ *      logic guarantees every part of the platform computes values the same, verifiable way.
+ */
 interface IUniV2PairMin {
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
     function token0() external view returns (address);
@@ -15,7 +24,6 @@ interface IUniV2FactoryMin {
 }
 
 library HordexMath {
-    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
 
     function getTierIndex(uint32[12] memory tiers, uint256 ethInvestedWei)
         public pure returns (uint256 best)
@@ -100,10 +108,6 @@ library HordexMath {
         }
     }
 
-    // Returns the maximum ETH that can be swapped in a single invest() call while
-    // keeping the resulting spot price within TWAP_GUARD_BPS of the TWAP price.
-    // Derived by solving: spotExpected(A60) >= A60 * (1e18/twapPrice) * alphaBPS/10000
-    // for A60, cancelling the common A60 factor and rearranging.
     function calcMaxPoolBuy(
         uint256 resToken,
         uint256 resETH,
@@ -118,8 +122,6 @@ library HordexMath {
         maxA60 = (numer - sub) / (997 * 1e18 * alphaBPS);
     }
 
-    // Pure AMM math for the invest() swap+liquidity calculation.
-    // Extracted from Hordex.invest() so this bytecode lives in the library.
     function calcInvestAmounts(
         uint256 A60,
         uint256 A40,
@@ -133,15 +135,6 @@ library HordexMath {
         swapAmountOutMin     = expected * (10000 - maxSlippageBPS) / 10000;
     }
 
-    // Hybrid buy split: route up to a slippage-capped amount through the AMM pool, then fill the
-    // remainder from the platform's own token inventory at the post-pool spot price. Used by both
-    // Hordex.swapBuy (execution) and HordexViewFacet.quoteSwapBuy (display) so the quoted
-    // "tokens to receive" matches the trade exactly.
-    //   slippageBps — max effective price slippage (price impact + 0.3% pool fee) on the pool leg
-    //                 (e.g. 200 = 2%). The pool leg never moves the price more than this.
-    //   invBal      — contract's current token balance available to backstop the buy.
-    // Returns the USDT routed to the pool, tokens bought from the pool, tokens sold from inventory,
-    // and the total USDT actually spent (usdtIn - usdtSpent is refunded to the buyer).
     function calcHybridBuy(
         uint256 resToken,
         uint256 resETH,
@@ -154,8 +147,7 @@ library HordexMath {
         uint256 invTokensOut,
         uint256 usdtSpent
     ) {
-        // Max USDT into the pool keeping avgPrice/spot = (1000*resETH + 997*poolUsdt)/(997*resETH)
-        // within 1 + slippageBps/10000.  => poolUsdt <= resETH*(997*bps - 30000)/9_970_000.
+
         uint256 feeAdj      = 997 * slippageBps;
         uint256 maxPoolUsdt = feeAdj > 30000 ? resETH * (feeAdj - 30000) / 9970000 : 0;
 
@@ -171,21 +163,19 @@ library HordexMath {
             uint256 newResETH = resETH + poolUsdt;
             uint256 newResTok = resToken > poolTokensOut ? resToken - poolTokensOut : 0;
             if (newResTok > 0) {
-                // Inventory priced at the post-pool spot price (no extra slippage).
+
                 uint256 wantInv = remainingUsdt * newResTok / newResETH;
                 if (wantInv <= invBal) {
                     invTokensOut = wantInv;
-                    usdtSpent   += remainingUsdt;                 // full fill — no refund
+                    usdtSpent   += remainingUsdt;
                 } else {
-                    invTokensOut = invBal;                        // inventory short — partial fill
-                    usdtSpent   += invBal * newResETH / newResTok; // charge only for what we deliver
+                    invTokensOut = invBal;
+                    usdtSpent   += invBal * newResETH / newResTok;
                 }
             }
         }
     }
 
-    // Pure AMM math for the removeLiquidity slippage guards.
-    // Extracted from Hordex._removeLPCore() so this bytecode lives in the library.
     function calcRemoveLPAmounts(
         uint256 resTok,
         uint256 resETH,

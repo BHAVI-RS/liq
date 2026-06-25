@@ -16,7 +16,7 @@ const fs   = require("fs");
 const path = require("path");
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const TOKEN_ADDRESS = "0xCD575ebAEb4f5DC4E84CA324D936C37e8538cFBf"; // HDX platform token
+const TOKEN_ADDRESS = "0x88070EAf52AaE3E6fe16Ed70Ad16d82161958F19"; // HDX platform token
 
 // Amount in WHOLE tokens (scaled by the token's decimals below).
 // "10000000000000" = 10,000,000,000,000 (10 trillion) HDX.

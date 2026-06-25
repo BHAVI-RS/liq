@@ -4,9 +4,8 @@
 // sub-wallets, register a referral chain, or invest — those remain manual/owner steps.
 //
 // Pre-deployed inputs (already live on Polygon mainnet — NOT deployed here):
-//   • Platform token : 0xCD575ebAEb4f5DC4E84CA324D936C37e8538cFBf
-//   • USDT           : 0x1606E781D32C591Ea45841133D384eEcdF2c52C7  (TestUSDT, 6 decimals — pool base token, for mainnet testing)
-//                      (canonical Polygon USDT is 0xc2132D05D31c914a87C6611C10748AEb04B58e8F — swap back for real launch)
+//   • Platform token : 0x88070EAf52AaE3E6fe16Ed70Ad16d82161958F19  (HDX)
+//   • USDT           : 0xc2132D05D31c914a87C6611C10748AEb04B58e8F  (canonical Polygon USDT, 6 decimals — pool base token)
 //   • Uniswap V2      : official Polygon factory + router02 (see below)
 //
 // What it deploys:
@@ -43,9 +42,8 @@ const UNI_ROUTER   = "0xedf6066a2b290C185783862C7F4776A2C8077AD1";
 const UNI_FACTORY  = "0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C";
 
 // ── Pre-deployed tokens on Polygon mainnet ─────────────────────────────────────
-const PLATFORM_TOKEN = "0xCD575ebAEb4f5DC4E84CA324D936C37e8538cFBf";
-const USDT           = "0x1606E781D32C591Ea45841133D384eEcdF2c52C7"; // TestUSDT, 6 decimals (pool base token "_weth") — mainnet testing
-                                                                     // real Polygon USDT: 0xc2132D05D31c914a87C6611C10748AEb04B58e8F (swap back for real launch)
+const PLATFORM_TOKEN = "0x88070EAf52AaE3E6fe16Ed70Ad16d82161958F19"; // HDX
+const USDT           = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // canonical Polygon USDT, 6 decimals (pool base token "_weth")
 
 // ── PHASE 3 token-setup amounts (human units; token decimals queried on-chain) ─
 // Sent to the Hordex contract, then seedPool() establishes the starting price.

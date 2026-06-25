@@ -1,5 +1,11 @@
 // Update / warm up the on-chain TWAP price oracle on Polygon mainnet.
 //
+// RUN THIS AFTER scripts/polygon/hordexhdx.js — that script funds the HDX inventory,
+// registers the token, and seeds the pool. The TWAP needs a seeded pool, so warm it up here
+// only once hordexhdx.js has completed:
+//   1. npx hardhat run scripts/polygon/hordexhdx.js --network polygon   (inventory + addToken + seedPool)
+//   2. npx hardhat run scripts/polygon/twap.js      --network polygon   (this script — warm the TWAP)
+//
 // The platform values ROI & staking payouts in HDX and gates invest() on a Uniswap V2 TWAP.
 // That TWAP only becomes "ready" after TWO observations at least one TWAP period apart. This
 // script pushes those observations — updateTWAP() for the platform token, plus updateTokenTWAP()
@@ -42,7 +48,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function readDeployedContract() {
   const src = fs.readFileSync(path.join(__dirname, "..", "..", "contract-config.js"), "utf8");
   const m = src.match(/CONTRACT_ADDRESS\s*=\s*"(0x[0-9a-fA-F]{40})"/);
-  if (!m) throw new Error("CONTRACT_ADDRESS not found in contract-config.js — run mdeploy.js first");
+  if (!m) throw new Error("CONTRACT_ADDRESS not found in contract-config.js — run hordexdeploy.js first");
   return hre.ethers.getAddress(m[1]);
 }
 

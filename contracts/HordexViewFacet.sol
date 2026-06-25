@@ -5,30 +5,27 @@ import "./HordexStorage.sol";
 import "./HordexMath.sol";
 import "./HordexViewLib.sol";
 
+/**
+ * @title  HordexViewFacet — On-Chain Analytics
+ * @notice Read-only analytics and aggregation layer for the Hordex platform. https://hordex.club
+ *
+ * @dev This module gives the Hordex interface a fast, comprehensive, fully on-chain view of
+ *      the platform. It exposes detailed getters for positions, rewards, pricing, and history,
+ *      plus efficient batch and team-tree aggregations that gather many participants' data in a
+ *      single call. The result is a responsive experience backed entirely by verifiable chain
+ *      state — no off-chain indexers required.
+ */
 interface IERC20V {
     function balanceOf(address account) external view returns (uint256);
 }
 
-// Read-only DELEGATECALL facet. Hordex.sol forwards every unknown selector here through
-// its fallback(), so these functions execute in Hordex.sol's storage context via eth_call.
-//
-// Two jobs:
-//   1. Hold all the heavy ABI-encoding view getters that used to live in Hordex.sol —
-//      moving them here keeps the core Hordex contract under the 24 KB mainnet limit.
-//   2. Provide batch/aggregation views (getDownline, *Batch) that traverse the referral tree
-//      and read many users' state in a SINGLE on-chain pass, so the frontend replaces its
-//      per-user RPC loops (one call per member) with one round trip.
-//
-// Immutables are baked into this facet's own bytecode at deploy time (same addresses passed
-// to HordexFacet) and are read correctly under delegatecall.
 contract HordexViewFacet is HordexStorage {
 
     address private immutable UNISWAP_FACTORY;
     address private immutable WETH;
     address public  immutable platformToken;
 
-    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
-    uint256 private constant SWAP_SLIPPAGE_BPS = 200; // hybrid buy pool leg cap — mirrors Hordex.swapBuy
+    uint256 private constant SWAP_SLIPPAGE_BPS = 200;
 
     constructor(address _factory, address _weth, address _platform) {
         UNISWAP_FACTORY = _factory;
@@ -36,7 +33,6 @@ contract HordexViewFacet is HordexStorage {
         platformToken   = _platform;
     }
 
-    // ── Simple getters (moved verbatim from Hordex.sol) ─────────────────────
     function getActiveDirectReferralCount(address _user) external view returns (uint256) {
         return activeReferralCount[_user];
     }
@@ -67,9 +63,6 @@ contract HordexViewFacet is HordexStorage {
         return IERC20V(_token).balanceOf(address(this));
     }
 
-    // Quote for swapBuy: how many tokens a given USDT amount buys under the hybrid pool+inventory
-    // split, and how much USDT is actually spent (usdtIn - usdtSpent is refunded). Mirrors the
-    // exact math swapBuy executes, so "tokens to receive" reflects true pool state.
     function quoteSwapBuy(address _token, uint256 _usdtIn) external view returns (
         uint256 tokensOut, uint256 usdtSpent, uint256 poolUsdt, uint256 invTokensOut
     ) {
@@ -154,13 +147,12 @@ contract HordexViewFacet is HordexStorage {
     function getMissedRecords(address _user) external view returns (MissedRecord[] memory) {
         return _missedRecords[_user];
     }
-    // ── Referral reserve (held over-1× commission) ──────────────────────────────
-    // total = every tranche (locked + matured); claimable = tranches past their unlock time.
+
     function getReserveStats(address _user) external view returns (uint256 total, uint256 claimable) {
         total     = _reserveTotalWei[_user];
         claimable = _reserveClaimableWei(_user);
     }
-    // Per-tranche breakdown (amount + unlock time) for the reserve detail modal.
+
     function getReserveTranches(address _user) external view returns (ReserveTranche[] memory) {
         return _reserveTranches[_user];
     }
@@ -176,7 +168,7 @@ contract HordexViewFacet is HordexStorage {
     function getLPEventRecords(address _user) external view returns (LPEventRecord[] memory) {
         return _lpEventRecords[_user];
     }
-    // Per-lock period history (initial + each restake) for the Lock History modal.
+
     function getLockPeriods(address _user, uint256 _lockIndex) external view returns (LockPeriod[] memory) {
         return _lockPeriods[_user][_lockIndex];
     }
@@ -184,21 +176,14 @@ contract HordexViewFacet is HordexStorage {
         return _capPausedAt[user];
     }
 
-    // Authoritative live available cap (active locks only) = raw active cap − pending ROI − live
-    // ROI accrual.  Mirrors the exact value the contract gates accrual against (_getAvailableCap).
-    // The UI should use THIS instead of reconstructing cap from getROIData, whose liveETH collapses
-    // to 0 at exhaustion and makes reconstructed cap over-report remaining headroom.
     function getAvailableCap(address user) external view returns (uint256) {
         return _getAvailableCap(user);
     }
 
-    // Same, but the raw base also counts expired (non-removed) locks — the settlement-inclusive
-    // available cap used by the Investments tab (which shows cap on expired/not-staked locks too).
     function getAvailableCapInclExpired(address user) external view returns (uint256) {
         return _getAvailableCapInclExpired(user);
     }
 
-    // ── ROI view functions (read directly from inherited storage) ─────────────
     function getROIPending(address recipient) external view returns (uint256 total) {
         total = _roiPendingETH[recipient];
         uint64 retAt = _roiRetainedAt[recipient];
@@ -208,8 +193,7 @@ contract HordexViewFacet is HordexStorage {
             StreamRef storage ref = arr[i];
             ROIStream storage stream = _roiStreams[ref.investor][ref.lockIndex][ref.level];
             if (!stream.ended) {
-                // Retained-after-exit: earned ROI is bounded at the retention time and capped by
-                // the retained budget, matching what claimAllROI / claimROIFromStream will pay.
+
                 acc += retAt != 0
                     ? _calcAccruedRawAt(stream, ref.investor, ref.lockIndex, ref.level, retAt)
                     : _calcAccrued(stream, ref.investor, ref.lockIndex, ref.level);
@@ -223,7 +207,7 @@ contract HordexViewFacet is HordexStorage {
         pendingETH = _roiPendingETH[recipient];
         uint64 retAt = _roiRetainedAt[recipient];
         if (retAt != 0) {
-            // Withdrawn but ROI retained: report the still-claimable earned ROI (bounded + capped).
+
             StreamRef[] storage rArr = _activeROIStreams[recipient];
             for (uint256 i = 0; i < rArr.length; ) {
                 StreamRef storage ref = rArr[i];
@@ -260,21 +244,12 @@ contract HordexViewFacet is HordexStorage {
         return _calcAccrued(stream, investor, lockIndex, level);
     }
 
-    // ── Level-eligibility views (active self-stake gate) ────────────────────────
-    // selfGates[i] is the per-level self-stake threshold (BOTH ROI and referral) for paid level
-    // N = i+1. bizGates is INERT (team-business gating removed) and returned as the seeded zeros
-    // for ABI stability.
     function getEligibilityGates()
         external view returns (uint32[10] memory selfGates, uint32[10] memory bizGates)
     {
         return (selfStakeGate, businessGate);
     }
 
-    // A user's live eligibility: active self-stake (USDT), cumulative team business (USDT, now an
-    // informational stat — it no longer gates), and how many ROI levels (1..10) they currently
-    // unlock. `unlockedLevels` is the ROI per-level gate depth (selfStakeGate is monotonic, so it is
-    // the highest contiguous level qualified for). REFERRAL eligibility is DIFFERENT: a flat $25
-    // active self-stake unlocks ALL 10 referral levels (so referral depth = selfStakeUSDT >= 25 ? 10 : 0).
     function getUserEligibility(address user)
         external view returns (uint256 selfStakeUSDT, uint256 teamBusinessUSDT, uint8 unlockedLevels)
     {
@@ -287,13 +262,6 @@ contract HordexViewFacet is HordexStorage {
         }
     }
 
-    // ── Batch / aggregation views ─────────────────────────────────────────────
-    // Single-call alternatives to the frontend's per-member RPC loops.
-
-    // Flattened downline tree under `root` (root included at index 0), depth-first.
-    // Replaces fetchGeneTree()'s one-getReferrals()-per-node recursion AND the matching
-    // userTotalInvested() loop with one on-chain traversal. maxDepth caps levels below root
-    // (the genealogy view uses 10).
     function getDownline(address root, uint256 maxDepth) external view returns (DownlineNode[] memory out) {
         uint256 n = _countDownline(root, 0, maxDepth);
         out = new DownlineNode[](n);
@@ -335,7 +303,6 @@ contract HordexViewFacet is HordexStorage {
         return idx;
     }
 
-    // WealthParams for many users in one call (dashboard/team wealth, ref popup).
     function getWealthParamsBatch(address[] calldata usersArr)
         external view returns (WealthParams[] memory out)
     {
@@ -347,7 +314,6 @@ contract HordexViewFacet is HordexStorage {
         }
     }
 
-    // Live + pending ROI for many users in one call (team wealth ROI component).
     function getROIDataBatch(address[] calldata usersArr)
         external view returns (uint256[] memory liveETH, uint256[] memory pendingETH)
     {
@@ -360,7 +326,6 @@ contract HordexViewFacet is HordexStorage {
         }
     }
 
-    // LP locks for many users in one call (ROI per-second rate computation).
     function getUserLPLocksBatch(address[] calldata usersArr)
         external view returns (LPLock[][] memory out)
     {

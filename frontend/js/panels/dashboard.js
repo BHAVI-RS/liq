@@ -14,6 +14,7 @@ function _dashStartPoll() {
   _dashPollInterval = setInterval(() => {
     const panel = document.getElementById('panel-dashboard');
     if (!panel || !panel.classList.contains('active')) { _dashStopPoll(); return; }
+    if (document.hidden) return; // skip while the browser tab is backgrounded
     loadDashboard(true);
   }, 30000);
 }
@@ -535,7 +536,7 @@ const GRAPH_OPTS = {
 async function fetchGraphData() {
   if (!contract || !walletAddress) return null;
   try {
-    const latestBlockNum = await provider.getBlockNumber();
+    const latestBlockNum = await getCachedBlockNumber();
     const fromBlock      = getFromBlock(latestBlockNum);
     const [userInfo, investEvents, refEvents] = await Promise.all([
       contract.users(walletAddress),
@@ -1078,7 +1079,7 @@ async function loadDashboard(silent = false) {
   }
 
   try {
-    const _latestBlockNum = await provider.getBlockNumber();
+    const _latestBlockNum = await getCachedBlockNumber();
     const _fromBlock      = getFromBlock(_latestBlockNum);
     // All seven per-user contract reads go out as ONE multicall (was 7 separate RPCs).
     // platformToken is cached after first load; getBlock isn't a contract call — both

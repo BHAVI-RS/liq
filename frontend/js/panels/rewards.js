@@ -779,7 +779,7 @@ function _rwStartCapFastPoll() {
         }
       }
     } catch(_) {}
-  }, 5000);
+  }, 30000);
 }
 
 function _rwStopPoll() {
@@ -792,9 +792,12 @@ function _rwStartPoll() {
   _rwPollInterval = setInterval(() => {
     const panel = document.getElementById('panel-rewards');
     if (!panel || !panel.classList.contains('active')) { _rwStopPoll(); return; }
+    if (document.hidden) return; // skip while the browser tab is backgrounded
     loadRwROI(true);
   }, 30000);
-  _rwStartCapFastPoll();
+  // Cap-state changes (pause / recovery) are already detected by the 30s reload above,
+  // which re-reads full on-chain ROI state — the separate cap-fast poll would only
+  // duplicate those reads at the same cadence, so it is intentionally not started.
 }
 
 function _rwStopTicker() {
@@ -1249,7 +1252,7 @@ async function loadRwReferral() {
     // Missed commissions — computed in background, updates card + table when done
     (async () => {
       try {
-        const lb = await provider.getBlockNumber().catch(() => 0);
+        const lb = await getCachedBlockNumber().catch(() => 0);
         const missedResult = await _computeMissedWei(getFromBlock(lb))
           .catch(() => ({ total: ethers.BigNumber.from(0), entries: [] }));
         const missed = usdtToFloat(missedResult.total);

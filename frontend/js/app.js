@@ -18,10 +18,10 @@ const _capturedRefParam = (function() {
 const NET = {
   chainId: 137, chainIdHex: '0x89', name: 'polygon', label: 'POLYGON',
   chainName: 'Polygon',
-  rpcUrls:  ['https://polygon-bor-rpc.publicnode.com'],
+  rpcUrls:  ['https://lb.drpc.live/polygon/ArMt-iLguEkon4OP48CBXLlnYeX-b-YR8aCKVjewFaCJ'],
   explorer: 'https://polygonscan.com',
-  readRpc:  'https://polygon-bor-rpc.publicnode.com',
-  logsRpc:  'https://polygon-bor-rpc.publicnode.com',
+  readRpc:  'https://lb.drpc.live/polygon/ArMt-iLguEkon4OP48CBXLlnYeX-b-YR8aCKVjewFaCJ',
+  logsRpc:  'https://lb.drpc.live/polygon/ArMt-iLguEkon4OP48CBXLlnYeX-b-YR8aCKVjewFaCJ',
 };
 /* ───── POLYGON AMOY (TESTNET) ─────
 const NET = {
@@ -67,9 +67,8 @@ window.getLogsProvider = getLogsProvider;
   try {
     gasProvider = new ethers.providers.StaticJsonRpcProvider(READ_RPC, { chainId: NET.chainId, name: NET.name });
   } catch (_) { return; }
-  const tick = () => refreshGasFromNetwork(gasProvider);
-  tick();
-  setInterval(tick, 12000);
+  refreshGasFromNetwork(gasProvider); // prime _GAS immediately so the first tx has live fees
+  setInterval(() => { if (!document.hidden) refreshGasFromNetwork(gasProvider); }, 30000);
 })();
 
 // Returns { total: BigNumber, entries: [] } for the connected wallet.
@@ -648,6 +647,7 @@ async function loadLandingStats() {
         _landingStatsPollInterval = null;
         return;
       }
+      if (document.hidden) return; // skip while the browser tab is backgrounded
       loadLandingStats();
     }, 30000);
   }

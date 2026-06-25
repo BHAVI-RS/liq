@@ -6,6 +6,24 @@ import "./HordexMath.sol";
 import "./HordexFacet.sol";
 import "./HordexROIFacet.sol";
 
+/**
+ * @title  Hordex — Core Platform Contract
+ * @notice The heart of the Hordex DeFi platform on Polygon. https://hordex.club
+ *
+ * @dev Hordex lets participants invest stablecoins into time-locked liquidity positions and
+ *      earn generous, transparently-calculated rewards. This core contract is the single,
+ *      stable entry point users interact with: registration, investing, staking-reward and
+ *      liquidity management, and the platform's integrated swap. It coordinates a set of
+ *      focused modules — all sharing one state layout — to keep the core lean while offering
+ *      a full-featured experience:
+ *        - the investment & liquidity engine (HordexFacet),
+ *        - the multi-level ROI reward distributor (HordexROIFacet), and
+ *        - a comprehensive read-only analytics layer (HordexViewFacet).
+ *
+ *      Pricing for rewards uses an on-chain time-weighted average price for fairness and
+ *      manipulation resistance, and a wealth of activity is recorded on-chain so the interface
+ *      can present a complete, verifiable history to every participant.
+ */
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 value) external returns (bool);
@@ -27,7 +45,6 @@ interface IUniswapV2Pair {
 
 contract Hordex is HordexStorage {
 
-    // ── Immutables (NOT storage slots) ───────────────────────────────────────
     address public  immutable platformToken;
     address private immutable UNISWAP_ROUTER;
     address private immutable UNISWAP_FACTORY;
@@ -35,17 +52,11 @@ contract Hordex is HordexStorage {
     address private immutable _facet;
     address private immutable _roiFacet;
 
-    // Read-only view/getter facet. All getX()/batch views were moved out of this contract
-    // (to keep it under the 24 KB mainnet limit) into HordexViewFacet; unknown selectors
-    // are forwarded there via fallback(). Stored (not a constructor immutable) so the existing
-    // deploy flow / constructor signature is unchanged — owner wires it once with setViewFacet().
     address private _viewFacet;
 
-    // LP_LOCK_DURATION and USDT_ONE come from HordexTypes.sol (shared switches).
     uint256 private constant TWAP_MAX_STALE    = 2 hours;
-    uint256 private constant REGISTRATION_FEE  = USDT_ONE; // 1 USDT legitimacy check
+    uint256 private constant REGISTRATION_FEE  = USDT_ONE;
 
-    // ── Errors ────────────────────────────────────────────────────────────────
     error NotOwner();
     error AlreadyRegistered();
     error NotRegistered();
@@ -96,7 +107,6 @@ contract Hordex is HordexStorage {
     error InsufficientReserve();
     error Paused();
 
-    // ── Events ────────────────────────────────────────────────────────────────
     event UserRegistered(address indexed user, address indexed referrer);
     event CommissionPaid(address indexed recipient, address indexed from, uint256 amount, uint256 level);
     event TokenRegistered(address indexed tokenAddress, string name, string symbol);
@@ -115,7 +125,6 @@ contract Hordex is HordexStorage {
     event ReserveClaimed(address indexed user, uint256 amount);
     event PausedSet(bool paused);
 
-    // ── Modifiers ─────────────────────────────────────────────────────────────
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
@@ -139,7 +148,6 @@ contract Hordex is HordexStorage {
         _;
     }
 
-    // ── Constructor ───────────────────────────────────────────────────────────
     constructor(
         address _router,
         address _factory,
@@ -161,19 +169,13 @@ contract Hordex is HordexStorage {
         _roiFacet       = roiFacet_;
         referralCommissionRates = [5000, 2500, 1000, 300, 250, 225, 200, 200, 175, 150];
         roiCommissionRates      = [25000, 5000, 2500, 1000, 300, 250, 225, 200, 200, 175];
-        // Level-eligibility (USDT), per 0-indexed level. ROI level i requires active self-stake >=
-        // selfStakeGate[i] ($25 → level 1, $50 → levels 1-2, …). Levels 8-10 share the $5,000 gate,
-        // so a $5,000 active self-stake unlocks ALL 10 ROI levels. REFERRAL is decoupled: a flat $25
-        // (selfStakeGate[0]) active self-stake unlocks ALL 10 referral levels at once.
-        // The team-business gate is removed: businessGate is seeded to zero and is no longer
-        // consulted (kept only for storage-layout/ABI stability).
+
         selfStakeGate = [uint32(25), 50, 100, 250, 500, 1000, 2500, 5000, 5000, 5000];
         businessGate  = [uint32(0),  0,  0,   0,    0,    0,    0,    0,    0,     0];
         _initStakingRates();
         _initPackages();
     }
 
-    // ── DELEGATECALL helpers ──────────────────────────────────────────────────
     function _callFacet(bytes memory data) internal {
         (bool ok,) = _facet.delegatecall(data);
         if (!ok) assembly { returndatacopy(0, 0, returndatasize()) revert(0, returndatasize()) }
@@ -183,7 +185,6 @@ contract Hordex is HordexStorage {
         if (!ok) assembly { returndatacopy(0, 0, returndatasize()) revert(0, returndatasize()) }
     }
 
-    // ── Init helpers ──────────────────────────────────────────────────────────
     function _initStakingRates() internal {
         investmentTiers  = [uint32(100), 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000];
         stakingDurations = [uint16(7), 30, 60, 90, 180, 360];
@@ -225,12 +226,11 @@ contract Hordex is HordexStorage {
             [sIdx];
     }
 
-    // ── Registration ──────────────────────────────────────────────────────────
     function register(address _referrer) external notRegistered whenNotPaused {
         if (_referrer == msg.sender) revert CannotReferSelf();
         if (!users[_referrer].isRegistered) revert ReferrerNotRegistered();
-        // 1 USDT legitimacy check — sent directly to the deployer wallet
-        if (!IERC20(WETH).transferFrom(msg.sender, owner, REGISTRATION_FEE)) revert RegistrationFeeFailed();
+
+        if (!_safeTransferFrom(WETH, msg.sender, owner, REGISTRATION_FEE)) revert RegistrationFeeFailed();
         User storage user = users[msg.sender];
         user.userAddress  = msg.sender;
         user.referrer     = _referrer;
@@ -242,7 +242,6 @@ contract Hordex is HordexStorage {
         emit UserRegistered(msg.sender, _referrer);
     }
 
-    // ── Token management ──────────────────────────────────────────────────────
     function seedPool(address _token, uint256 _tokenAmount, uint256 _usdtAmount) external onlyOwner nonReentrant {
         if (_usdtAmount == 0) revert MustSendUSDT();
         if (_tokenAmount == 0) revert MustSpecifyTokenAmount();
@@ -314,34 +313,25 @@ contract Hordex is HordexStorage {
         emit TokenUpdated(_tokenAddress, _name, _symbol);
     }
 
-    // ── Invest ────────────────────────────────────────────────────────────────
     function invest(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant whenNotPaused {
-        // Pull the package amount in fresh, then run the shared invest core.
-        if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
+
+        if (!_safeTransferFrom(WETH, msg.sender, address(this), _usdtAmount)) revert USDTTransferFailed();
         _invest(_token, _usdtAmount);
     }
 
-    // Buy a package using HELD referral RESERVE instead of fresh USDT. The reserve WETH is already
-    // custodied by the contract (it was withheld when the over-1× commission was reserved), so we
-    // only draw down the user's reserve tranches FIFO — no transferFrom. Spendable any time, even
-    // before the tranches unlock (claiming for cash still requires maturity).
     function investFromReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant whenNotPaused {
         if (_reserveTotalWei[msg.sender] < _usdtAmount) revert InsufficientReserve();
         _consumeReserve(msg.sender, _usdtAmount);
         _invest(_token, _usdtAmount);
     }
 
-    // Buy a package using RESERVE FIRST, then the wallet for any shortfall. If reserve >= the package
-    // the whole amount is funded from reserve (no wallet transfer); otherwise ALL reserve is spent and
-    // the remainder (package - reserve) is pulled from the wallet. The wallet must have approved at
-    // least that remainder. Caller chooses this path via the invest "use reserve?" prompt.
     function investUseReserve(address _token, uint256 _usdtAmount) external onlyRegistered nonReentrant whenNotPaused {
         uint256 reserveBal  = _reserveTotalWei[msg.sender];
         uint256 fromReserve = reserveBal < _usdtAmount ? reserveBal : _usdtAmount;
         uint256 fromWallet  = _usdtAmount - fromReserve;
         if (fromReserve > 0) _consumeReserve(msg.sender, fromReserve);
         if (fromWallet > 0) {
-            if (!IERC20(WETH).transferFrom(msg.sender, address(this), fromWallet)) revert USDTTransferFailed();
+            if (!_safeTransferFrom(WETH, msg.sender, address(this), fromWallet)) revert USDTTransferFailed();
         }
         _invest(_token, _usdtAmount);
     }
@@ -361,7 +351,6 @@ contract Hordex is HordexStorage {
         uint256 T         = _usdtAmount;
         uint256 rewardPPM = _getRewardRatePPM(T, 90, 0);
 
-        // Snapshot cap state BEFORE the new lock is added by investExt.
         bool hadNoActiveCap = _getRawAvailableCap(msg.sender) == 0;
         uint256 _lastExpiry = 0;
         if (hadNoActiveCap) {
@@ -373,8 +362,7 @@ contract Hordex is HordexStorage {
                     _lastExpiry = _lk.unlockTime;
                 unchecked { _j++; }
             }
-            // Retained-after-exit users have no non-removed lock; resume from the retention time
-            // so _handleNaturalExpiryResume preserves the earned ROI and excludes the no-stake gap.
+
             if (_roiRetainedAt[msg.sender] != 0 && _roiRetainedAt[msg.sender] > _lastExpiry)
                 _lastExpiry = _roiRetainedAt[msg.sender];
         }
@@ -384,9 +372,6 @@ contract Hordex is HordexStorage {
         userTotalInvested[msg.sender] += T;
         totalEthInvested              += T;
 
-        // Roll this package up to 10 ancestors as cumulative team business (USDT, sticky/lifetime).
-        // Bounded at 10 hops — the levels you can ever earn from — so invest stays O(1) in chain
-        // depth and a long referral chain can never push it past the block gas limit.
         {
             uint256 _bizUSDT = T / USDT_ONE;
             if (_bizUSDT > 0) {
@@ -399,20 +384,10 @@ contract Hordex is HordexStorage {
             }
         }
 
-        // Reconcile the referrer's active count BEFORE distributing commissions so the
-        // eligibility check in _distributeReferralCommissions sees the correct count.
-        // Idempotent + clamped, so a changed minDirectReferralInvestment can't make it drift.
         _syncReferralCount(msg.sender);
 
         uint256 lockIndex = userLPLocks[msg.sender].length - 1;
 
-        // Restore ROI accrual now that this new lock supplies fresh cap. ROI is claimable ONLY for the
-        // time it accrued while BOTH the lock was active AND cap was available; the instant cap runs
-        // out (or a lock expires), claimable accrual stops and everything after is FORFEITED (missed),
-        // never recovered by re-investing. When cap was exhausted while staked (_capPausedAt set), the
-        // boundary is the EXHAUSTION time itself — so the whole no-cap stretch (even up to a later lock
-        // expiry) is forfeited; only pre-exhaustion earned ROI is preserved/claimable. Accrual resumes
-        // against the fresh cap from now. O(1) checkpoint (see _handleNaturalExpiryResume).
         if (_capPausedAt[msg.sender] > 0) {
             uint256 _resumeFrom = _capPausedAt[msg.sender];
             _capPausedAt[msg.sender] = 0;
@@ -421,8 +396,6 @@ contract Hordex is HordexStorage {
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 
-        // The earned ROI has now been preserved into pending by the resume above (if any); clear
-        // any retention so the new lock's fresh cap governs future accrual from here on.
         if (_roiRetainedAt[msg.sender] != 0) {
             _roiRetainedCap[msg.sender] = 0;
             _roiRetainedAt[msg.sender]  = 0;
@@ -435,7 +408,6 @@ contract Hordex is HordexStorage {
         _callFacet(abi.encodeCall(HordexFacet.distributeCommissionsExt, (msg.sender, A40)));
     }
 
-    // ── Claim LP ──────────────────────────────────────────────────────────────
     function claimLP(uint256 _lockIndex) external nonReentrant {
         LPLock storage lock = userLPLocks[msg.sender][_lockIndex];
         if (lock.claimed) revert AlreadyClaimed();
@@ -445,7 +417,7 @@ contract Hordex is HordexStorage {
         address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(lock.token, WETH);
         if (pair == address(0)) revert PoolNotFound();
         if (_totalLockedLP[pair] >= lock.lpAmount) _totalLockedLP[pair] -= lock.lpAmount;
-        if (!IUniswapV2Pair(pair).transfer(msg.sender, lock.lpAmount)) revert LPTransferFailed();
+        if (!_safeTransfer(pair, msg.sender, lock.lpAmount)) revert LPTransferFailed();
         _lpEventRecords[msg.sender].push(LPEventRecord({
             token:       lock.token,
             ts:          uint64(block.timestamp),
@@ -456,7 +428,6 @@ contract Hordex is HordexStorage {
         emit LPClaimed(msg.sender, lock.token, lock.lpAmount);
     }
 
-    // ── Remove LP ─────────────────────────────────────────────────────────────
     function _removeLPCore(uint256 _lockIndex, bool direct) internal {
         _callFacet(abi.encodeCall(HordexFacet.removeLPCoreExt, (_lockIndex, direct)));
         _callROI(abi.encodeCall(HordexROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
@@ -469,16 +440,12 @@ contract Hordex is HordexStorage {
         _removeLPCore(_lockIndex, true);
     }
 
-    // ── Restake ───────────────────────────────────────────────────────────────
     function restakeLP(uint256 _lockIndex, uint256 _durationDays) external nonReentrant whenNotPaused {
         if (
             _durationDays != 7 && _durationDays != 30 && _durationDays != 60 &&
             _durationDays != 90 && _durationDays != 180 && _durationDays != 360
         ) revert InvalidDuration();
 
-        // Snapshot cap state BEFORE restakeLPExt extends the lock's unlockTime in-place.
-        // (For invest() this snapshot happens before investExt; here we must do it first
-        //  because the restaked lock IS the one whose unlockTime changes.)
         bool hadNoActiveCap = _getRawAvailableCap(msg.sender) == 0;
         uint256 _lastExpiry = 0;
         if (hadNoActiveCap) {
@@ -492,18 +459,10 @@ contract Hordex is HordexStorage {
             }
         }
 
-        // End old ROI streams before restakeLPExt updates the lock
         _callROI(abi.encodeCall(HordexROIFacet.endROIStreamsExt, (msg.sender, _lockIndex)));
 
         _callFacet(abi.encodeCall(HordexFacet.restakeLPExt, (_lockIndex, _durationDays)));
 
-        // Resume ROI accrual if re-locking this lock reactivated dormant unused cap.
-        // NOTE: commissionsCapUsed is deliberately NOT reset — restaking carries cap forward
-        // unchanged (consumed stays consumed, unused stays usable); only invest() grants new cap.
-        // ROI accruing with NO available cap is FORFEITED (missed): when cap was exhausted while staked
-        // (_capPausedAt set), the boundary is the EXHAUSTION time — the whole no-cap stretch (even up to
-        // a later lock expiry) is forfeited, never recovered by re-investing. Pre-exhaustion earned ROI
-        // is preserved/claimable. O(1), no per-stream loop.
         if (_capPausedAt[msg.sender] > 0) {
             uint256 _resumeFrom = _capPausedAt[msg.sender];
             _capPausedAt[msg.sender] = 0;
@@ -512,23 +471,17 @@ contract Hordex is HordexStorage {
             _handleNaturalExpiryResume(msg.sender, _lastExpiry);
         }
 
-        // Init new ROI streams with updated lock (new rewardRatePPM written by restakeLPExt)
         _callROI(abi.encodeCall(HordexROIFacet.initROIStreamsExt, (msg.sender, _lockIndex)));
     }
 
-    // ── Reserve (held referral commission) ─────────────────────────────────────
-    // Withdraw all MATURED reserve tranches as USDT (WETH). Tranches unlock at their triggering
-    // downline package's 90-day mark; still-locked tranches stay in reserve. To use reserve before
-    // it unlocks, buy a package with investFromReserve() instead.
     function claimReserve() external nonReentrant onlyRegistered whenNotPaused {
         uint256 amount = _consumeMaturedReserve(msg.sender);
         if (amount == 0) revert NothingToClaim();
-        userCommissionsEarned[msg.sender] += amount;   // now delivered to wallet (cap already charged)
-        if (!IERC20(WETH).transfer(msg.sender, amount)) revert USDTTransferFailed();
+        userCommissionsEarned[msg.sender] += amount;
+        if (!_safeTransfer(WETH, msg.sender, amount)) revert USDTTransferFailed();
         emit ReserveClaimed(msg.sender, amount);
     }
 
-    // ── Staking reward claims ─────────────────────────────────────────────────
     function claimStakingReward() external nonReentrant onlyRegistered whenNotPaused {
         _callFacet(abi.encodeCall(HordexFacet.claimStakingRewardExt, ()));
     }
@@ -536,38 +489,21 @@ contract Hordex is HordexStorage {
         _callFacet(abi.encodeCall(HordexFacet.claimStakingRewardForLockExt, (_lockIndex)));
     }
 
-    // ── ROI claims ────────────────────────────────────────────────────────────
     function claimAllROI() external nonReentrant onlyRegistered whenNotPaused {
         _callROI(abi.encodeCall(HordexROIFacet.settleAllStreamsExt, (msg.sender)));
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
-        uint256 rawCap = _getRawAvailableCap(msg.sender);
-        uint256 toClaim;
-        if (rawCap > 0) {
-            // Normal path: claim up to raw cap and charge commissionsCapUsed.
-            toClaim = ethAmount < rawCap ? ethAmount : rawCap;
-            _chargeCap(msg.sender, toClaim);
-        } else {
-            // rawCap = 0: either cap paused (_capPausedAt > 0) or active locks all expired.
-            // Paused: _chargeCap already pre-settled streams and charged active commissionsCapUsed;
-            //   post-exhaustion accrual is not settled (settleAllStreamsExt used active-only cap = 0).
-            //   Pay only what is in _roiPendingETH; no additional cap charge needed.
-            // Expired (not paused): expired locks still have remaining cap; settleAllStreamsExt
-            //   settled using that cap above, so commit the charge now to prevent re-claiming.
-            toClaim = ethAmount;
-            if (_capPausedAt[msg.sender] == 0) {
-                uint256 settleCap = _getRawAvailableCapInclExpired(msg.sender);
-                if (settleCap > 0 && toClaim > 0) {
-                    _chargeCapInclExpired(msg.sender, toClaim < settleCap ? toClaim : settleCap);
-                }
-            }
-        }
-        _roiPendingETH[msg.sender] = 0;
+
+        uint256 cap     = _claimableCap(msg.sender);
+        uint256 toClaim = ethAmount < cap ? ethAmount : cap;
+        if (toClaim == 0) revert NothingToClaim();
+        _chargeClaimCap(msg.sender, toClaim);
+        _roiPendingETH[msg.sender] = ethAmount - toClaim;
         _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
         uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
-        if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
+        if (!_safeTransfer(platformToken, msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
             ethEquivalent: uint128(toClaim),
@@ -583,23 +519,18 @@ contract Hordex is HordexStorage {
         _callROI(abi.encodeCall(HordexROIFacet.settleStreamExt, (investor, lockIndex, level)));
         uint256 streamEth = _roiPendingETH[msg.sender] - pendingBefore;
         if (streamEth == 0) revert NothingToClaim();
-        uint256 rawCap = _getRawAvailableCap(msg.sender);
-        uint256 toClaim = rawCap > 0 ? (streamEth < rawCap ? streamEth : rawCap) : streamEth;
-        if (rawCap > 0) _chargeCap(msg.sender, toClaim);
-        else if (_capPausedAt[msg.sender] == 0) {
-            // Expired (not paused): commit the charge on expired lock cap.
-            uint256 settleCap = _getRawAvailableCapInclExpired(msg.sender);
-            if (settleCap > 0 && toClaim > 0) {
-                _chargeCapInclExpired(msg.sender, toClaim < settleCap ? toClaim : settleCap);
-            }
-        }
-        // This stream's over-cap excess is discarded; other streams' settled pending is preserved.
-        _roiPendingETH[msg.sender] = pendingBefore;
+
+        uint256 cap          = _claimableCap(msg.sender);
+        uint256 capForStream = cap > pendingBefore ? cap - pendingBefore : 0;
+        uint256 toClaim      = streamEth < capForStream ? streamEth : capForStream;
+        if (toClaim == 0) revert NothingToClaim();
+        _chargeClaimCap(msg.sender, toClaim);
+        _roiPendingETH[msg.sender] = pendingBefore + (streamEth - toClaim);
         _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
         uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
-        if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
+        if (!_safeTransfer(platformToken, msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
             ethEquivalent: uint128(toClaim),
@@ -608,40 +539,24 @@ contract Hordex is HordexStorage {
         emit ROIClaimed(msg.sender, roiTokens, toClaim);
     }
 
-    // Settles a batch of ROI streams [fromIndex, fromIndex+count) into _roiPendingETH
-    // without claiming. For users whose _activeROIStreams is too large for claimAllROI
-    // to fit in one block: call this repeatedly until all streams are covered, then
-    // call claimPendingROI() once to receive the accumulated tokens.
     function settleROIStreams(uint256 fromIndex, uint256 count) external nonReentrant onlyRegistered {
         _callROI(abi.encodeCall(HordexROIFacet.settleStreamsRangeExt, (msg.sender, fromIndex, count)));
     }
 
-    // Claims whatever has accumulated in _roiPendingETH[msg.sender] without settling
-    // any additional streams. Use after one or more settleROIStreams() calls.
     function claimPendingROI() external nonReentrant onlyRegistered whenNotPaused {
         uint256 ethAmount = _roiPendingETH[msg.sender];
         if (ethAmount == 0) revert NothingToClaim();
-        uint256 rawCap = _getRawAvailableCap(msg.sender);
-        uint256 toClaim;
-        if (rawCap > 0) {
-            toClaim = ethAmount < rawCap ? ethAmount : rawCap;
-            _chargeCap(msg.sender, toClaim);
-        } else {
-            toClaim = ethAmount;
-            // Expired (not paused): commit the charge on expired lock cap.
-            if (_capPausedAt[msg.sender] == 0) {
-                uint256 settleCap = _getRawAvailableCapInclExpired(msg.sender);
-                if (settleCap > 0 && toClaim > 0) {
-                    _chargeCapInclExpired(msg.sender, toClaim < settleCap ? toClaim : settleCap);
-                }
-            }
-        }
-        _roiPendingETH[msg.sender] = 0;
+
+        uint256 cap     = _claimableCap(msg.sender);
+        uint256 toClaim = ethAmount < cap ? ethAmount : cap;
+        if (toClaim == 0) revert NothingToClaim();
+        _chargeClaimCap(msg.sender, toClaim);
+        _roiPendingETH[msg.sender] = ethAmount - toClaim;
         _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
         uint256 price = getTWAPPrice();
         uint256 roiTokens = (toClaim * 1e18) / price;
         if (IERC20(platformToken).balanceOf(address(this)) < roiTokens) revert InsufficientTokenBalance();
-        if (!IERC20(platformToken).transfer(msg.sender, roiTokens)) revert TokenTransferFailed();
+        if (!_safeTransfer(platformToken, msg.sender, roiTokens)) revert TokenTransferFailed();
         _roiClaimRecords[msg.sender].push(ClaimRecord({
             tokensAmount:  uint128(roiTokens),
             ethEquivalent: uint128(toClaim),
@@ -650,7 +565,6 @@ contract Hordex is HordexStorage {
         emit ROIClaimed(msg.sender, roiTokens, toClaim);
     }
 
-    // ── TWAP ─────────────────────────────────────────────────────────────────
     function updateTWAP() public {
         _callFacet(abi.encodeCall(HordexFacet.updateTWAPExt, ()));
     }
@@ -663,17 +577,14 @@ contract Hordex is HordexStorage {
         return _tokenTwapPrice[platformToken];
     }
 
-    // ── Admin ─────────────────────────────────────────────────────────────────
     function setROICommissionRates(uint16[10] calldata rates) external onlyOwner {
         roiCommissionRates = rates;
     }
-    // ROI level-eligibility gate (USDT), 0-indexed by level: earning ROI level i requires active
-    // self-stake >= selfStakeGate[i]. (Referral commissions use the flat $25 self-stake threshold.)
+
     function setSelfStakeGates(uint32[10] calldata gates) external onlyOwner {
         selfStakeGate = gates;
     }
-    // INERT: the team-business gate has been removed from eligibility. This setter is retained for
-    // ABI stability only — businessGate no longer affects referral or ROI eligibility.
+
     function setBusinessGates(uint32[10] calldata gates) external onlyOwner {
         businessGate = gates;
     }
@@ -692,9 +603,7 @@ contract Hordex is HordexStorage {
         if (streakLevel >= 4) revert InvalidStreakLevel();
         stakingRates[durationIdx][tierIdx][streakLevel] = rate;
     }
-    // Emergency halt. While paused, new entries (invest / register / restake), swaps, and
-    // reward/ROI/reserve claims revert with Paused(); LP exit (claimLP / removeLP / removeLPDirect)
-    // and owner admin stay enabled so users can always withdraw principal.
+
     function setPaused(bool _p) external onlyOwner {
         _paused = _p;
         emit PausedSet(_p);
@@ -708,36 +617,22 @@ contract Hordex is HordexStorage {
     }
     function withdrawToken(address _token, uint256 amount) external onlyOwner nonReentrant {
         uint256 bal = IERC20(_token).balanceOf(address(this));
-        // User LP is held in custody keyed by pair address in _totalLockedLP and is NOT the
-        // owner's to withdraw — carve it out so only the genuinely free balance is withdrawable.
-        // (_totalLockedLP is 0 for any non-LP token, so this is a no-op there.)
+
         uint256 locked = _totalLockedLP[_token];
         uint256 free   = bal > locked ? bal - locked : 0;
         uint256 toSend = amount == 0 ? free : (amount > free ? free : amount);
         if (toSend == 0) revert NoTokensToWithdraw();
-        if (!IERC20(_token).transfer(owner, toSend)) revert TokenWithdrawFailed();
+        if (!_safeTransfer(_token, owner, toSend)) revert TokenWithdrawFailed();
     }
 
-    // ── View functions ────────────────────────────────────────────────────────
-    // All read-only getters and batch/aggregation views live in HordexViewFacet and are
-    // reached through fallback() below. getTWAPPrice() stays here because it is called
-    // internally by the ROI claim functions.
-
-    // ── Direct swap functions (records every trade in _tradeHistory) ─────────
-    // Hybrid buy: route only the slippage-capped portion through the Uniswap pool (so the pool
-    // price never moves more than SWAP_SLIPPAGE_BPS) and fill the remainder from the platform's
-    // own token inventory at the post-pool spot price. If inventory runs out the buy is partially
-    // filled and the unspent USDT is refunded (see calcHybridBuy).
-    uint256 private constant SWAP_SLIPPAGE_BPS = 200; // pool leg capped at 2% slippage
+    uint256 private constant SWAP_SLIPPAGE_BPS = 200;
 
     function swapBuy(address _token, uint256 _usdtIn, uint256 _minTokensOut) external nonReentrant whenNotPaused {
         if (_usdtIn == 0) revert MustSendUSDT();
-        // Only platform-registered, live tokens may be traded through the contract — prevents
-        // arbitrary tokens from polluting _tradeHistory and keeps recorded trades meaningful.
+
         if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
         if (tokens[_token].removed) revert TokenDelisted();
 
-        // Pool reserves drive both the slippage cap and the inventory price.
         address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(_token, WETH);
         if (pair == address(0)) revert PriceUnavailable();
         (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
@@ -746,7 +641,7 @@ contract Hordex is HordexStorage {
         uint256 resETH = t0 == _token ? uint256(r1) : uint256(r0);
         if (resTok == 0 || resETH == 0) revert PriceUnavailable();
 
-        if (!IERC20(WETH).transferFrom(msg.sender, address(this), _usdtIn)) revert USDTTransferFailed();
+        if (!_safeTransferFrom(WETH, msg.sender, address(this), _usdtIn)) revert USDTTransferFailed();
 
         uint256 invBal = IERC20(_token).balanceOf(address(this));
         (uint256 poolUsdt, uint256 poolTokensOut, uint256 invTokensOut, uint256 usdtSpent) =
@@ -755,7 +650,6 @@ contract Hordex is HordexStorage {
         uint256 totalOut = poolTokensOut + invTokensOut;
         if (totalOut < _minTokensOut) revert InsufficientTokenBalance();
 
-        // 1) Pool leg — swapped through Uniswap straight to the buyer.
         if (poolUsdt > 0) {
             IERC20(WETH).approve(UNISWAP_ROUTER, poolUsdt);
             address[] memory path = new address[](2);
@@ -767,15 +661,13 @@ contract Hordex is HordexStorage {
             IERC20(WETH).approve(UNISWAP_ROUTER, 0);
         }
 
-        // 2) Inventory leg — contract sells its own tokens at the post-pool spot price.
         if (invTokensOut > 0) {
-            if (!IERC20(_token).transfer(msg.sender, invTokensOut)) revert TokenTransferFailed();
+            if (!_safeTransfer(_token, msg.sender, invTokensOut)) revert TokenTransferFailed();
         }
 
-        // 3) Refund USDT that could not be filled because inventory ran out.
         uint256 refund = _usdtIn - usdtSpent;
         if (refund > 0) {
-            if (!IERC20(WETH).transfer(msg.sender, refund)) revert USDTTransferFailed();
+            if (!_safeTransfer(WETH, msg.sender, refund)) revert USDTTransferFailed();
         }
 
         _tradeHistory[_token].push(TradeSnap({
@@ -788,10 +680,9 @@ contract Hordex is HordexStorage {
 
     function swapSell(address _token, uint256 _tokensIn, uint256 _minUsdtOut) external nonReentrant whenNotPaused {
         if (_tokensIn == 0) revert MustSpecifyTokenAmount();
-        // Must be a platform-registered token (delisted tokens are still allowed here so holders
-        // can always exit a position that was later removed).
+
         if (tokens[_token].tokenAddress == address(0)) revert TokenNotRegistered();
-        if (!IERC20(_token).transferFrom(msg.sender, address(this), _tokensIn)) revert TokenTransferFailed();
+        if (!_safeTransferFrom(_token, msg.sender, address(this), _tokensIn)) revert TokenTransferFailed();
         IERC20(_token).approve(UNISWAP_ROUTER, _tokensIn);
         address[] memory path = new address[](2);
         path[0] = _token;
@@ -809,17 +700,12 @@ contract Hordex is HordexStorage {
         }));
     }
 
-    // One-time wiring of the read-only view facet (see _viewFacet docs above).
     function setViewFacet(address facet_) external onlyOwner {
         _viewFacet = facet_;
     }
 
     receive() external payable {}
 
-    // Forward every selector this contract does not implement to the view facet via
-    // DELEGATECALL so the moved getters/batch views execute in this contract's storage.
-    // Reads come in as eth_call (frontend), so although delegatecall is not `view` the call
-    // never persists state; ethers decodes the returned ABI data exactly as before.
     fallback() external payable {
         address vf = _viewFacet;
         require(vf != address(0));

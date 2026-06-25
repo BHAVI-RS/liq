@@ -33,8 +33,9 @@ function _invStartPoll() {
   _invPollInterval = setInterval(() => {
     const panel = document.getElementById('panel-investments');
     if (!panel || !panel.classList.contains('active')) { _invStopPoll(); return; }
+    if (document.hidden) return; // skip while the browser tab is backgrounded
     loadInvestments();
-  }, 15000);
+  }, 30000);
 }
 
 function _invTickStakingRewards() {
@@ -93,14 +94,35 @@ async function loadInvestments() {
   }
 
   try {
-    const [lpLocks, latestBlock, roiData, availCapInclExpiredRaw] = await Promise.all([
-      contract.getUserLPLocks(walletAddress),
-      provider.getBlock('latest').catch(() => null),
-      contract.getROIData(walletAddress).catch(() => null),
-      // Authoritative live available cap (incl. expired/settlement locks). Used to derive the
-      // true outstanding ROI debt below, because getROIData.liveETH collapses to 0 at exhaustion.
-      contract.getAvailableCapInclExpired(walletAddress).catch(() => null),
-    ]);
+    // One multicall fetches all four per-user views (was 4 separate eth_calls). getTWAPPrice
+    // is folded in here too so the later separate read is removed. getBlock stays a separate
+    // RPC (Multicall3 can't return block.timestamp). On transport failure, fall back to the
+    // individual reads so a flaky multicall never blanks the tab.
+    let lpLocks, roiData, availCapInclExpiredRaw, _twapRaw, latestBlock;
+    try {
+      const [batched, blk] = await Promise.all([
+        multicallRead(contract, [
+          ['getUserLPLocks', [walletAddress]],
+          ['getROIData', [walletAddress]],
+          ['getAvailableCapInclExpired', [walletAddress]],
+          ['getTWAPPrice', []],
+        ]),
+        provider.getBlock('latest').catch(() => null),
+      ]);
+      lpLocks               = batched[0];
+      roiData               = batched[1] ?? null;
+      availCapInclExpiredRaw = batched[2] ?? null;
+      _twapRaw              = batched[3] ?? null;
+      latestBlock           = blk;
+    } catch (_) {
+      [lpLocks, latestBlock, roiData, availCapInclExpiredRaw] = await Promise.all([
+        contract.getUserLPLocks(walletAddress),
+        provider.getBlock('latest').catch(() => null),
+        contract.getROIData(walletAddress).catch(() => null),
+        contract.getAvailableCapInclExpired(walletAddress).catch(() => null),
+      ]);
+    }
+    if (!lpLocks) throw new Error('failed to load LP locks');
     // Use blockchain timestamp as the reference "now".  On a Hardhat mainnet fork
     // block.timestamp can be far behind the wall clock, which makes every fresh lock
     // appear immediately unlocked (unlockTime < wallNow) and produces absurd staking
@@ -159,12 +181,20 @@ async function loadInvestments() {
     const tokenSet  = [...new Set(lpLocks.map(l => l.token.toLowerCase()))];
     const poolCache = new Map();
     const tokenMeta = new Map();
+
+    // Prewarm every token's pool price with ≤2 multicalls (was up to 5 reads PER token),
+    // then read all getToken() metadata in a single multicall.
+    if (typeof _dashPrewarmPoolPrices === 'function') { try { await _dashPrewarmPoolPrices(tokenSet); } catch(_) {} }
+    let _tokMetas = [];
+    try { _tokMetas = await multicallRead(contract, tokenSet.map(a => ['getToken', [a]])); } catch(_) {}
     await Promise.all([
       ...tokenSet.map(async addr => {
         const d = await _dashGetPoolPrice(addr); if (d) poolCache.set(addr, d);
       }),
-      ...tokenSet.map(async addr => {
-        try { const t = await contract.getToken(addr); tokenMeta.set(addr, { symbol: t.symbol, name: t.name, meta: getMeta(addr) }); } catch(_) {}
+      ...tokenSet.map(async (addr, i) => {
+        let t = _tokMetas[i];
+        if (!t) { try { t = await contract.getToken(addr); } catch(_) { return; } }
+        tokenMeta.set(addr, { symbol: t.symbol, name: t.name, meta: getMeta(addr) });
       })
     ]);
 
@@ -174,7 +204,10 @@ async function loadInvestments() {
 
     // Platform-token TWAP (ETH/token) — the price the contract pays staking rewards at.
     _invStakingPayoutPrice = 0;
-    try { _invStakingPayoutPrice = usdtToFloat(await contract.getTWAPPrice()); } catch(_) {}
+    try {
+      const _tw = (_twapRaw != null) ? _twapRaw : await contract.getTWAPPrice();
+      _invStakingPayoutPrice = usdtToFloat(_tw);
+    } catch(_) {}
 
     const expandedIndices = new Set();
     el.querySelectorAll('.dash-inv-card[data-lock-index]').forEach(card => {

@@ -1,0 +1,19 @@
+{
+  "network": "polygon",
+  "chainId": 137,
+  "deployedAt": "2026-06-25T02:45:56.556Z",
+  "deployer": "0xBBc0989CC1830348e0f0946EE52e247F5044fd15",
+  "deployBlock": 89100368,
+  "router": "0xedf6066a2b290C185783862C7F4776A2C8077AD1",
+  "factory": "0x9e5A52f57b3038F1B8EeE45F28b3C1967e22799C",
+  "usdt": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+  "platformToken": "0x88070EAf52AaE3E6fe16Ed70Ad16d82161958F19",
+  "addresses": {
+    "HordexMath": "0xf384951fA4F374984b6B5324944aB856777B2744",
+    "HordexViewLib": "0xaCa7895Bc65996B9FF7E4553523534C70e111c3e",
+    "HordexFacet": "0xd3752c127cEb4ADEE6b7E2c8A481782c8F0e1411",
+    "HordexROIFacet": "0x9810b4723aaaDfACfC6f82f0A4cFa808DBaDcb56",
+    "Hordex": "0xfEB87885e2bbbbbfCEdd5e8C46d30767a090da78",
+    "HordexViewFacet": "0x43A6E088A8480fcA98160990A35Ea91dbe6FCD1A"
+  }
+}
