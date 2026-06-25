@@ -5,6 +5,7 @@
     { "source": "/favicon.ico", "destination": "/frontend/logo/hordex-mark.png" },
     { "source": "/favicon.png", "destination": "/frontend/logo/hordex-mark.png" },
     { "source": "/apple-touch-icon.png", "destination": "/frontend/logo/hordex-mark.png" },
-    { "source": "/apple-touch-icon-precomposed.png", "destination": "/frontend/logo/hordex-mark.png" }
+    { "source": "/apple-touch-icon-precomposed.png", "destination": "/frontend/logo/hordex-mark.png" },
+    { "source": "/hordex-mark.svg", "destination": "/frontend/logo/hordex-mark.svg" }
   ]
 }
