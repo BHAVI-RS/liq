@@ -12,7 +12,6 @@
       <stop offset="1" stop-color="#c0903f"/>
     </linearGradient>
   </defs>
-  <rect width="778" height="778" fill="#1c1914"/>
   <!-- left + right legs meet at center (389,374) -->
   <path d="M242 130 L319 130 L389 374 L318 618 L242 618 Z" fill="url(#leg)"/>
   <path d="M533 130 L456 130 L389 374 L457 618 L533 618 Z" fill="url(#leg)"/>
