@@ -1,5 +1,6 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/frontend/launchpad.html" }
+    { "source": "/", "destination": "/frontend/launchpad.html" },
+    { "source": "/app", "destination": "/frontend/launchpad.html" }
   ]
 }
